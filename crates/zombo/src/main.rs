@@ -455,7 +455,7 @@ fn join<T: ToString>(items: &[T]) -> String {
 
 async fn blacklist(it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (t, resolvers, timeout, json) = dns_args(it, BLACKLIST_USAGE, "blacklist")?;
-    let r = check_blacklist(&resolvers, &t.value, BlacklistOptions { query_timeout: timeout, ..BlacklistOptions::default() }).await;
+    let r = check_blacklist(&resolvers, &t.value, BlacklistOptions { query_timeout: timeout, overall: (timeout * 5).max(BlacklistOptions::default().overall) }).await;
     let findings = blacklist_findings(&t.value, &r);
     if json {
         let out = serde_json::json!({ "result": r, "findings": findings });

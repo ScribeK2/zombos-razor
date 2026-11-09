@@ -326,3 +326,22 @@ async fn a_flood_of_mx_hosts_is_bounded() {
     assert_eq!(asked.load(Ordering::SeqCst), 10, "only the ten most preferred hosts are resolved");
     assert_eq!(r.subjects.len(), 2, "one distinct address plus the domain");
 }
+
+#[tokio::test]
+async fn at_most_ten_questions_are_in_flight() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counter = asked.clone();
+    let server = serve(move |name, t| match t {
+        RecordType::MX if name == "example.com" => Reply::Answers(vec![scripted::mx(name, 10, "mail.example.com")]),
+        RecordType::A if name == "mail.example.com" => Reply::Answers((1..=5).map(|i| a(name, &format!("198.51.100.{i}"))).collect()),
+        _ => {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Reply::Silent
+        }
+    })
+    .await;
+    let o = Options { query_timeout: Duration::from_secs(30), overall: Duration::from_millis(400) };
+    let r = check_blacklist(&[server], "example.com", o).await;
+    assert_eq!(r.subjects.len(), 6);
+    assert_eq!(asked.load(Ordering::SeqCst), 10, "42 questions are wanted; only ten may be out at once");
+}
