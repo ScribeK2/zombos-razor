@@ -214,3 +214,6 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] Not verified: the AppImage on a stock Arch install without `fuse3` (fallback is `--appimage-extract-and-run`), the FUSE mount path in CI (CI smoke uses extract-and-run), the release workflow itself, a from-scratch build on a second machine
 - [ ] Local builds take their version from `git describe`, which finds the old Go tag `v1.0.0`; tag the Rust release or set VERSION
 - [ ] Metainfo homepage URL still says ScribeK2/Stackwell; change with the rename
+- [x] Signed self-update merged (727 tests): minisign-verify, trusted comment bound to the version (no downgrade replay), SHA256SUMS then AppImage hash, bounded https, atomic replace, prompt card, `update.toml`. Fails closed on the test key in release builds, with four guards (background_check, check_in, install_in, UpdateCard::install). Live-checked in a debug build only
+- [ ] Owner: create the real key and secret, fill the release.yml signing line, set RELEASE_REPO (steps in docs/release.md). Delete the two tests that pin the test key
+- [ ] Not verified: a real GitHub endpoint, a real `minisign` binary reading our signatures, the update card's refusal in a release binary seen live

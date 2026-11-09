@@ -81,7 +81,7 @@ Every action also appears in the palette with its shortcut shown.
 
 ## Settings
 
-A small TOML file, and a settings pane that edits only these: extra resolvers for propagation, extra DKIM selectors, per-Check timeout, HTTP proxy (default: honour the environment), and whether Watch sends desktop notifications. No accounts, no sync, no themes, no telemetry switch. The file is `$XDG_CONFIG_HOME/zombo-razor/config.toml` (mode 0600) with the keys `resolvers` (at most 20), `dkim_selectors` (at most 20), `timeout_seconds` (1 to 120), `proxy` (http or https URL, registration only) and `notifications` (default on). Unknown keys are an error. A broken file is never touched on load; Save first copies it to `config.toml.bak`. Recent targets live in `recent.toml` in the state directory. `Ctrl+,` opens the pane. Changes apply to the next run.
+A small TOML file, and a settings pane that edits only these: extra resolvers for propagation, extra DKIM selectors, per-Check timeout, HTTP proxy (default: honour the environment), and whether Watch sends desktop notifications. No accounts, no sync, no themes, no telemetry switch. The file is `$XDG_CONFIG_HOME/zombo-razor/config.toml` (mode 0600) with the keys `resolvers` (at most 20), `dkim_selectors` (at most 20), `timeout_seconds` (1 to 120), `proxy` (http or https URL, registration only) `notifications` (default on) and `check_updates` (default on, shown only when running as an AppImage with a real signing key). Unknown keys are an error. A broken file is never touched on load; Save first copies it to `config.toml.bak`. Recent targets live in `recent.toml` in the state directory. `Ctrl+,` opens the pane. Changes apply to the next run.
 
 ## Accessibility
 

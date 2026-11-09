@@ -51,3 +51,16 @@ The signing step is a placeholder. It fails the job when the `MINISIGN_SECRET_KE
 ## Compatibility
 
 The AppImage targets Ubuntu 24.04 and newer. Arch needs `fuse3` for the mount, or the extract-and-run flag. The host supplies Vulkan and Mesa on every distribution.
+
+
+## Before the first real release: the signing key
+
+The app embeds a TEST update key (`crates/zombo-core/update_key.pub`). A release build that still holds it never contacts GitHub, shows no update prompt, and the settings pane says "Updates are not available in this build". To enable updates:
+
+1. Install minisign and run `minisign -G -p update_key.pub -s zombo-update.key`. Set a password. Never commit the secret key.
+2. Replace the whole contents of `crates/zombo-core/update_key.pub` with the new two-line public key and commit it.
+3. Delete the two tests that pin the test key: `the_embedded_key_is_the_one_the_tests_sign_with_until_the_real_key_replaces_it` in `crates/zombo-core/tests/update.rs` and `updates_are_unavailable_in_a_release_build_that_embeds_the_test_key`.
+4. Add the repository secrets `MINISIGN_SECRET_KEY` (the key file contents) and its password.
+5. In `.github/workflows/release.yml`, replace the signing `TODO` line: run `sha256sum <name>.AppImage > SHA256SUMS`, then `minisign -S -s <key file> -t "zombo-razor <version>" -m SHA256SUMS` (the trusted comment is exactly `zombo-razor 1.4.0`, no leading `v`), and upload `SHA256SUMS`, `SHA256SUMS.minisig` and the AppImage. Every AppImage name must end in `.AppImage` and appear in `SHA256SUMS`.
+6. Set `RELEASE_REPO` in `crates/zombo-core/src/update.rs` to the real `owner/repo` (it is still the placeholder `ScribeK2/zombos-razor`).
+7. Test once against a real draft release with a debug build and `ZOMBO_UPDATE_BASE` only if you need to; release builds have no such hook.

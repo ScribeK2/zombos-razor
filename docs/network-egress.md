@@ -34,7 +34,7 @@ The queries contain the target's name, nothing else.
 
 ## Updates
 
-The release endpoint (a GitHub release page) once a day, to check for a newer version. The download is verified (SHA256SUMS, and a signature from the signing work still to do) before it is applied, and never applied without a prompt.
+Once a day, when the app runs as an AppImage and "Check for updates once a day" is on (default on), it requests the release list of the repository named in `RELEASE_REPO` (`crates/zombo-core/src/update.rs`) from `https://api.github.com`. The request carries the User-Agent `zombo/<version>` and nothing about the rep or any lookup, and no cookies. A newer version is downloaded only after the rep clicks Update, from the release assets (`SHA256SUMS`, `SHA256SUMS.minisig`, the AppImage) over https with at most 5 redirects, 256 KiB for metadata and a 120 MiB cap on the AppImage. The minisign signature on `SHA256SUMS` is verified against the embedded public key, its trusted comment must name the release version, and the AppImage's SHA-256 must match the signed sums. Only then is the file renamed over the old AppImage. A build that still carries the test key refuses to check or install. The last check time and one skipped version are kept in `update.toml` in the state directory.
 
 ## Nothing else
 
