@@ -1,0 +1,2 @@
+untrusted comment: TEST KEY, NOT FOR RELEASE. Replace both lines with the output of: minisign -G -p update_key.pub (see the note on PUBLIC_KEY in src/update.rs)
+RWRaUlRFU1RLWRCysoPTt6Udjpf4qaLvZZMjZ+nIRYFlX+1Pqps4kifA

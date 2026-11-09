@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::settings::{PaneEvent, SettingsPane};
+use crate::update_ui::UpdateCard;
 use gpui_kit::component::input::{Input, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -61,6 +62,7 @@ pub struct Shell {
     error: Option<String>,
     config: Config,
     settings: Option<Entity<SettingsPane>>,
+    update: Entity<UpdateCard>,
     started: Instant,
     rendered: bool,
 }
@@ -145,6 +147,8 @@ impl Shell {
         })
         .detach();
         let config = Config::load(Dirs::from_env());
+        let dirs = Dirs::from_env();
+        let update = cx.new(|cx| UpdateCard::new(config.settings.check_updates, dirs.as_ref(), cx));
         let ws = Workspace {
             recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()),
             ..Workspace::default()
@@ -181,6 +185,7 @@ impl Shell {
             error: None,
             config,
             settings: None,
+            update,
             started,
             rendered: false,
         }
@@ -473,7 +478,8 @@ impl Shell {
         self.sheet = false;
         let (current, problem, path) =
             (self.config.settings.clone(), self.config.settings_problem.clone(), self.config.settings_path());
-        let pane = cx.new(|cx| SettingsPane::new(&current, problem, path, window, cx));
+        let updates = self.update.read(cx).availability();
+        let pane = cx.new(|cx| SettingsPane::new(&current, updates, problem, path, window, cx));
         cx.subscribe_in(&pane, window, |this, pane, event: &PaneEvent, window, cx| match event {
             PaneEvent::Close => this.close_settings(window, cx),
             PaneEvent::Save(settings) => match this.config.save_settings(settings.clone()) {
@@ -1750,6 +1756,7 @@ impl Render for Shell {
                     )
                 },
             )
+            .child(self.update.clone())
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
             .when_some(self.settings.clone(), |s, pane| s.child(pane));

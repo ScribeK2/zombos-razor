@@ -23,7 +23,10 @@ regex = "1.12.3"
 url = "2.5.8"
 webpki-roots = "1.0.11"
 x509-parser = { version = "0.18.1", features = ["verify"] }
+minisign-verify = "0.3.0"
 
 [dev-dependencies]
 data-encoding = "2.11.1"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+blake2 = "0.11.0"
+ring = "0.17.14"

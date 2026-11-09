@@ -25,11 +25,20 @@ pub struct Settings {
     /// `None` honours `HTTP_PROXY` and `HTTPS_PROXY`. Registration only.
     pub proxy: Option<String>,
     pub notifications: bool,
+    /// Ask GitHub once a day for a newer AppImage. Used only when running as an AppImage.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { resolvers: vec![], selectors: vec![], timeout: None, proxy: None, notifications: true }
+        Settings {
+            resolvers: vec![],
+            selectors: vec![],
+            timeout: None,
+            proxy: None,
+            notifications: true,
+            check_updates: true,
+        }
     }
 }
 
@@ -89,6 +98,7 @@ pub struct Draft {
     pub timeout: String,
     pub proxy: String,
     pub notifications: bool,
+    pub check_updates: bool,
 }
 
 /// Split a typed list on commas, semicolons and whitespace.
@@ -111,6 +121,7 @@ impl From<&Settings> for Draft {
             timeout: s.timeout.map(|t| t.as_secs().to_string()).unwrap_or_default(),
             proxy: s.proxy.clone().unwrap_or_default(),
             notifications: s.notifications,
+            check_updates: s.check_updates,
         }
     }
 }
@@ -125,7 +136,14 @@ impl Draft {
         let timeout = timeout(&self.timeout).map_err(|m| fail(Field::Timeout, m)).unwrap_or_default();
         let proxy = proxy(&self.proxy).map_err(|m| fail(Field::Proxy, m)).unwrap_or_default();
         if errors.is_empty() {
-            Ok(Settings { resolvers, selectors, timeout, proxy, notifications: self.notifications })
+            Ok(Settings {
+                resolvers,
+                selectors,
+                timeout,
+                proxy,
+                notifications: self.notifications,
+                check_updates: self.check_updates,
+            })
         } else {
             Err(errors)
         }
@@ -210,6 +228,7 @@ struct FileForm {
     timeout_seconds: Option<i64>,
     proxy: Option<String>,
     notifications: Option<bool>,
+    check_updates: Option<bool>,
 }
 
 /// Parse a config file. Missing keys take their defaults; everything present is validated.
@@ -224,6 +243,7 @@ pub fn parse(text: &str) -> Result<Settings, LoadError> {
         timeout: f.timeout_seconds.map(|n| n.to_string()).unwrap_or_default(),
         proxy: f.proxy.unwrap_or_default(),
         notifications: f.notifications.unwrap_or(Settings::default().notifications),
+        check_updates: f.check_updates.unwrap_or(Settings::default().check_updates),
     };
     draft.validate().map_err(LoadError::Invalid)
 }
@@ -236,6 +256,7 @@ pub fn to_toml(s: &Settings) -> String {
         timeout_seconds: s.timeout.map(|t| t.as_secs() as i64),
         proxy: s.proxy.clone(),
         notifications: Some(s.notifications),
+        check_updates: Some(s.check_updates),
     };
     toml::to_string(&f).unwrap_or_default()
 }
@@ -285,7 +306,7 @@ mod tests {
     use super::*;
 
     fn draft() -> Draft {
-        Draft { notifications: true, ..Draft::default() }
+        Draft { notifications: true, check_updates: true, ..Draft::default() }
     }
     fn only(d: Draft) -> (Field, String) {
         let mut e = d.validate().unwrap_err();
@@ -312,9 +333,17 @@ mod tests {
             timeout: Some(secs(45)),
             proxy: Some("http://proxy.example:3128".into()),
             notifications: false,
+            check_updates: false,
         };
         assert_eq!(parse(&to_toml(&s)).unwrap(), s);
         assert_eq!(parse(&to_toml(&Settings::default())).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn update_checks_are_on_by_default_and_can_be_switched_off_in_the_file() {
+        assert!(Settings::default().check_updates);
+        assert!(parse("").unwrap().check_updates);
+        assert!(!parse("check_updates = false\n").unwrap().check_updates);
     }
 
     #[test]
@@ -416,6 +445,7 @@ mod tests {
             timeout: "0".into(),
             proxy: "x".into(),
             notifications: true,
+            check_updates: true,
         };
         let fields: Vec<Field> = d.validate().unwrap_err().iter().map(|e| e.field).collect();
         assert_eq!(fields, [Field::Resolvers, Field::Selectors, Field::Timeout, Field::Proxy]);

@@ -49,7 +49,7 @@ impl Dirs {
 
 /// `Ok(None)` when the file does not exist. A directory, a pipe or an oversized file is an error,
 /// and is never opened for reading beyond the cap.
-fn read_capped(path: &Path) -> Result<Option<String>, String> {
+pub(crate) fn read_capped(path: &Path) -> Result<Option<String>, String> {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -73,7 +73,7 @@ fn read_capped(path: &Path) -> Result<Option<String>, String> {
 
 /// Write a temp file beside the target (mode 0600), then rename it over the target.
 /// A new directory gets mode 0700. A reader sees the old file or the new one, never half of one.
-fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     let dir = path.parent().ok_or("the file has no directory")?;
     DirBuilder::new()
         .recursive(true)
