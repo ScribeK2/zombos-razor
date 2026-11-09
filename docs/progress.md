@@ -10,7 +10,7 @@ Three workers running (started 2026-11-09), each in its own worktree:
 
 - [ ] **SMTP and TLS extras:** SMTP banner and STARTTLS Check, CAA lookup, OCSP stapling detection (`smtp.rs`, `tls_extras.rs`)
 - [ ] **Web follow-ups:** https to http downgrade finding, `--insecure-origin`
-- [ ] **`zombo-ui` slice 1:** window, theme, title bar and omnibox, empty state, tabs, rail with five states, one real Check (propagation) streaming, keyboard, palette
+- [x] **`zombo-ui` slice 1** merged (screenshot reviewed 2026-11-09). Follow-ups: see "UI follow-ups"
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
@@ -157,3 +157,14 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Blacklist: a real Spamhaus refusal when queried through a public resolver (this network cannot show it); rerun from the VPS with and without `--resolver 8.8.8.8`
 - [ ] Registration: a real https redirect chain and the proxy path are untested; `.ru`/`.it` referral seen live only via IANA
 - [ ] Scroll frame rate
+
+## UI follow-ups (from slice 1)
+
+- [ ] Verdict chips clip at 1280 px ("ok" chip cut off); recheck after the `min_w_0` fix
+- [ ] Geist weights 500 and 600 do not render (variable font axis ignored by GPUI): bundle static weight files
+- [ ] Answer column shows every record type in one line; sketch shows one type per column
+- [ ] Not built: On-demand rail group, Watch button and status line, collapsed data rows, "changed since previous run", window shadow and resize handle, motion
+- [ ] `Ctrl+9` mapped but the rail has 8 sections
+- [ ] `cargo deny`: allow `0BSD` (enum-iterator); ignore advisories for unmaintained `instant`, `paste`, `rustybuzz`, `ttf-parser`, `zbus_names`, `zvariant`, `zvariant_derive`, `rustls-pemfile` (each with a reason)
+- [ ] CI: apt `-dev` packages for GPUI builds (take the list from `spike/Dockerfile.build`)
+- [ ] Unverified: X11, GNOME, Retry, timeout and failed paths live, screen reader output, full tab order
