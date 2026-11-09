@@ -79,7 +79,7 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Table cell labels for screen readers on every result view
 - [ ] Tabs, rail with five Check states, status bar with Watches, empty state with recent targets
 - [ ] Copy at three levels (value, section, Diagnosis) in Markdown, plus JSON per section
-- [ ] Evidence paste tabs; settings pane (resolvers, DKIM selectors, timeout, proxy, notifications)
+- [ ] Evidence paste tabs (worker running); [x] settings pane (merged 2026-11-09: file, validation, recents, Watch notification; 588 tests)
 - [x] Main screen sketch: `docs/sketches/main-screen.html` (+ PNG). Built as HTML, not Pencil: the Pencil tool needs the Cursor IDE running with its extension. Shows the stale-cache case on the test domain
 - [ ] Window title and app ID set; clear error when the compositor has no `wl_seat`
 - [ ] Recent-lookups list (no Cases)
@@ -188,3 +188,5 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] Collapse the description card above the results once a result exists
 - [ ] The blacklist facts key column (200 px) wraps long names
 - [ ] TLS on a port for an IP target (DESIGN.md says later)
+
+- [ ] Settings unverified: a real Watch-stop desktop notification, a real proxied registration, keyboard-only checkbox toggle. Deviation to confirm: Save over a broken config copies it to `config.toml.bak` instead of refusing
