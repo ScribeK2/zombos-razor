@@ -84,7 +84,7 @@ impl Watches {
         now: Instant,
     ) -> Option<Stopped> {
         let at = self.list.iter().position(|w| w.target == target && w.section == section)?;
-        let w = &mut self.list[at];
+        let w = self.list.get_mut(at)?;
         w.last_run = Some(now);
         let records = records?;
         match &w.baseline {

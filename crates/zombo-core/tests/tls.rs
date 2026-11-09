@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! TLS inspection against a local server with throwaway certificates. The
 //! scenarios are the Go `ssl_inspection` tests, plus the rules the Go code lacks.
 

@@ -499,9 +499,12 @@ pub fn analyse_headers(raw: &str) -> Result<HeaderAnalysis, EvidenceError> {
     }
     a.hops = received.iter().take(MAX_HOPS).rev().map(|r| parse_hop(r)).collect();
     for i in 1..a.hops.len() {
-        if let (Some(now), Some(before)) = (a.hops[i].at, a.hops[i - 1].at) {
+        let before = a.hops.get(i - 1).and_then(|h| h.at);
+        if let (Some(before), Some(hop)) = (before, a.hops.get_mut(i))
+            && let Some(now) = hop.at
+        {
             let delay = (now - before).whole_seconds();
-            a.hops[i].delay_s = Some(delay);
+            hop.delay_s = Some(delay);
             if delay < 0 {
                 a.anomalies.push(Anomaly::ClockSkew { hop: i });
             }
@@ -666,8 +669,11 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
             ),
         );
     }
-    if let Some((prev, slow)) =
-        a.hops.windows(2).map(|w| (&w[0], &w[1])).find(|(_, x)| x.delay_s.is_some_and(|d| d > SLOW_HOP_SECONDS))
+    if let Some((prev, slow)) = a
+        .hops
+        .windows(2)
+        .filter_map(|w| Some((w.first()?, w.get(1)?)))
+        .find(|(_, x)| x.delay_s.is_some_and(|d| d > SLOW_HOP_SECONDS))
     {
         add(
             "email_headers_delayed",

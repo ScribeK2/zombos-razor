@@ -112,7 +112,9 @@ where
         set.spawn(async move { (i, f.await) });
     }
     while let Some(Ok((i, v))) = set.join_next().await {
-        out[i] = Some(v);
+        if let Some(slot) = out.get_mut(i) {
+            *slot = Some(v);
+        }
     }
     out
 }

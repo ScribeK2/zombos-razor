@@ -285,8 +285,7 @@ impl Tab {
     }
 
     pub fn step_port(&mut self, delta: isize) {
-        let i = smtp_plan::PORTS.iter().position(|&p| p == self.smtp_port).unwrap_or(0) as isize;
-        self.smtp_port = smtp_plan::PORTS[(i + delta).rem_euclid(smtp_plan::PORTS.len() as isize) as usize];
+        self.smtp_port = crate::cycle::step(&smtp_plan::PORTS, self.smtp_port, delta);
     }
 
     pub fn smtp_request(&self) -> smtp_plan::Request {

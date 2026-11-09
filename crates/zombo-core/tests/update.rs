@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! The signed self-update against a fake release server over https. Every rejection leaves the
 //! installed AppImage byte for byte as it was, with nothing else beside it.
 

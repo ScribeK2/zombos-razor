@@ -181,8 +181,7 @@ impl Workspace {
     pub fn step_section(&mut self, delta: isize) {
         if let Some(e) = self.current_evidence_mut() {
             let all = evidence_model::sections(e.kind);
-            let at = all.iter().position(|&s| s == e.section).unwrap_or(0) as isize;
-            e.section = all[(at + delta).rem_euclid(all.len() as isize) as usize];
+            e.section = crate::cycle::step(all, e.section, delta);
         } else if let Some(tab) = self.current_mut() {
             tab.section = tab.section.step(delta);
         }

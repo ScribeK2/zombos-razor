@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/zombo-core", "crates/zombo", "crates/zombo-ui"]
-exclude = ["spike"]
+exclude = ["spike", "fuzz"]
 
 [workspace.package]
 edition = "2024"
@@ -12,3 +12,12 @@ publish = false
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"

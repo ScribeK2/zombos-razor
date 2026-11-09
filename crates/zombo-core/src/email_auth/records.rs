@@ -64,7 +64,10 @@ pub(crate) async fn mta_sts_audit(dns: Dns, domain: &str) -> MtaSts {
 /// The value of a tag, only when exactly one record is published: with two,
 /// receivers discard both.
 fn single(records: &[String]) -> Option<std::collections::BTreeMap<String, String>> {
-    (records.len() == 1).then(|| tags(&records[0]))
+    match records {
+        [one] => Some(tags(one)),
+        _ => None,
+    }
 }
 
 pub fn parse_tls_rpt(txts: &[String]) -> TlsRpt {

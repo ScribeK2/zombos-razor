@@ -176,7 +176,7 @@ fn classify(e: &io::Error) -> PortState {
 }
 
 /// The first line of a greeting, printable characters only: it comes from the network.
-fn clean_banner(raw: &[u8]) -> Option<String> {
+pub(crate) fn clean_banner(raw: &[u8]) -> Option<String> {
     let line: String = String::from_utf8_lossy(raw)
         .split('\n')
         .next()
@@ -203,7 +203,7 @@ where
     }
     let mut buf = [0u8; BANNER_BYTES];
     let n = tokio::time::timeout(t.banner, stream.read(&mut buf)).await.ok().and_then(Result::ok).unwrap_or(0);
-    (PortState::Open, clean_banner(&buf[..n]))
+    (PortState::Open, clean_banner(buf.get(..n).unwrap_or_default()))
 }
 
 /// Dial every port on every address, at most `t.parallel` at a time, using
@@ -235,9 +235,11 @@ where
         });
     }
     while let Some(done) = set.join_next().await {
-        if let Ok((i, (state, banner))) = done {
-            out[i].state = state;
-            out[i].banner = banner;
+        if let Ok((i, (state, banner))) = done
+            && let Some(p) = out.get_mut(i)
+        {
+            p.state = state;
+            p.banner = banner;
         }
     }
     PortsResult { addresses: addresses.to_vec(), ports: out }

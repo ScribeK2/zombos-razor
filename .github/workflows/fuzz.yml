@@ -1,0 +1,45 @@
+name: fuzz
+
+# Not run on every push: a scheduled smoke run and an on-demand one.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: "30"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - run: python3 fuzz/seed.py
+      - name: Build every target
+        working-directory: fuzz
+        run: cargo fuzz build -O
+      - name: Run every target
+        working-directory: fuzz
+        env:
+          SECONDS_PER_TARGET: ${{ inputs.seconds || '30' }}
+        run: |
+          for target in $(cargo fuzz list); do
+            echo "::group::$target"
+            cargo fuzz run -O "$target" -- -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048 -max_len=1048576
+            echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

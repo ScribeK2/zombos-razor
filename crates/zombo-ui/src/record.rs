@@ -27,8 +27,7 @@ impl RecordKind {
     }
 
     pub fn step(self, delta: isize) -> RecordKind {
-        let i = Self::ALL.iter().position(|&k| k == self).unwrap_or(0) as isize;
-        Self::ALL[(i + delta).rem_euclid(Self::ALL.len() as isize) as usize]
+        crate::cycle::step(&Self::ALL, self, delta)
     }
 }
 

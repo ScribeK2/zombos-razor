@@ -67,7 +67,7 @@ pub fn reverse_name(ip: IpAddr) -> String {
     }
 }
 
-fn addresses_of(m: &hickory_proto::op::Message, want: RecordType) -> Vec<IpAddr> {
+pub(crate) fn addresses_of(m: &hickory_proto::op::Message, want: RecordType) -> Vec<IpAddr> {
     let mut out: Vec<IpAddr> = vec![];
     for a in &m.answers {
         let ip = match (&a.data, want) {
@@ -119,7 +119,9 @@ async fn check_ip(resolver: &Resolver, ip: IpAddr) -> RdnsResult {
     }
     let mut forward: Vec<Option<Result<Vec<IpAddr>, String>>> = vec![None; names.len()];
     while let Some(Ok((i, r))) = set.join_next().await {
-        forward[i] = Some(r.map(|m| addresses_of(&m, want)));
+        if let Some(slot) = forward.get_mut(i) {
+            *slot = Some(r.map(|m| addresses_of(&m, want)));
+        }
     }
     for (name, f) in names.into_iter().zip(forward) {
         let name = printable(name.trim_end_matches('.'));

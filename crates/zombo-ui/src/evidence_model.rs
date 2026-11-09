@@ -224,7 +224,7 @@ impl EvidenceTab {
             suggested: None,
             overridden: false,
             stage: Stage::Paste,
-            section: sections(kind)[0],
+            section: sections(kind).first().copied().unwrap_or(Section::Findings),
             notice: None,
         }
     }
@@ -238,7 +238,7 @@ impl EvidenceTab {
 
     pub fn set_kind(&mut self, kind: Kind) {
         self.kind = kind;
-        self.section = sections(kind)[0];
+        self.section = sections(kind).first().copied().unwrap_or(Section::Findings);
     }
 
     pub fn state(&self, section: Section) -> CheckState {

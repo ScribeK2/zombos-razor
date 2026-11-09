@@ -138,7 +138,7 @@ impl Shell {
         let Some(tab) = self.ws.evidence_mut_for(id) else { return };
         match result {
             Ok(report) => {
-                tab.section = ev::sections(tab.kind)[0];
+                tab.section = ev::sections(tab.kind).first().copied().unwrap_or(ev::Section::Findings);
                 tab.stage = Stage::Done(Box::new(report));
                 self.pastes.remove(&id);
                 window.focus(&self.root_focus, cx);
@@ -179,7 +179,7 @@ impl Shell {
             let selected = tab.section == section;
             div()
                 .id(("ev-rail", i))
-                .track_focus(&self.rail_focus[i])
+                .when_some(self.rail_focus.get(i), |d, h| d.track_focus(h))
                 .h(px(t::RAIL_ITEM_HEIGHT))
                 .px(px(8.))
                 .flex()

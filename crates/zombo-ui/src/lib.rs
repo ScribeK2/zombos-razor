@@ -2,6 +2,7 @@ pub mod checks;
 pub mod chrome;
 pub mod config;
 pub mod copy;
+pub mod cycle;
 pub mod diagnosis;
 pub mod dns_data;
 pub mod evidence_model;

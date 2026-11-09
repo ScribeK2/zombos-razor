@@ -78,7 +78,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
             if n == 0 {
                 return Err(ReplyError::Closed);
             }
-            self.buf.extend_from_slice(&chunk[..n]);
+            self.buf.extend_from_slice(chunk.get(..n).unwrap_or_default());
         }
     }
 

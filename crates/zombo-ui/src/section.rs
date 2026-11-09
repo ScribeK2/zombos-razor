@@ -60,8 +60,7 @@ impl Section {
     }
 
     pub fn step(self, delta: isize) -> Section {
-        let n = Self::ALL.len() as isize;
-        Self::ALL[(self.index() as isize + delta).rem_euclid(n) as usize]
+        crate::cycle::step(&Self::ALL, self, delta)
     }
 }
 

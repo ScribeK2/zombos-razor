@@ -104,6 +104,11 @@ enum Ident {
 }
 
 impl Version {
+    /// The version used when the running version cannot be read: it is older than every release.
+    pub fn zero() -> Self {
+        Self { major: 0, minor: 0, patch: 0, pre: Vec::new() }
+    }
+
     /// `1.4.0`, `v1.4.0` or `1.4.0-rc.1`. Anything else is `None`.
     pub fn parse(text: &str) -> Option<Version> {
         let text = text.strip_prefix('v').unwrap_or(text);
@@ -490,8 +495,11 @@ pub fn install_in(ep: &Endpoints, rel: &Available, target: &Path, release: bool)
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                hash.update(&buf[..n]);
-                file.write_all(&buf[..n]).map_err(write)?;
+                let chunk = buf
+                    .get(..n)
+                    .ok_or_else(|| UpdateError::Network("the reader reported more bytes than it read".into()))?;
+                hash.update(chunk);
+                file.write_all(chunk).map_err(write)?;
                 total += n as u64;
             }
             Err(e) => {

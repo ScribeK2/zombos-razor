@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod common;
 
 use std::{collections::BTreeSet, net::IpAddr, time::Duration};

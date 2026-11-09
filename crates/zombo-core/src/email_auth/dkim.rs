@@ -231,7 +231,7 @@ fn base64(s: &str) -> Option<Vec<u8>> {
         return None;
     }
     let (mut out, mut acc, mut n) = (Vec::with_capacity(b.len() / 4 * 3), 0u32, 0u32);
-    for &c in &b[..b.len() - pad] {
+    for &c in b.get(..b.len() - pad).unwrap_or_default() {
         let v = match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
@@ -291,8 +291,8 @@ fn rsa_bits(der: &[u8]) -> Option<u32> {
 fn pkcs1_bits(body: &[u8]) -> Option<u32> {
     let (0x02, n, rest) = tlv(body)? else { return None };
     let (0x02, _, _) = tlv(rest)? else { return None };
-    let n = &n[n.iter().position(|&b| b != 0)?..];
-    u32::try_from(n.len() * 8).ok()?.checked_sub(n[0].leading_zeros())
+    let n = n.get(n.iter().position(|&b| b != 0)?..)?;
+    u32::try_from(n.len() * 8).ok()?.checked_sub(n.first()?.leading_zeros())
 }
 
 #[cfg(test)]

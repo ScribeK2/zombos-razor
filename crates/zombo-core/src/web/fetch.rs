@@ -134,7 +134,7 @@ fn agent(pin: Option<&Pin>, tls: &TlsMode) -> Agent {
     Agent::with_parts(config, DefaultConnector::default(), PinResolver(pin.cloned()))
 }
 
-fn clean(bytes: &[u8]) -> String {
+pub(crate) fn clean(bytes: &[u8]) -> String {
     let s = String::from_utf8_lossy(bytes);
     let s = match s.char_indices().nth(MAX_HEADER_VALUE) {
         Some((i, _)) => &s[..i],
@@ -239,7 +239,7 @@ pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration, tls: 
     }
 }
 
-fn next_url(current: &str, location: &str) -> Result<String, String> {
+pub(crate) fn next_url(current: &str, location: &str) -> Result<String, String> {
     let base = url::Url::parse(current).map_err(|e| e.to_string())?;
     let mut next = base.join(location).map_err(|_| format!("redirect to an invalid Location {location:?}"))?;
     if !matches!(next.scheme(), "http" | "https") {

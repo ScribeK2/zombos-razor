@@ -99,7 +99,9 @@ async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         return Err(format!("email needs a domain or host name, not {:?}", t.kind));
     }
     let selectors = parse_selectors(&selectors)?;
-    let resolver = resolver.unwrap_or_else(|| default_resolvers()[0].address);
+    let Some(resolver) = resolver.or_else(|| default_resolvers().first().map(|v| v.address)) else {
+        return Err("no default DNS resolver is configured".into());
+    };
     let r = email_auth(resolver, &t.value, &selectors, timeout).await;
     if !r.answered() {
         return Err(format!("no answer from DNS resolver {resolver}"));
@@ -375,7 +377,7 @@ async fn propagation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
                 "  {:<14} {:<16} {:?}  {} record types answered{}",
                 r.name,
                 r.location,
-                rcode.unwrap(),
+                rcode.map_or_else(|| "no code".to_string(), |c| format!("{c:?}")),
                 a.answers.len(),
                 if a.authoritative == Some(false) && r.kind == VantageKind::Authoritative {
                     "  (NOT authoritative)"

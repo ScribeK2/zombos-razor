@@ -550,7 +550,7 @@ pub fn analyse_maillog(raw: &str) -> Result<MailLogAnalysis, EvidenceError> {
                         a.messages.len() - 1
                     }
                 };
-                let m = &mut a.messages[i];
+                let Some(m) = a.messages.get_mut(i) else { continue };
                 match event {
                     Some(Event::Client { host, ip }) => {
                         a.extracted.host(&host);
@@ -566,9 +566,11 @@ pub fn analyse_maillog(raw: &str) -> Result<MailLogAnalysis, EvidenceError> {
                         // A later attempt for the same recipient (a retry after a
                         // deferral) is its outcome now; count the attempts.
                         let key = (i, r.to.clone());
-                        if let Some(&j) = recipient_at.get(&key) {
-                            r.attempts = m.recipients[j].attempts.saturating_add(1);
-                            m.recipients[j] = r;
+                        if let Some(&j) = recipient_at.get(&key)
+                            && let Some(old) = m.recipients.get_mut(j)
+                        {
+                            r.attempts = old.attempts.saturating_add(1);
+                            *old = r;
                         } else if m.recipients.len() < MAX_RECIPIENTS {
                             recipient_at.insert(key, m.recipients.len());
                             m.recipients.push(r);

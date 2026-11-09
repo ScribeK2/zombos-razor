@@ -80,7 +80,7 @@ pub enum DelegationError {
     NoReferral(String),
 }
 
-fn norm(n: &Name) -> String {
+pub(crate) fn norm(n: &Name) -> String {
     n.to_string().trim_end_matches('.').to_lowercase()
 }
 
@@ -88,7 +88,7 @@ fn in_zone(name: &str, apex: &str) -> bool {
     name == apex || name.ends_with(&format!(".{apex}"))
 }
 
-fn addrs(m: &Message, owner: Option<&str>) -> BTreeSet<IpAddr> {
+pub(crate) fn addrs(m: &Message, owner: Option<&str>) -> BTreeSet<IpAddr> {
     m.answers
         .iter()
         .chain(&m.additionals)
@@ -101,7 +101,7 @@ fn addrs(m: &Message, owner: Option<&str>) -> BTreeSet<IpAddr> {
         .collect()
 }
 
-fn ns_set(m: &Message, apex: &str) -> BTreeSet<String> {
+pub(crate) fn ns_set(m: &Message, apex: &str) -> BTreeSet<String> {
     m.answers
         .iter()
         .chain(&m.authorities)
