@@ -40,7 +40,7 @@ fn ring() -> BoxShadow {
 impl UpdateCard {
     /// Starts the daily check in the background. Nothing here waits on the disk or the network.
     pub fn new(check_updates: bool, dirs: Option<&Dirs>, cx: &mut Context<Self>) -> Self {
-        let version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(Version::zero);
+        let version = Version::parse(zombo_core::VERSION).unwrap_or_else(Version::zero);
         let endpoints = Endpoints::real(&version);
         let state_path = dirs.map(update_model::state_file);
         let (ep, v, path) = (endpoints.clone(), version.clone(), state_path.clone());
