@@ -667,7 +667,7 @@ impl Shell {
         let items = Section::ALL.iter().enumerate().map(|(i, &section)| {
             let state = tab.state(section);
             let selected = tab.section == section;
-            let g = state.glyph();
+            let g = tab.verdict_glyph(section);
             let group = match i {
                 1 => Some("CHECKS"),
                 Section::FIRST_ON_DEMAND => Some("ON DEMAND"),

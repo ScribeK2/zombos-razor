@@ -163,7 +163,7 @@ impl Shell {
     pub(super) fn evidence_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(tab) = self.ws.current_evidence() else { return div().id("none") };
         let items = ev::sections(tab.kind).iter().enumerate().map(|(i, &section)| {
-            let state = tab.state(section);
+            let mark = tab.mark(section);
             let selected = tab.section == section;
             div()
                 .id(("ev-rail", i))
@@ -184,7 +184,7 @@ impl Shell {
                 .cursor_pointer()
                 .role(Role::Tab)
                 .aria_selected(selected)
-                .aria_label(format!("{}: {}", section.label(), state.label()))
+                .aria_label(format!("{}: {}", section.label(), mark.label))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.ws.jump(i);
                     cx.notify();
@@ -195,9 +195,9 @@ impl Shell {
                         cx.notify();
                     }
                 }))
-                .child(glyph(state.glyph(), 16.))
+                .child(glyph(mark.glyph, 16.))
                 .child(div().flex_1().child(section.label()))
-                .child(div().max_w(px(132.)).truncate().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(state.label()))
+                .child(div().max_w(px(132.)).truncate().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(mark.label))
         });
         div()
             .id("ev-rail")

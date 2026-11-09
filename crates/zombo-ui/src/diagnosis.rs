@@ -645,6 +645,15 @@ mod tests {
     }
 
     #[test]
+    fn the_dns_rail_mark_follows_the_agreement_not_the_problem_count() {
+        let mut t = tab();
+        t.propagation.apply("example.com", PropEvent::Started);
+        t.propagation.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        assert_eq!(t.verdict_glyph(Section::Dns), Glyph::Info);
+        assert_eq!(t.verdict_glyph(Section::Web), Glyph::Ring);
+    }
+
+    #[test]
     fn summary_follows_the_checks_that_ran_and_never_claims_a_pass_for_none() {
         let mut t = tab();
         assert_eq!(t.state(Section::Summary), CheckState::NotRun);
