@@ -82,7 +82,7 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Tabs, rail with five Check states, status bar with Watches, empty state with recent targets
 - [ ] Copy at three levels (value, section, Diagnosis) in Markdown, plus JSON per section
 - [ ] Evidence paste tabs; settings pane (resolvers, DKIM selectors, timeout, proxy, notifications)
-- [ ] Optional sketch of the main screen in Pencil before the first UI code
+- [x] Main screen sketch: `docs/sketches/main-screen.html` (+ PNG). Built as HTML, not Pencil: the Pencil tool needs the Cursor IDE running with its extension. Shows the stale-cache case on the test domain
 - [ ] Window title and app ID set; clear error when the compositor has no `wl_seat`
 - [ ] Recent-lookups list (no Cases)
 

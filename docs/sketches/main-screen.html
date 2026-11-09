@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zombo's Razor: main screen sketch</title>
+<style>
+  /* Tokens from DESIGN.md (initial dark palette). Fonts: Geist, SIL OFL 1.1 (see fonts/OFL.txt). */
+  @font-face { font-family: "Geist"; src: url("fonts/Geist.ttf"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono.ttf"); font-weight: 100 900; }
+  :root {
+    --bg-100: #0B0B0C; --bg-200: #111113;
+    --gray-100: #17171A; --gray-200: #1D1D21; --gray-300: #25252A;
+    --gray-400: #2E2E34; --gray-500: #3A3A41; --gray-600: #6B6B74; --gray-800: #8F8F99;
+    --gray-900: #A1A1AA; --gray-1000: #EDEDEF;
+    --accent: #5B8DEF; --ok: #3FB27F; --info: #5B8DEF; --warning: #E5A93D; --critical: #F06A6E;
+    --r-s: 6px; --r-l: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body { background: #000; color: var(--gray-1000); font: 400 14px/20px "Geist", system-ui, sans-serif; display: grid; place-items: center; }
+  .mono { font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; line-height: 18px; }
+  .window { width: 1280px; height: 800px; background: var(--bg-100); border-radius: var(--r-l); overflow: hidden; display: grid; grid-template-rows: 40px 32px 1fr 28px; border: 1px solid var(--gray-400); }
+
+  /* title bar with the omnibox */
+  .titlebar { display: grid; grid-template-columns: 220px 1fr 220px; align-items: center; background: var(--bg-200); padding: 0 8px 0 16px; }
+  .brand { font-weight: 600; font-size: 13px; color: var(--gray-900); letter-spacing: .01em; }
+  .omnibox { height: 28px; max-width: 640px; width: 100%; margin: 0 auto; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--gray-100); border: 1px solid var(--gray-600); border-radius: var(--r-s); }
+  .omnibox .q { flex: 1; color: var(--gray-1000); }
+  .omnibox kbd, .hint kbd { font: 500 11px/16px "Geist Mono", monospace; color: var(--gray-900); border: 1px solid var(--gray-500); border-radius: 4px; padding: 0 5px; }
+  .controls { display: flex; justify-content: flex-end; gap: 4px; }
+  .controls span { width: 28px; height: 28px; display: grid; place-items: center; color: var(--gray-900); border-radius: var(--r-s); }
+
+  /* tabs */
+  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; background: var(--bg-200); border-bottom: 1px solid var(--gray-400); }
+  .tab { height: 28px; padding: 0 12px; display: flex; align-items: center; gap: 8px; color: var(--gray-900); border-radius: var(--r-s) var(--r-s) 0 0; font-size: 13px; }
+  .tab.active { background: var(--bg-100); color: var(--gray-1000); border: 1px solid var(--gray-400); border-bottom: 1px solid var(--bg-100); margin-bottom: -1px; }
+  .tab .x { color: var(--gray-800); font-size: 14px; }
+  .tab.plus { color: var(--gray-800); padding: 0 10px; }
+
+  /* body: rail + pane */
+  .body { display: grid; grid-template-columns: 224px 1fr; min-height: 0; }
+  .rail { background: var(--bg-200); padding: 8px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+  .rail .group { font-size: 12px; line-height: 16px; color: var(--gray-900); padding: 12px 8px 4px; text-transform: uppercase; letter-spacing: .06em; }
+  .item { height: 32px; display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-s); color: var(--gray-900); }
+  .item.sel { background: var(--gray-300); color: var(--gray-1000); outline: 2px solid var(--accent); outline-offset: -2px; }
+  .item .state { font-size: 12px; line-height: 16px; color: var(--gray-900); }
+  .item .key { font: 500 11px/16px "Geist Mono", monospace; color: var(--gray-800); margin-right: 6px; }
+  .pane { padding: 16px 24px 16px; overflow: hidden; display: flex; flex-direction: column; gap: 16px; }
+
+  /* status icons: shape differs by status, label always present */
+  svg.i { width: 16px; height: 16px; flex: none; }
+  .ok { color: var(--ok); } .info { color: var(--info); } .warn { color: var(--warning); } .crit { color: var(--critical); } .mute { color: var(--gray-600); }
+
+  /* verdict */
+  .verdict { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; }
+  .verdict .word { font-weight: 600; font-size: 28px; line-height: 36px; letter-spacing: -.01em; display: flex; align-items: center; gap: 12px; }
+  .verdict .why { color: var(--gray-900); font-size: 14px; max-width: 640px; }
+  .counts { display: flex; gap: 8px; }
+  .chip { display: flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid var(--gray-400); border-radius: 999px; font-size: 13px; background: var(--gray-100); }
+  .chip b { font-weight: 600; }
+
+  /* findings */
+  .findings { display: flex; flex-direction: column; gap: 8px; }
+  .finding { display: grid; grid-template-columns: 96px 1fr auto; gap: 12px; align-items: start; padding: 10px 12px; background: var(--gray-100); border: 1px solid var(--gray-400); border-radius: var(--r-s); }
+  .finding.focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--gray-200); }
+  .tag { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 20px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .finding h3 { font-weight: 500; font-size: 14px; line-height: 20px; }
+  .finding p { color: var(--gray-900); font-size: 13px; line-height: 18px; margin-top: 2px; max-width: 760px; }
+  .finding .act { display: flex; gap: 6px; align-items: center; color: var(--gray-900); font-size: 12px; }
+  .btn { height: 24px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--gray-500); border-radius: var(--r-s); color: var(--gray-1000); background: var(--gray-100); font-size: 12px; }
+
+  /* raw data */
+  .data h4 { font-weight: 600; font-size: 13px; line-height: 18px; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .data h4 span { font-weight: 400; color: var(--gray-900); }
+  table { width: 100%; border-collapse: collapse; background: var(--gray-100); border: 1px solid var(--gray-400); border-radius: var(--r-s); overflow: hidden; }
+  th { text-align: left; font-weight: 500; font-size: 12px; line-height: 16px; color: var(--gray-900); padding: 6px 12px; background: var(--bg-200); }
+  td { height: 28px; padding: 0 12px; border-top: 1px solid var(--gray-400); }
+  td.state { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  tr.stale td { background: color-mix(in srgb, var(--warning) 6%, var(--gray-100)); }
+
+  .collapsed { display: flex; flex-direction: column; border: 1px solid var(--gray-400); border-radius: var(--r-s); background: var(--gray-100); }
+  .collapsed .row { height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 13px; }
+  .collapsed .row + .row { border-top: 1px solid var(--gray-400); }
+  .collapsed .row span:last-child { color: var(--gray-900); }
+  .collapsed .chev { color: var(--gray-800); width: 10px; }
+
+  /* status bar */
+  .statusbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; background: var(--bg-200); border-top: 1px solid var(--gray-400); font-size: 12px; color: var(--gray-900); }
+  .statusbar .sp { flex: 1; }
+  .watch { display: flex; align-items: center; gap: 8px; color: var(--gray-1000); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .hint { display: flex; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="s-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="s-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2v4M8 4.6v.1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+  <symbol id="s-warn" viewBox="0 0 16 16"><path d="M8 2.2l6.2 11H1.8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.6v3.2M8 11.6v.1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+  <symbol id="s-crit" viewBox="0 0 16 16"><path d="M5.2 1.8h5.6l3.4 3.4v5.6l-3.4 3.4H5.2L1.8 10.8V5.2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="s-run" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3.4"/></symbol>
+  <symbol id="s-off" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+</svg>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="brand">Zombo's Razor</div>
+    <div class="omnibox mono">
+      <svg class="i mute" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5"/></svg>
+      <span class="q">domainmappingtest.com</span>
+      <kbd>Ctrl L</kbd><kbd>Enter</kbd>
+    </div>
+    <div class="controls"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active"><span class="mono">domainmappingtest.com</span><span class="x">&#215;</span></div>
+    <div class="tab"><span class="mono">example.com</span><span class="x">&#215;</span></div>
+    <div class="tab"><span class="mono">93.184.216.34</span><span class="x">&#215;</span></div>
+    <div class="tab plus">+</div>
+  </div>
+
+  <div class="body">
+    <nav class="rail" aria-label="Sections">
+      <div class="item sel"><svg class="i warn"><use href="#s-warn"/></svg><span>Summary</span><span><span class="state">2 problems</span></span></div>
+      <div class="group">Checks</div>
+      <div class="item"><svg class="i info"><use href="#s-info"/></svg><span>DNS</span><span><span class="state">done · 1 note</span></span></div>
+      <div class="item"><svg class="i ok"><use href="#s-ok"/></svg><span>Delegation</span><span><span class="state">done</span></span></div>
+      <div class="item"><svg class="i info"><use href="#s-info"/></svg><span>DNSSEC</span><span><span class="state">not signed</span></span></div>
+      <div class="item"><svg class="i warn"><use href="#s-warn"/></svg><span>Email</span><span><span class="state">done · 1 warning</span></span></div>
+      <div class="item"><svg class="i mute"><use href="#s-run"/></svg><span>Web</span><span><span class="state">running</span></span></div>
+      <div class="item"><svg class="i mute"><use href="#s-run"/></svg><span>TLS</span><span><span class="state">running</span></span></div>
+      <div class="item"><svg class="i ok"><use href="#s-ok"/></svg><span>Registration</span><span><span class="state">done</span></span></div>
+      <div class="group">On demand</div>
+      <div class="item"><svg class="i mute"><use href="#s-off"/></svg><span>Port scan</span><span class="state">not run</span></div>
+      <div class="item"><svg class="i mute"><use href="#s-off"/></svg><span>SMTP banner</span><span class="state">not run</span></div>
+      <div class="item"><svg class="i mute"><use href="#s-off"/></svg><span>Blacklist</span><span class="state">not run</span></div>
+    </nav>
+
+    <main class="pane">
+      <section class="verdict" aria-label="Verdict">
+        <div>
+          <div class="word"><svg class="i info" style="width:24px;height:24px"><use href="#s-info"/></svg>CACHED</div>
+          <p class="why">The nameservers agree, and some resolvers still serve old records. Nothing is wrong with the zone.</p>
+        </div>
+        <div class="counts">
+          <span class="chip"><svg class="i crit"><use href="#s-crit"/></svg><b>0</b> critical</span>
+          <span class="chip"><svg class="i warn"><use href="#s-warn"/></svg><b>2</b> warning</span>
+          <span class="chip"><svg class="i info"><use href="#s-info"/></svg><b>3</b> info</span>
+          <span class="chip"><svg class="i ok"><use href="#s-ok"/></svg><b>4</b> ok</span>
+        </div>
+      </section>
+
+      <section class="findings" aria-label="Findings">
+        <article class="finding focus">
+          <div class="tag warn"><svg class="i"><use href="#s-warn"/></svg>Warning</div>
+          <div>
+            <h3>Some resolvers still serve old records</h3>
+            <p>The authoritative nameservers agree, but 2 of 10 resolvers (CleanBrowsing, Quad9) return something different for <span class="mono">TXT</span>. They are serving cached records and will refresh within 101 seconds at the most.</p>
+          </div>
+          <div class="act"><span class="btn">Watch <kbd class="mono" style="border:0;padding:0">W</kbd></span></div>
+        </article>
+        <article class="finding">
+          <div class="tag warn"><svg class="i"><use href="#s-warn"/></svg>Warning</div>
+          <div>
+            <h3>No DKIM key found</h3>
+            <p>None of the 37 selectors checked has an active DKIM key for domainmappingtest.com. Add the selector from a real message's <span class="mono">DKIM-Signature</span> header.</p>
+          </div>
+          <div class="act"><span class="btn">Email &#8594; <kbd class="mono" style="border:0;padding:0">5</kbd></span></div>
+        </article>
+        <article class="finding">
+          <div class="tag ok"><svg class="i"><use href="#s-ok"/></svg>Ok</div>
+          <div><h3>DMARC enforced (p=quarantine)</h3></div>
+          <div class="act"></div>
+        </article>
+      </section>
+
+      <section class="data" aria-label="Raw data">
+        <h4>Propagation by resolver <span>TXT · 2 of 10 differ</span></h4>
+        <table>
+          <thead><tr><th style="width:150px">Resolver</th><th style="width:150px">Location</th><th>TXT</th><th style="width:70px">TTL</th><th style="width:90px">Status</th></tr></thead>
+          <tbody class="mono">
+            <tr><td>ns1.hosting…llc</td><td>Authoritative</td><td>"zombo-razor-test-2"</td><td>3600</td><td class="state ok">Truth</td></tr>
+            <tr><td>Google</td><td>Global anycast</td><td>"zombo-razor-test-2"</td><td>54</td><td class="state ok">Match</td></tr>
+            <tr class="stale"><td>Quad9</td><td>Global anycast</td><td>"zombo-razor-test"</td><td>28</td><td class="state warn">Stale</td></tr>
+            <tr class="stale"><td>CleanBrowsing</td><td>Netherlands</td><td>"zombo-razor-test"</td><td>101</td><td class="state warn">Stale</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="collapsed" aria-label="More data">
+        <div class="row"><span class="chev">&#9656;</span><b>Nameserver answers</b><span>2 nameservers · SOA serial 2026110902 on both</span></div>
+        <div class="row"><span class="chev">&#9656;</span><b>All records</b><span>A, AAAA, MX, NS, TXT, SOA, CAA</span></div>
+        <div class="row"><span class="chev">&#9656;</span><b>Changed since the previous run</b><span>TXT: 1 removed, 1 added</span></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="statusbar">
+    <span class="watch"><span class="dot"></span>Watching <span class="mono">domainmappingtest.com TXT</span> · last run 12 s ago · stops on change</span>
+    <span class="sp"></span>
+    <span class="hint"><kbd>Ctrl K</kbd> palette</span>
+    <span class="hint"><kbd>?</kbd> shortcuts</span>
+  </div>
+</div>
+</body>
+</html>

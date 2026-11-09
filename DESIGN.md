@@ -116,7 +116,8 @@ Carried over from the Go app's polish pass. The palette opens instantly. Hover a
 | `gray-300` | `#25252A` | active |
 | `gray-400` | `#2E2E34` | border |
 | `gray-500` | `#3A3A41` | hover border |
-| `gray-600` | `#6B6B74` | input and control boundaries (3.4:1 or more on any surface) |
+| `gray-600` | `#6B6B74` | input and control boundaries and non-text icons only, never text (3.4:1 or more on any surface) |
+| `gray-800` | `#8F8F99` | tertiary text such as key hints (4.7:1 or more on every surface) |
 | `gray-900` | `#A1A1AA` | secondary text |
 | `gray-1000` | `#EDEDEF` | primary text |
 | `accent` | `#5B8DEF` | focus ring and selection |
@@ -131,6 +132,6 @@ Cases, ticket references, a Write-up, accounts, sync, telemetry, screenshots of 
 
 ## Open
 
-- A sketch of the main screen (Pencil) before the first UI code, if wanted.
+- Sketch of the main screen: `docs/sketches/main-screen.html` (PNG next to it). The rail shows no number hints; the shortcut sheet and the palette list the keys.
 - Contrast of the initial palette is checked: text and status colors reach 4.5:1 or more on every background step (`critical` was raised from `#E5484D`, which failed on the hover and active steps), and `gray-600` gives control boundaries 3:1 or more. Re-run the check whenever a token changes.
 - How the rail behaves on a narrow window (collapse to icons at under 720 px, initial).
