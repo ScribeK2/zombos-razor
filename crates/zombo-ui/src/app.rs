@@ -35,7 +35,7 @@ mod frame;
 mod ondemand_ui;
 
 const FINDING_HANDLES: usize = 64;
-const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
+const DISCLOSURES: [&str; 5] = ["nameservers", "records", "details", "changes", "blind"];
 const TOAST_FOR: Duration = Duration::from_secs(8);
 
 pub struct Shell {
@@ -1109,6 +1109,16 @@ impl Shell {
             .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)).child(self.dns_rows(tab, cx)))
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
+            .when(!zombo_ui::blind_spots::lines(section).is_empty(), |s| s.child(self.blind_spots_view(section, cx)))
+    }
+
+    fn blind_spots_view(&self, section: Section, cx: &mut Context<Self>) -> Div {
+        let lines: Vec<_> = zombo_ui::blind_spots::lines(section)
+            .iter()
+            .map(|l| ("Cannot see".to_string(), l.to_string(), t::GRAY_900))
+            .collect();
+        let n = lines.len();
+        self.disclosure("blind", zombo_ui::blind_spots::TITLE.into(), format!("{n} limits of this Check"), lines, cx)
     }
 
     fn finding_card(

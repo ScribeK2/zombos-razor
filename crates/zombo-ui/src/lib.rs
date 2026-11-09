@@ -1,3 +1,4 @@
+pub mod blind_spots;
 pub mod checks;
 pub mod chrome;
 pub mod config;

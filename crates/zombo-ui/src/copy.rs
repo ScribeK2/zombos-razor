@@ -73,6 +73,7 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
         out.push_str(&format!("\n{level}# {}\n\n", single_line(&d.details_title)));
         fact_lines(&mut out, &d.details);
     }
+    out.push_str(&crate::blind_spots::markdown(section, level));
     out
 }
 
@@ -175,6 +176,15 @@ mod tests {
         assert!(md.contains("- Status: `200`\n"), "{md}");
         assert!(md.contains("- Server: `a' b`\n"), "{md}");
         assert!(md.contains("\n### Redirect chain\n\n- Hop 1: `301 http://example.com`\n"), "{md}");
+    }
+
+    #[test]
+    fn a_copied_section_ends_with_what_it_cannot_see_and_the_summary_does_not() {
+        let t = tab_with_web();
+        let md = section_markdown(&t, Section::Web);
+        assert!(md.contains("\n### Not visible from here\n\n- Application logs"), "{md}");
+        assert!(!section_markdown(&t, Section::Summary).contains("Not visible"));
+        assert!(diagnosis_markdown(&t).contains("Not visible from here"));
     }
 
     #[test]
