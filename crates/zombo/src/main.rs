@@ -10,6 +10,7 @@ use zombo_core::{
     registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
+use zombo_core::web::{WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 
 const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
@@ -40,6 +41,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("registration") => registration(it).await,
         Some("dnssec") => dnssec(it).await,
         Some("email") => email(it).await,
+        Some("web") => web(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -406,6 +408,63 @@ async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> 
     row("Status", Some(r.statuses.join(", ")));
     row("Nameservers", Some(r.nameservers.join(", ")));
     row("DNSSEC", r.dnssec.map(|s| if s { "signed" } else { "unsigned" }.to_string()));
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+const WEB_USAGE: &str = "usage: zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]";
+
+async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut opts) = (None, false, WebOptions::default());
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                opts.timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            "--origin" => {
+                let v = value("--origin")?;
+                opts.origin = Some(v.trim_matches(['[', ']']).parse().map_err(|_| format!("{v:?} is not an IP address"))?);
+            }
+            "--resolver" => opts.resolver = Some(addr(&value("--resolver")?)?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{WEB_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(WEB_USAGE.into()),
+        }
+    }
+    let (host, path) = parse_web_target(&target.ok_or(WEB_USAGE)?).map_err(|e| e.to_string())?;
+    let r = check_web(&host, &path, &opts).await;
+    let findings = web_findings(&host, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{}", r.url);
+    if let Some(e) = &r.https_error {
+        println!("  HTTPS failed: {e}");
+    }
+    for h in &r.chain {
+        let to = h.location.as_deref().map_or(String::new(), |l| format!("  -> {l}"));
+        println!("  {} {}{to}", h.status, h.url);
+    }
+    if let Some(e) = &r.error {
+        println!("  failed: {e}");
+    }
+    if let Some(s) = r.status {
+        println!("  HTTP {s} in {} ms{}", r.time_ms, r.server.as_deref().map_or(String::new(), |s| format!(", server {s}")));
+    }
+    if r.hosting.dns_error.is_none() {
+        let cname = if r.hosting.cname_chain.is_empty() { String::new() } else { format!(" via {}", r.hosting.cname_chain.join(" > ")) };
+        let ips: Vec<String> = r.hosting.addresses.iter().map(ToString::to_string).collect();
+        println!("  {}{cname}: {}", r.hosting.host, if ips.is_empty() { "no addresses".to_string() } else { ips.join(", ") });
+    }
+    if let Some(o) = &r.origin {
+        let a = &o.answer;
+        println!("  origin {}: {}", o.ip, a.status.map_or_else(|| format!("no answer ({})", a.error.as_deref().unwrap_or("unknown")), |s| format!("HTTP {s} in {} ms", a.time_ms)));
+    }
     println!();
     print_findings(&findings);
     Ok(())
