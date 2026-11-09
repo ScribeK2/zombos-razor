@@ -1,6 +1,6 @@
 mod common;
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{FakeDns, dnssec_zone, rdatas};
 use hickory_proto::{
@@ -9,7 +9,7 @@ use hickory_proto::{
 };
 use zombo_core::{
     dns::{QueryFlags, exchange_with},
-    dnssec::{Algorithm, DigestType, Dnskey, Ds, KeyTag},
+    dnssec::{Algorithm, DigestType, Dnskey, Ds, KeyTag, Rrsig, SigWindow},
 };
 
 const T: Duration = Duration::from_millis(500);
@@ -95,6 +95,61 @@ fn the_digest_types_compute_the_published_test_vectors() {
     assert_eq!(hex(DigestType::Sha256), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     assert_eq!(hex(DigestType::Sha384), "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7");
     assert!(DigestType::from_number(3).digest(b"abc").is_none(), "GOST is not computed");
+}
+
+// RRSIG validity windows
+
+fn at(secs: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(secs)
+}
+
+/// Wire RDATA of an RRSIG over SOA with these times.
+fn rrsig_rdata(inception: u32, expiration: u32) -> Vec<u8> {
+    let mut r = 6u16.to_be_bytes().to_vec();
+    r.extend([13, 2]);
+    r.extend(300u32.to_be_bytes());
+    r.extend(expiration.to_be_bytes());
+    r.extend(inception.to_be_bytes());
+    r.extend(4242u16.to_be_bytes());
+    r.extend([7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0]);
+    r.extend([1, 2, 3]);
+    r
+}
+
+fn soa_rrsig(zone_text: &str) -> Rrsig {
+    rdatas(zone_text, RecordType::RRSIG).iter().filter_map(|r| Rrsig::from_rdata(r)).find(|s| s.type_covered() == RecordType::SOA).unwrap()
+}
+
+/// The cloudflare.com SOA signature: valid 2026-11-08 12:36:21 to 2026-11-10 14:36:21 UTC.
+const CF_START: u64 = 1794141381;
+const CF_END: u64 = 1794321381;
+
+#[test]
+fn a_real_rrsig_is_read_and_checked_against_now() {
+    let sig = soa_rrsig(&dnssec_zone("cloudflare.com"));
+    assert_eq!((sig.key_tag, sig.algorithm, sig.signer.as_str()), (KeyTag(34505), Algorithm::EcdsaP256Sha256, "cloudflare.com."));
+    assert_eq!((u64::from(sig.inception), u64::from(sig.expiration)), (CF_START, CF_END));
+    assert_eq!(sig.window(at(CF_START + 3600)), SigWindow::Valid { expires_in: (CF_END - CF_START - 3600) as u32 });
+    assert_eq!(sig.window(at(CF_END)), SigWindow::Valid { expires_in: 0 }, "valid up to and including the expiration");
+    assert_eq!(sig.window(at(CF_END + 90)), SigWindow::Expired { ago: 90 });
+    assert_eq!(sig.window(at(CF_START - 60)), SigWindow::NotYetValid { starts_in: 60 });
+}
+
+#[test]
+fn signature_times_are_serial_numbers_that_wrap_in_2106() {
+    // Inception just before the 32-bit wrap, expiration just after it: valid across the wrap.
+    let sig = Rrsig::from_rdata(&rrsig_rdata(0xffff_ff00, 0x0000_0100)).unwrap();
+    assert_eq!(sig.window(at(0xffff_ffc0)), SigWindow::Valid { expires_in: 0x140 });
+    assert_eq!(sig.window(at(0x1_0000_0010)), SigWindow::Valid { expires_in: 0xf0 }, "after the wrap, a plain comparison calls this not yet valid");
+    assert_eq!(sig.window(at(0x1_0000_0200)), SigWindow::Expired { ago: 0x100 });
+    assert_eq!(sig.window(at(0xffff_fe00)), SigWindow::NotYetValid { starts_in: 0x100 });
+}
+
+#[test]
+fn a_truncated_rrsig_is_rejected() {
+    let r = rrsig_rdata(1, 2);
+    assert!(Rrsig::from_rdata(&r[..10]).is_none());
+    assert!(Rrsig::from_rdata(&r[..22]).is_none(), "the signer name is cut off");
 }
 
 #[test]

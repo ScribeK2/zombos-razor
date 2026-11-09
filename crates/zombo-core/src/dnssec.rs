@@ -8,9 +8,12 @@
 //! DNSSEC records are read from raw RDATA: hickory decodes them only with its
 //! crypto features, which Zombo does not use.
 
-use std::fmt;
+use std::{
+    fmt,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use hickory_proto::rr::Name;
+use hickory_proto::rr::{Name, RecordType};
 use serde::{Serialize, Serializer};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384};
@@ -255,4 +258,80 @@ fn canonical_wire(name: &Name) -> Vec<u8> {
     }
     out.push(0);
     out
+}
+
+/// An RRSIG record: a signature over one record set, valid between two times.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rrsig {
+    #[serde(skip)]
+    covered: RecordType,
+    pub algorithm: Algorithm,
+    pub key_tag: KeyTag,
+    pub signer: String,
+    /// Seconds since 1970, modulo 2^32 (RFC 4034 section 3.1.5).
+    pub inception: u32,
+    pub expiration: u32,
+}
+
+/// Where "now" falls against an RRSIG's validity period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SigWindow {
+    NotYetValid { starts_in: u32 },
+    Valid { expires_in: u32 },
+    Expired { ago: u32 },
+}
+
+impl Rrsig {
+    /// From the record's wire RDATA: type covered, algorithm, labels, original
+    /// TTL, expiration, inception, key tag, signer name, signature.
+    pub fn from_rdata(rdata: &[u8]) -> Option<Self> {
+        let (head, rest) = rdata.split_first_chunk::<18>()?;
+        let u32_at = |i: usize| u32::from_be_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+        let mut signer = String::new();
+        let mut labels = rest;
+        loop {
+            let (&len, tail) = labels.split_first()?;
+            if len == 0 {
+                break;
+            }
+            // A signer name is never compressed, so a pointer here means garbage.
+            let (label, tail) = tail.split_at_checked(usize::from(len)).filter(|_| len < 64)?;
+            signer.push_str(&String::from_utf8_lossy(label));
+            signer.push('.');
+            labels = tail;
+        }
+        Some(Rrsig {
+            covered: RecordType::from(u16::from_be_bytes([head[0], head[1]])),
+            algorithm: Algorithm::from_number(head[2]),
+            key_tag: KeyTag(u16::from_be_bytes([head[16], head[17]])),
+            signer: if signer.is_empty() { ".".into() } else { signer },
+            expiration: u32_at(8),
+            inception: u32_at(12),
+        })
+    }
+
+    pub fn type_covered(&self) -> RecordType {
+        self.covered
+    }
+
+    /// Where `now` falls against the validity period. The times are serial
+    /// numbers (RFC 1982): a plain comparison would break when they wrap in 2106.
+    pub fn window(&self, now: SystemTime) -> SigWindow {
+        let now = epoch_secs(now);
+        let until_start = self.inception.wrapping_sub(now) as i32;
+        let until_end = self.expiration.wrapping_sub(now) as i32;
+        if until_start > 0 {
+            SigWindow::NotYetValid { starts_in: until_start.unsigned_abs() }
+        } else if until_end < 0 {
+            SigWindow::Expired { ago: until_end.unsigned_abs() }
+        } else {
+            SigWindow::Valid { expires_in: until_end.unsigned_abs() }
+        }
+    }
+}
+
+/// Seconds since 1970 modulo 2^32, the form RRSIG times use.
+fn epoch_secs(t: SystemTime) -> u32 {
+    t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as u32)
 }
