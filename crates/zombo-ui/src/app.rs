@@ -6,7 +6,8 @@ use gpui_kit::*;
 use zombo_ui::{
     checks, diagnosis as dg,
     keys::{self, Action, Mode, Press},
-    outcome::Fact,
+    ondemand,
+    outcome::{CheckEvent, Fact},
     record::RecordKind,
     runtime,
     section::Section,
@@ -24,6 +25,7 @@ pub struct Shell {
     ws: Workspace,
     input: Entity<InputState>,
     root_focus: FocusHandle,
+    pane_focus: FocusHandle,
     rail_focus: Vec<FocusHandle>,
     finding_focus: Vec<FocusHandle>,
     palette: Option<usize>,
@@ -111,6 +113,7 @@ impl Shell {
             ws: Workspace::default(),
             input,
             root_focus: cx.focus_handle(),
+            pane_focus: cx.focus_handle(),
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             finding_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
@@ -164,8 +167,11 @@ impl Shell {
         if tab.state(section) == zombo_ui::status::CheckState::Running || !checks::wired(section) {
             return;
         }
+        if section.is_on_demand() && !ondemand::runnable(tab.target.kind, section) {
+            return;
+        }
         let key = key.to_string();
-        let Some(name) = checks::check_name(&tab.target) else { return };
+        let Some(name) = checks::name_for(section, &tab.target) else { return };
         if section == Section::Dns {
             let mut rx = runtime::stream(move |tx| checks::run_propagation(name, tx));
             cx.spawn(async move |this, cx| {
@@ -187,6 +193,9 @@ impl Shell {
             })
             .detach();
             return;
+        }
+        if let Some(tab) = self.ws.tabs.iter_mut().find(|t| t.target.value == key) {
+            tab.run_mut(section).apply(CheckEvent::Started);
         }
         let mut rx = runtime::stream(move |tx| checks::run_section(section, name, tx));
         cx.spawn(async move |this, cx| {
@@ -282,6 +291,16 @@ impl Shell {
                     None => {}
                 }
             }
+            Action::Run(section) => match self.ws.current().map(|t| t.target.kind) {
+                None => self.toast = Some(("Enter a target first, then run this Check.".into(), Instant::now())),
+                Some(kind) if !ondemand::runnable(kind, section) => {
+                    self.toast = Some((format!("The {} Check does not apply to this target.", section.label()), Instant::now()))
+                }
+                Some(_) => {
+                    self.ws.jump(section.index());
+                    self.start_section(section, cx);
+                }
+            },
             Action::ToggleWatch => self.toggle_watch(),
             Action::NextRecord | Action::PrevRecord => {
                 if self.ws.current().is_some_and(|t| t.section == Section::Dns) {
@@ -696,8 +715,20 @@ impl Shell {
                         }),
                 )
         });
+        let brief = ondemand::brief(section);
+        let run_label = ondemand::run_label(section);
+        let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
             .id("pane")
+            .track_focus(&self.pane_focus)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| window.focus(&this.pane_focus, cx)))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                let plain_enter = ev.keystroke.key == "enter" && !ev.keystroke.modifiers.modified();
+                if let Some(section) = this.ws.current().map(|t| t.section).filter(|s| plain_enter && s.is_on_demand()) {
+                    cx.stop_propagation();
+                    this.perform(Action::Run(section), window, cx);
+                }
+            }))
             .flex_1()
             .min_w_0()
             .overflow_y_scroll()
@@ -768,6 +799,61 @@ impl Shell {
                         })))
                     })),
             )
+            .when_some(brief, |s, b| {
+                s.child(
+                    div()
+                        .id("on-demand")
+                        .w_full()
+                        .max_w(px(720.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .p(px(16.))
+                        .bg(color(t::GRAY_100))
+                        .border_1()
+                        .border_color(color(t::GRAY_400))
+                        .rounded(px(t::RADIUS_SMALL))
+                        .role(Role::Group)
+                        .aria_label("What this Check will do")
+                        .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).child(b.what))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.))
+                                .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
+                                .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
+                        )
+                        .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                        .when(can_run, |s| {
+                            s.child(
+                                div()
+                                    .id("run")
+                                    .h(px(28.))
+                                    .px(px(12.))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .self_start()
+                                    .border_1()
+                                    .border_color(color(t::ACCENT))
+                                    .rounded(px(t::RADIUS_SMALL))
+                                    .bg(color(t::GRAY_100))
+                                    .text_size(px(t::TEXT_LABEL))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(color(t::GRAY_200)))
+                                    .active(|s| s.bg(color(t::GRAY_300)))
+                                    .focus_visible(focus_ring)
+                                    .role(Role::Button)
+                                    .aria_label(run_label.unwrap_or("Run this Check"))
+                                    .on_click(cx.listener(move |this, _, window, cx| this.perform(Action::Run(section), window, cx)))
+                                    .child(if state == zombo_ui::status::CheckState::NotRun { run_label.unwrap_or("Run") } else { "Run again" })
+                                    .child(kbd("Enter")),
+                            )
+                        }),
+                )
+            })
             .when(state.can_retry(), |s| {
                 s.child(
                     div()
