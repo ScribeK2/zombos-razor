@@ -238,3 +238,28 @@ fn each_address_is_judged_on_its_own() {
     assert!(web.message.contains(V6) && !web.message.contains(v4), "{}", web.message);
     assert!(fs.iter().find(|f| f.code == "hosting_reachability_reachable").unwrap().message.starts_with("192.0.2.10 and 2001:db8::10 answers on"));
 }
+
+#[test]
+fn only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server() {
+    // Many networks and hosting providers block outbound SMTP: silence on 25 alone says nothing about the server.
+    let v4 = "192.0.2.10";
+    let r = result(&[v4], &[(v4, 25, "SMTP", Filtered)]);
+    let fs = ports_findings("mail.example.com", &r);
+    assert_eq!(codes(&fs), ["hosting_reachability_mail_filtered"], "{fs:?}");
+    assert_eq!(fs[0].severity, Severity::Info);
+    assert!(fs[0].message.contains("block outbound"), "{}", fs[0].message);
+}
+
+#[test]
+fn mail_ports_that_are_refused_still_say_the_server_is_up() {
+    let v4 = "192.0.2.10";
+    let r = result(&[v4], &[(v4, 25, "SMTP", Closed), (v4, 587, "Submission", Closed)]);
+    assert_eq!(codes(&ports_findings("mail.example.com", &r)), ["hosting_reachability_unreachable"]);
+}
+
+#[test]
+fn silence_on_web_ports_is_still_unreachable() {
+    let v4 = "192.0.2.10";
+    let r = result(&[v4], &[(v4, 80, "HTTP", Filtered), (v4, 25, "SMTP", Filtered)]);
+    assert_eq!(codes(&ports_findings("example.com", &r)), ["hosting_reachability_unreachable"]);
+}

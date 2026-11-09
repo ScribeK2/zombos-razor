@@ -262,6 +262,18 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
     let lacking = |ports: &[u16]| r.addresses.iter().filter(|a| !ports.iter().any(|p| open_on.contains(&(**a, *p)))).map(ToString::to_string).collect::<Vec<_>>().join(" and ");
     let addrs = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(" and ");
 
+    // Outbound mail ports are blocked by many networks and hosting providers, so silence on
+    // only those ports says nothing about the server.
+    const OUTBOUND_MAIL: [u16; 4] = [25, 465, 587, 2525];
+    if open_ports.is_empty() && filtered > 0 && closed == 0 && r.ports.iter().all(|p| OUTBOUND_MAIL.contains(&p.port)) {
+        return vec![finding(
+            "hosting_reachability_mail_filtered",
+            Severity::Info,
+            "No answer on the mail ports",
+            format!("{addrs} did not answer on the mail ports probed. Many networks and hosting providers block outbound mail connections, so this may be the network doing the probing and not the server."),
+            Some("Re-run from a network that allows outbound mail, or check the server's own mail logs."),
+        )];
+    }
     if open_ports.is_empty() {
         let mut msg = format!("None of the probed ports on {addrs} accepted a connection");
         let mut rec = "Check that the server is up and that its firewall allows these services.";

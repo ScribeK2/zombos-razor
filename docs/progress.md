@@ -108,6 +108,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 ## Decisions waiting
 
+- [x] Fixed after a live run from the VPS: probing only mail ports with no answer no longer says CRITICAL "Host unreachable" (outbound SMTP is blocked by many networks); it is now an info finding `hosting_reachability_mail_filtered`
+
 - [ ] **Proxy policy is inconsistent.** `registration` honours `HTTP_PROXY`/`HTTPS_PROXY`; `web` turns the environment proxy off on purpose ("a diagnostic must show what the site does"). Decide one rule, or keep both and say so in the UI
 - [ ] **Web User-Agent** is `zombo/<version>` (Go sent a browser-like string to avoid WAF blocks): expect more 403s. Keep honest, or send a browser-like string
 - [ ] **Web cookies:** no cookie jar (Go kept cookies across hops), so a cookie-dependent redirect reads as a loop. Add a per-Check jar if it matters
@@ -127,6 +129,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [x] `registration`: registered and not-registered domains over RDAP
 - [x] `email`: google.com, github.com, etsy.com (11 lookups), the test domain
 - [x] Earlier: propagation, stale cache, delegation
+- [x] `blacklist` (127.0.0.2 test entries, clean domain, public-resolver run), `rdns` (incl. generated PTR name detection), `tls` (valid, expired, self-signed), `ports`, `web` (HSTS, headers, ASN) from the VPS
+- [ ] Not seen live: a Spamhaus 'refused' answer (Spamhaus answered normally through 8.8.8.8 today); web `--origin` against a real origin that differs from its CDN
 - [ ] UI note: the `dnssec` nameserver list repeats identical lines per address; collapse identical rows in the UI
 
 ## Network egress (what the app contacts), to document in `docs/network-egress.md`
