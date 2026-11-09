@@ -103,7 +103,7 @@ Carried over from the Go app's polish pass. The palette opens instantly. Hover a
 - **Borders.** 1 px, low contrast. Prefer spacing and background steps over separators.
 - **Spacing.** A 4 px grid: 4, 8, 12, 16, 24, 32. Pane padding 16. Gap between findings 8.
 - **Density.** Table and list rows 28 px. Rail items 32 px. Omnibox 32 px in a 44 px title bar. Hit targets at least 28 px (buttons are 28 px tall).
-- **Type scale** (initial). Caption 12/16, label 13/18, body 14/20, subtitle 16/24, title 20/28, verdict 28/36. Weights 400, 500, 600. Monospace data 13/18.
+- **Type scale** (initial). Caption 12/16, label 13/18, body 14/20, subtitle 16/24, title 20/28, verdict 28/36. Weights 400, 500, 600. Monospace data 13/18. Finding titles stay at 14 px (weight 500) over 13 px descriptions: weight and color carry that step, not size (decided 2026-11-09).
 
 ### Initial dark palette (tune in the first build)
 
