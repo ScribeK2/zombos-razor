@@ -1,6 +1,6 @@
 use zombo_core::{blacklist::DNSBLS, ports::QUICK, target::Kind};
 
-use crate::section::Section;
+use crate::{section::Section, status::CheckState};
 
 /// What an on-demand Check will do, shown before the rep runs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,11 @@ pub fn on_demand(kind: Kind) -> &'static [Section] {
 
 pub fn runnable(kind: Kind, section: Section) -> bool {
     on_demand(kind).contains(&section)
+}
+
+/// Once a result exists the description card shrinks to one line, unless the rep opened it.
+pub fn collapsed(state: &CheckState, open: bool) -> bool {
+    !open && matches!(state, CheckState::Done { .. } | CheckState::Failed { .. } | CheckState::TimedOut)
 }
 
 pub fn run_label(section: Section) -> Option<&'static str> {
@@ -43,8 +48,8 @@ pub fn brief(section: Section) -> Option<Brief> {
         }
         Section::Smtp => Some(brief(
             "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
-            "The target's server on port 25, dialled by the name you typed. This machine's resolver looks up the name and the reverse name of the address.".into(),
-            "This build does not look up MX records first and the port is fixed at 25. For a domain whose mail is hosted elsewhere, open the mail host's name as the target.",
+            "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
+            "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
         )),
         Section::Blacklist => Some(brief(
             "Asks public blocklists whether the target's address, or a domain and its mail hosts, are listed for spam.",
@@ -79,10 +84,22 @@ mod tests {
     }
 
     #[test]
+    fn the_card_collapses_only_after_a_result_and_only_until_it_is_opened() {
+        let done = CheckState::Done { problems: 0 };
+        for s in [CheckState::NotRun, CheckState::Running] {
+            assert!(!collapsed(&s, false), "{s:?}");
+        }
+        for s in [done.clone(), CheckState::Failed { reason: "x".into() }, CheckState::TimedOut] {
+            assert!(collapsed(&s, false), "{s:?}");
+            assert!(!collapsed(&s, true), "{s:?} opened");
+        }
+    }
+
+    #[test]
     fn the_brief_names_the_servers_it_will_contact() {
         let ports = brief(Section::Ports).unwrap();
         assert!(ports.contacts.contains("25") && ports.contacts.contains("3306"));
-        assert!(brief(Section::Smtp).unwrap().contacts.contains("port 25"));
+        assert!(brief(Section::Smtp).unwrap().contacts.contains("MX hosts"));
         assert!(brief(Section::Blacklist).unwrap().contacts.contains("Nothing connects to the target"));
     }
 }

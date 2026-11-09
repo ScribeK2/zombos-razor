@@ -7,9 +7,11 @@ use crate::settings::{PaneEvent, SettingsPane};
 use zombo_ui::{
     checks,
     config::{self, Config, Dirs},
+    copy::Format,
     diagnosis as dg,
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
+    layout,
     notice, ondemand,
     motion::{self, Fade, Feedback, Level, Motion},
     open_state::OpenState,
@@ -24,8 +26,10 @@ use zombo_ui::{
 };
 use zombo_core::Severity;
 
+mod copying;
 mod evidence;
 mod frame;
+mod ondemand_ui;
 
 const FINDING_HANDLES: usize = 64;
 const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
@@ -223,6 +227,7 @@ impl Shell {
         }
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
+        let smtp = tab.smtp_request();
         if section == Section::Dns {
             let settings = self.config.settings.clone();
             let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
@@ -250,7 +255,7 @@ impl Shell {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, tx));
+        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, smtp, tx));
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -363,18 +368,27 @@ impl Shell {
                 }
                 Some(_) => {
                     self.ws.jump(section.index());
+                    self.focus_on_demand(window, cx);
                     self.start_section(section, cx);
                 }
             },
             Action::ToggleWatch => self.toggle_watch(),
             Action::NextRecord | Action::PrevRecord => {
-                if self.ws.current().is_some_and(|t| t.section == Section::Dns) {
-                    self.ws.step_record(if action == Action::NextRecord { 1 } else { -1 });
+                let delta = if action == Action::NextRecord { 1 } else { -1 };
+                match self.ws.current().map(|t| t.section) {
+                    Some(Section::Dns) => self.ws.step_record(delta),
+                    Some(Section::Smtp) => self.ws.current_mut().into_iter().for_each(|t| t.step_port(delta)),
+                    _ => {}
                 }
             }
-            Action::Jump(n) => self.ws.jump(n),
-            Action::PrevSection => self.ws.step_section(-1),
-            Action::NextSection => self.ws.step_section(1),
+            Action::Jump(n) => {
+                self.ws.jump(n);
+                self.focus_on_demand(window, cx);
+            }
+            Action::PrevSection | Action::NextSection => {
+                self.ws.step_section(if action == Action::NextSection { 1 } else { -1 });
+                self.focus_on_demand(window, cx);
+            }
             Action::NewTab => {
                 self.ws.new_tab();
                 self.error = None;
@@ -395,8 +409,9 @@ impl Shell {
             }
             Action::OpenEvidence(kind) => self.open_evidence(kind, window, cx),
             Action::Analyse => self.analyse_pasted(window, cx),
-            Action::CopySection => self.copy_evidence(false, cx),
-            Action::CopyAll => self.copy_evidence(true, cx),
+            Action::CopySection => self.copy_current(Format::Section, cx),
+            Action::CopyAll => self.copy_current(Format::Whole, cx),
+            Action::CopyJson => self.copy_current(Format::Json, cx),
             Action::Cheatsheet => self.sheet = !self.sheet,
             Action::Settings => self.toggle_settings(window, cx),
             Action::Dismiss => {
@@ -702,8 +717,9 @@ impl Shell {
         let items = Section::ALL.iter().enumerate().map(|(i, &section)| {
             let state = tab.state(section);
             let selected = tab.section == section;
-            let g = state.glyph();
-            let count_line = zombo_ui::rail::count_line(section, &state, &tab.findings(section));
+            let findings = tab.findings(section);
+            let g = zombo_ui::rail::mark_glyph(&state, &findings, tab.verdict_glyph(section));
+            let count_line = zombo_ui::rail::count_line(section, &state, &findings);
             let group = match i {
                 1 => Some("CHECKS"),
                 Section::FIRST_ON_DEMAND => Some("ON DEMAND"),
@@ -728,13 +744,15 @@ impl Shell {
                 .role(Role::Tab)
                 .aria_selected(selected)
                 .aria_label(format!("{}: {}", section.label(), state.label()))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     this.ws.jump(i);
+                    this.focus_on_demand(window, cx);
                     cx.notify();
                 }))
-                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
                     if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
                         this.ws.jump(i);
+                        this.focus_on_demand(window, cx);
                         cx.notify();
                     }
                 }))
@@ -777,6 +795,9 @@ impl Shell {
         let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, Some(section), cx)).collect::<Vec<_>>();
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
+        let brief_open = self.open.contains("brief");
+        let has_result = matches!(state, zombo_ui::status::CheckState::Done { .. } | zombo_ui::status::CheckState::Failed { .. } | zombo_ui::status::CheckState::TimedOut);
+        let brief_collapsed = ondemand::collapsed(&state, brief_open);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
             .id("pane")
@@ -876,16 +897,18 @@ impl Shell {
                         .rounded(px(t::RADIUS_SMALL))
                         .role(Role::Group)
                         .aria_label("What this Check will do")
-                        .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).child(b.what))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.))
-                                .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
-                                .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
-                        )
-                        .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                        .child(self.brief_line(b.what, has_result, brief_open, cx))
+                        .when(!brief_collapsed, |s| {
+                            s.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
+                                    .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
+                            )
+                            .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                        })
                         .when(can_run, |s| {
                             s.child(
                                 div()
@@ -914,6 +937,7 @@ impl Shell {
                         }),
                 )
             })
+            .when(section == Section::Smtp, |s| s.child(self.port_field(tab, cx)))
             .when(state.can_retry(), |s| {
                 s.child(
                     div()
@@ -1104,6 +1128,7 @@ impl Shell {
     }
 
     fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
+        let kw = layout::key_column(lines.iter().map(|l| l.0.as_str()));
         let open = self.ws.current().is_some_and(|t| self.tab_open.is_open(&t.target.value, t.section, id));
         let slot = DISCLOSURES.iter().position(|&d| d == id).unwrap_or(0);
         let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
@@ -1119,9 +1144,15 @@ impl Shell {
                 .text_size(px(t::TEXT_LABEL))
                 .role(Role::Row)
                 .aria_label(format!("{k} {v}"))
-                .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(k))
+                .cursor_pointer()
+                .hover(|s| s.bg(color(t::GRAY_200)))
+                .on_click({
+                    let v = v.clone();
+                    cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                })
+                .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(k))
                 .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
-        });
+        }).collect::<Vec<_>>();
         div()
             .w_full()
             .min_w_0()
@@ -1166,6 +1197,7 @@ impl Shell {
         let o = &run.outcome;
         let rows = |f: &[Fact]| f.iter().map(|f| (f.key.clone(), f.value.clone(), t::GRAY_1000)).collect::<Vec<_>>();
         let open_rows = rows(&o.facts);
+        let kw = layout::key_column(o.facts.iter().map(|f| f.key.as_str()));
         div()
             .w_full()
             .min_w_0()
@@ -1201,7 +1233,13 @@ impl Shell {
                                     .text_size(px(t::TEXT_LABEL))
                                     .role(Role::Row)
                                     .aria_label(format!("{k}: {v}"))
-                                    .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(shown))
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(color(t::GRAY_200)))
+                                    .on_click({
+                                        let v = v.clone();
+                                        cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                                    })
+                                    .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(shown))
                                     .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
                             })),
                     )
@@ -1265,6 +1303,12 @@ impl Shell {
                 .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
                 .role(Role::Row)
                 .aria_label(r.label())
+                .cursor_pointer()
+                .hover(|s| s.bg(color(t::GRAY_200)))
+                .on_click({
+                    let answer = r.answer.clone();
+                    cx.listener(move |this, _, _, cx| this.copy_value(&answer, cx))
+                })
                 .child(cell(Some(150.)).child(r.resolver.clone()))
                 .child(cell(Some(140.)).child(r.location.clone()))
                 .child(cell(None).child(r.answer.clone()))
@@ -1276,7 +1320,7 @@ impl Shell {
                         .text_color(color(status_color))
                         .child(r.status.label().to_uppercase()),
                 )
-        });
+        }).collect::<Vec<_>>();
         let heading = match (&tab.propagation.state, rows.len()) {
             (zombo_ui::status::CheckState::NotRun, _) => "Propagation by resolver: not run".to_string(),
             (_, 0) => "Propagation by resolver: waiting for the first answer".to_string(),

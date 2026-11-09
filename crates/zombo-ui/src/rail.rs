@@ -1,6 +1,9 @@
 use zombo_core::{Finding, Severity};
 
-use crate::{section::Section, status::CheckState};
+use crate::{
+    section::Section,
+    status::{CheckState, Glyph},
+};
 
 /// The quiet text at the right of a rail item, as the sketch shows it: "done", "done · 1 note",
 /// "done · 1 warning", and for the Summary "2 problems". Problems are warnings and criticals;
@@ -22,6 +25,19 @@ pub fn count_line(section: Section, state: &CheckState, findings: &[Finding]) ->
         (_, None) => "done".into(),
         (Section::Summary, Some(t)) if *problems > 0 => t,
         (_, Some(t)) => format!("done \u{b7} {t}"),
+    }
+}
+
+/// The rail glyph: a problem is a triangle (an octagon when one is critical), a note is the
+/// info glyph, and only a clean finished Check keeps the verdict's own glyph, a check mark.
+pub fn mark_glyph(state: &CheckState, findings: &[Finding], verdict: Glyph) -> Glyph {
+    let CheckState::Done { problems } = state else { return verdict };
+    let has = |s: Severity| findings.iter().any(|f| f.severity == s);
+    match (*problems, has(Severity::Critical), has(Severity::Info)) {
+        (0, _, false) => verdict,
+        (0, _, true) => Glyph::Info,
+        (_, true, _) => Glyph::Octagon,
+        _ => Glyph::Triangle,
     }
 }
 
@@ -72,6 +88,16 @@ mod tests {
         assert_eq!(line(Section::Summary, 1, &[]), "1 problem");
         assert_eq!(line(Section::Summary, 0, &[Severity::Info]), "done \u{b7} 1 note");
         assert_eq!(line(Section::Summary, 0, &[]), "done");
+    }
+
+    #[test]
+    fn notes_use_the_info_glyph_and_problems_the_warning_or_critical_glyph() {
+        let done = |p| CheckState::Done { problems: p };
+        assert_eq!(mark_glyph(&done(0), &[f(Severity::Ok)], Glyph::Check), Glyph::Check);
+        assert_eq!(mark_glyph(&done(0), &[f(Severity::Info), f(Severity::Ok)], Glyph::Check), Glyph::Info);
+        assert_eq!(mark_glyph(&done(1), &[f(Severity::Warning), f(Severity::Info)], Glyph::Check), Glyph::Triangle);
+        assert_eq!(mark_glyph(&done(2), &[f(Severity::Critical), f(Severity::Warning)], Glyph::Check), Glyph::Octagon);
+        assert_eq!(mark_glyph(&CheckState::Running, &[f(Severity::Warning)], Glyph::Dashed), Glyph::Dashed);
     }
 
     #[test]

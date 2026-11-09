@@ -11,10 +11,13 @@ use std::{
 
 use hickory_proto::{
     op::{Message, ResponseCode},
-    rr::{Name, RecordType},
+    rr::{Name, RData, RecordType},
 };
 
-use crate::{dns::exchange, email_auth::clip};
+use crate::{
+    dns::exchange,
+    email_auth::{clip, printable},
+};
 
 const RESOLV_CONF_MAX_BYTES: u64 = 64 * 1024;
 /// glibc's own limit.
@@ -56,6 +59,15 @@ pub fn system_resolvers() -> Vec<SocketAddr> {
     parse_resolv_conf(&String::from_utf8_lossy(&bytes))
 }
 
+/// One MX record: the mail host and how much it is preferred (lower is tried first).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mx {
+    pub preference: u16,
+    pub host: String,
+}
+
+const MAX_MX: usize = 16;
+
 /// A list of servers tried in order, and how long each question may take on one server.
 #[derive(Debug, Clone)]
 pub struct Resolver {
@@ -85,6 +97,24 @@ impl Resolver {
             }
         }
         Err(last)
+    }
+
+    /// The domain's MX hosts, lowest preference first, ties by name. The null MX (RFC 7505)
+    /// and an empty answer both give an empty list.
+    pub async fn mx_hosts(&self, name: &str) -> Result<Vec<Mx>, String> {
+        let m = self.ask(name, RecordType::MX).await?;
+        let mut out: Vec<Mx> = m
+            .answers
+            .iter()
+            .filter_map(|a| match &a.data {
+                RData::MX(mx) => Some(Mx { preference: mx.preference, host: printable(&clip(mx.exchange.to_string().trim_end_matches('.'))).to_ascii_lowercase() }),
+                _ => None,
+            })
+            .filter(|mx| !mx.host.is_empty())
+            .collect();
+        out.sort_by(|a, b| (a.preference, &a.host).cmp(&(b.preference, &b.host)));
+        out.truncate(MAX_MX);
+        Ok(out)
     }
 }
 

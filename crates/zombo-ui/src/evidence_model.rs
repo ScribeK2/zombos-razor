@@ -228,8 +228,23 @@ impl EvidenceTab {
         match &self.stage {
             Stage::Paste => CheckState::NotRun,
             Stage::Analysing => CheckState::Running,
-            Stage::Done(r) => CheckState::Done { problems: if section == Section::Findings { problems(&r.findings) } else { 0 } },
+            Stage::Done(r) => CheckState::Done { problems: section_problems(r, section) },
         }
+    }
+
+    /// What the rail shows for a section: the state's glyph and label, except that a section
+    /// with no problems carries its own verdict, so "Not reported" never looks like a pass.
+    pub fn mark(&self, section: Section) -> Mark {
+        let state = self.state(section);
+        let Some(report) = self.report().filter(|_| section != Section::Findings) else {
+            return Mark { glyph: state.glyph(), label: state.label() };
+        };
+        if matches!(state, CheckState::Done { problems: 0 }) {
+            let v = view(report, section);
+            let glyph = if v.glyph == Glyph::Info { Glyph::Info } else { Glyph::Check };
+            return Mark { glyph, label: v.word.to_lowercase() };
+        }
+        Mark { glyph: state.glyph(), label: state.label() }
     }
 
     pub fn choose(&mut self, kind: Kind) {
@@ -244,6 +259,26 @@ impl EvidenceTab {
             self.set_kind(k);
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mark {
+    pub glyph: Glyph,
+    pub label: String,
+}
+
+/// Header findings that are about the route and the clock, not about who the sender is.
+const PATH_CODES: &[&str] = &["email_headers_delayed", "email_headers_clock_skew", "email_headers_too_many_hops", "email_headers_truncated", "email_headers_multiple_from"];
+
+/// The warnings and criticals that belong to one rail section. Findings counts them all.
+pub fn section_problems(report: &Report, section: Section) -> usize {
+    let own = |f: &Finding| match (&report.analysis, section) {
+        (_, Section::Findings) | (Analysis::MailLog(_), _) => true,
+        (Analysis::Headers(_), Section::Path) => PATH_CODES.contains(&f.code),
+        (Analysis::Headers(_), _) => !PATH_CODES.contains(&f.code),
+    };
+    let mine: Vec<Finding> = report.findings.iter().filter(|f| own(f)).cloned().collect();
+    problems(&mine)
 }
 
 #[derive(Debug, Clone)]
@@ -500,13 +535,25 @@ pub fn view(report: &Report, section: Section) -> View {
     v
 }
 
-fn code(s: &str) -> String {
-    format!("`{}`", s.replace('`', "'").replace('\n', " "))
+/// A value as a Markdown code span: no control characters, and no backtick to end the span early.
+pub(crate) fn code(s: &str) -> String {
+    let flat: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    format!("`{}`", flat.replace('`', "'"))
 }
 
-fn fact_lines(out: &mut String, rows: &[Fact]) {
+pub(crate) fn fact_lines(out: &mut String, rows: &[Fact]) {
     for f in rows {
         out.push_str(&format!("- {}: {}\n", f.key.trim(), code(&f.value)));
+    }
+}
+
+pub(crate) fn finding_lines(out: &mut String, findings: &[Finding]) {
+    for f in findings {
+        out.push_str(&format!("- **{}** {}: {}", severity_word(f.severity), f.title, f.message));
+        if let Some(r) = &f.recommendation {
+            out.push_str(&format!(" {r}"));
+        }
+        out.push('\n');
     }
 }
 
@@ -514,13 +561,7 @@ fn fact_lines(out: &mut String, rows: &[Fact]) {
 pub fn section_markdown(report: &Report, section: Section) -> String {
     let v = view(report, section);
     let mut out = format!("## {}\n\n**{}.** {}\n\n", section.label(), v.word, v.why);
-    for f in &v.findings {
-        out.push_str(&format!("- **{}** {}: {}", severity_word(f.severity), f.title, f.message));
-        if let Some(r) = &f.recommendation {
-            out.push_str(&format!(" {r}"));
-        }
-        out.push('\n');
-    }
+    finding_lines(&mut out, &v.findings);
     if !v.findings.is_empty() && !v.rows.is_empty() {
         out.push('\n');
     }
@@ -644,6 +685,46 @@ mod tests {
     fn the_wrong_kind_is_an_error_the_rep_can_read() {
         let e = analyse(Kind::MailLog, fixture!("gmail.txt")).unwrap_err();
         assert!(e.contains("doesn't look like"), "{e}");
+    }
+
+    #[test]
+    fn a_failed_authentication_shows_a_problem_mark_with_its_count() {
+        let mut tab = EvidenceTab::new(1, Kind::Headers, 0);
+        tab.stage = Stage::Done(Box::new(analyse(Kind::Headers, fixture!("spoofed.txt")).unwrap()));
+        let n = match tab.state(Section::Authentication) {
+            CheckState::Done { problems } => problems,
+            other => panic!("{other:?}"),
+        };
+        assert!(n >= 1);
+        let mark = tab.mark(Section::Authentication);
+        assert_eq!(mark.glyph, Glyph::Triangle);
+        assert!(mark.label.starts_with("done \u{b7} ") && mark.label.contains("problem"), "{}", mark.label);
+        assert_ne!(tab.state(Section::Findings), CheckState::Done { problems: 0 });
+    }
+
+    #[test]
+    fn a_clean_section_carries_its_verdict_and_never_a_bare_pass() {
+        let mut tab = EvidenceTab::new(1, Kind::Headers, 0);
+        tab.stage = Stage::Done(Box::new(analyse(Kind::Headers, fixture!("gmail.txt")).unwrap()));
+        let auth = tab.mark(Section::Authentication);
+        assert_eq!((auth.glyph, auth.label.as_str()), (Glyph::Check, "passed"));
+        let path = tab.mark(Section::Path);
+        assert_eq!((path.glyph, path.label.as_str()), (Glyph::Info, "2 hops"));
+    }
+
+    #[test]
+    fn a_section_counts_only_its_own_findings() {
+        let report = analyse(Kind::Headers, fixture!("spoofed.txt")).unwrap();
+        let all = section_problems(&report, Section::Findings);
+        assert_eq!(section_problems(&report, Section::Path) + section_problems(&report, Section::Authentication), all);
+        assert!(section_problems(&report, Section::Authentication) > 0);
+    }
+
+    #[test]
+    fn a_mail_log_timeline_carries_its_verdict() {
+        let mut tab = EvidenceTab::new(1, Kind::MailLog, 0);
+        tab.stage = Stage::Done(Box::new(analyse(Kind::MailLog, fixture!("sent.log")).unwrap()));
+        assert_eq!(tab.mark(Section::Timeline).label, "delivered");
     }
 
     #[test]
