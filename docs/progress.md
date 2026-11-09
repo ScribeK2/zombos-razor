@@ -172,3 +172,12 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 ## Location
 
 The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-11-09 because the old NTFS hard disk made builds take hours. The full workspace test now takes under 2 minutes. 501 tests pass; clippy, `cargo deny` and `cargo audit` clean.
+
+## UI slice 2 (merged 2026-11-09)
+
+- [x] Record-type switcher (`[` and `]`), verdict row wraps, static Geist weights, all Checks wired with five states and Retry, On demand rail group (not runnable from the app yet), Watch (`W`, 60 s interval, 8 s toast, no desktop notification until settings exist), "Changed since the previous run", Summary dedupes shared findings. 538 tests pass
+- [ ] Verify live: the Summary screenshot at 1600 px (taken before the dedupe commit) shows the DNS-intercepted warning three times; confirm the tip shows it once
+- [ ] Make the On demand Checks runnable from the app (port scan, SMTP, blacklist)
+- [ ] Not built: rail count lines ("done, 1 note"), per-finding action buttons, nameserver answers and All records collapsed rows, window shadow and resize handle, CAA in the TLS section, SOA and CAA record types in the switcher (core never asks them across resolvers)
+- [ ] Docs to update: Ctrl+9 goes to On demand; keys `W`, `[`, `]`; rail width 248 px
+- [ ] Unverified: X11, GNOME, screen reader, Retry after a real failure, a real record change stopping a Watch
