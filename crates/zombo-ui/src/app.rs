@@ -359,7 +359,7 @@ impl Shell {
                 self.sync_omnibox(window, cx);
             }
             Action::OpenEvidence(kind) => self.open_evidence(kind, window, cx),
-            Action::Analyse => self.analyse_pasted(cx),
+            Action::Analyse => self.analyse_pasted(window, cx),
             Action::CopySection => self.copy_evidence(false, cx),
             Action::CopyAll => self.copy_evidence(true, cx),
             Action::Cheatsheet => self.sheet = !self.sheet,

@@ -570,6 +570,14 @@ mod tests {
     }
 
     #[test]
+    fn a_tie_between_kinds_is_no_suggestion_and_the_majority_wins() {
+        let log = "Jun 12 02:26:20 mail01 postfix/qmgr[2790]: A1: removed";
+        assert_eq!(sniff(&format!("Subject: x\n{log}")), None);
+        assert_eq!(sniff(&format!("Subject: x\nFrom: a@b.c\n{log}")), Some(Kind::Headers));
+        assert_eq!(sniff(&format!("Subject: x\n{log}\n{log}")), Some(Kind::MailLog));
+    }
+
+    #[test]
     fn a_syslog_line_is_a_mail_log() {
         assert_eq!(sniff("Jun 12 02:26:20 mail01 postfix/qmgr[2790]: A1: removed"), Some(Kind::MailLog));
     }

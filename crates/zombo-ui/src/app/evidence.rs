@@ -56,12 +56,12 @@ impl Shell {
     pub(super) fn open_evidence(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.ws.open_evidence(kind, unix_secs());
         let state = cx.new(|cx| TextareaState::new(window, cx).placeholder("Paste here with Ctrl+V"));
-        cx.subscribe_in(&state, window, move |this, state, ev: &InputEvent, _, cx| {
+        cx.subscribe_in(&state, window, move |this, state, ev: &InputEvent, window, cx| {
             match ev {
                 InputEvent::Change => this.refresh_suggestion(id, state, cx),
                 // The text area binds Ctrl+Enter itself, ahead of the window's key handler.
                 InputEvent::PressEnter { secondary: true, .. } => {
-                    this.analyse_pasted(cx);
+                    this.analyse_pasted(window, cx);
                     cx.notify();
                 }
                 _ => {}
@@ -88,7 +88,7 @@ impl Shell {
         self.pastes.retain(|id, _| alive.contains(id));
     }
 
-    pub(super) fn analyse_pasted(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn analyse_pasted(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.ws.current_evidence() else { return };
         let (id, kind) = (tab.id, tab.kind);
         if !matches!(tab.stage, Stage::Paste) {
@@ -114,21 +114,22 @@ impl Shell {
             };
             let _ = tx.send(result);
         });
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             if let Some(result) = rx.recv().await {
-                this.update(cx, |app, cx| app.finish_analysis(id, result, cx)).ok();
+                this.update_in(cx, |app, window, cx| app.finish_analysis(id, result, window, cx)).ok();
             }
         })
         .detach();
     }
 
-    fn finish_analysis(&mut self, id: u64, result: Result<ev::Report, String>, cx: &mut Context<Self>) {
+    fn finish_analysis(&mut self, id: u64, result: Result<ev::Report, String>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.ws.evidence_mut_for(id) else { return };
         match result {
             Ok(report) => {
                 tab.section = ev::sections(tab.kind)[0];
                 tab.stage = Stage::Done(Box::new(report));
                 self.pastes.remove(&id);
+                window.focus(&self.root_focus, cx);
             }
             Err(message) => {
                 tab.stage = Stage::Paste;
@@ -343,8 +344,8 @@ impl Shell {
                     .items_center()
                     .gap(px(12.))
                     .child(kinds)
-                    .child(button("ev-analyse", if analysing { "Analysing" } else { "Analyse" }, Some("Ctrl Enter"), true).on_click(cx.listener(|this, _, _, cx| {
-                        this.analyse_pasted(cx);
+                    .child(button("ev-analyse", if analysing { "Analysing" } else { "Analyse" }, Some("Ctrl Enter"), true).on_click(cx.listener(|this, _, window, cx| {
+                        this.analyse_pasted(window, cx);
                         cx.notify();
                     })))
                     .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(format!("{} KiB of 1 MiB", bytes.div_ceil(1024)))),
