@@ -9,11 +9,12 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 | Work | Owner | Branch | Notes |
 |---|---|---|---|
 | Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
-| DNSSEC (`zombo-core::dnssec`, `zombo dnssec`) | worker C | worktree branch off `rewrite` (`92d23d1`) | New design: validating-resolver CD=0 vs CD=1 verdict plus local DS/DNSKEY/RRSIG analysis; no crypto library. Premise verified live on a clean network. Adds `exchange_with` to `dns.rs` additively. |
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
 ## Done
+
+- [x] Workers A (registration) and C (DNSSEC) reviewed and merged. Worker B (email) still running
 
 - [x] Planning session, ADR-0006 and ADR-0007, `CONTEXT.md` rewritten
 - [x] GPUI spike passed (Ubuntu 24.04.5 laptop with Orca, 24.04 and 26.04 containers, AMD, Intel)
@@ -35,7 +36,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 - [ ] Interception canary probe for resolver-only runs (`--no-authoritative`): needs a short extra probe to an address that must never answer, so it is opt-in to keep clean runs fast
 - [x] WHOIS/RDAP (`registration.rs`, `zombo registration`): RDAP first with WHOIS fallback, DENIC form, bounded `ureq`+rustls client (merged from worker A). 98 tests pass
-- [ ] DNSSEC (in progress, worker C). Full chain-to-root validation is deliberately out of scope: validating resolvers do that, and the CD trick plus DS/DNSKEY/RRSIG analysis explains failures
+- [x] DNSSEC (`dnssec.rs`, `zombo dnssec`, merged from worker C): resolver verdict (CD=0 vs CD=1) plus local DS/DNSKEY/RRSIG analysis. Key tag and DS digest proven on real cloudflare.com and iana.org data. 133 tests pass. Resolver verdicts NOT yet seen live from a clean network (do it from the VPS). Full chain-to-root validation is deliberately out of scope: validating resolvers do that, and the CD trick plus DS/DNSKEY/RRSIG analysis explains failures
 - [ ] More record types in lookup (SRV, PTR, DNSKEY, DS) if needed by the UI
 
 ## To do: email
@@ -102,6 +103,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 ## Decisions waiting
 
+- [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
+- [ ] DNSSEC expiry warning is `min(3 days, lifetime / 4)`, not a flat 3 days (Cloudflare signs for about 2 days). Accepted as a deliberate deviation; unsigned-yet (not-before) signatures have no finding
 - [ ] `Finding.recommendation` is `Option<&'static str>`, so the registration Check dropped Go's " (Registrar)" suffix on three recommendations (the registrar is printed above the findings instead). Widening to `Cow<'static, str>` would restore it but touches every `Some("...")` literal. Decide after workers B and C merge, to avoid conflicts.
 - [ ] ureq honours `HTTP_PROXY`/`HTTPS_PROXY`; keep (corporate networks) or turn off
 
