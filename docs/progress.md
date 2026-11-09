@@ -225,3 +225,8 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [x] Text policy merged (766 tests): `zombo_core::text` strips controls, bidirectional and zero-width characters (ZWJ kept); five local helpers deleted; `text_policy` tests ban new `.is_control()`. Weak: the redirect `Location` test passed under mutation, no web page title test
 - [x] First test AppImage built from `rewrite` (`VERSION=0.1.0-test`, 17.3 MB, SHA256SUMS verified), smoke passes on Ubuntu 24.04.5 and 26.04.1 with FUSE mount: first render 231 ms and 240 ms under llvmpipe, graceful message with a dead display and with no display variable
 - [x] Work laptop (Ubuntu, 2026-11-09): the test AppImage `0.1.0-test` runs and everything worked without issue (user report). No numbers recorded for cold start, scroll or memory; NVIDIA still untested
+
+## Go code removed (2026-11-09, user decision)
+
+- [x] No last Go release. `cmd/`, `internal/`, `web/`, `go.mod`, `go.sum` and the Go CI workflow deleted from `rewrite`; the Go source stays in git history at `main` (tip `b8fc3d5`) and the tag `v1.0.0`. 766 tests still pass. `testdata/` stays (the Rust tests read it)
+- [ ] Parity audit running (`docs/parity.md`); its scripts read Go from `main`

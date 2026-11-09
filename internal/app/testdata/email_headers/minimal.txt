@@ -1,2 +1,0 @@
-From: someone@example.com
-Subject: no auth, no received
