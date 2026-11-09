@@ -11,6 +11,7 @@ use zombo_ui::{
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
     notice, ondemand,
+    open_state::OpenState,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
     runtime,
@@ -25,6 +26,7 @@ use zombo_core::Severity;
 mod evidence;
 
 const FINDING_HANDLES: usize = 64;
+const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
 const TOAST_FOR: Duration = Duration::from_secs(8);
 
 pub struct Shell {
@@ -37,6 +39,8 @@ pub struct Shell {
     action_focus: Vec<FocusHandle>,
     palette: Option<usize>,
     open: HashSet<&'static str>,
+    tab_open: OpenState,
+    row_focus: Vec<FocusHandle>,
     watches: Watches,
     pastes: HashMap<u64, Entity<TextareaState>>,
     toast: Option<(String, Instant)>,
@@ -136,6 +140,8 @@ impl Shell {
             action_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
             open: HashSet::new(),
+            tab_open: OpenState::default(),
+            row_focus: DISCLOSURES.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             watches: Watches::default(),
             pastes: HashMap::new(),
             toast,
@@ -261,6 +267,7 @@ impl Shell {
         let now = Instant::now();
         let alive: Vec<String> = self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
+        self.tab_open.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
         }
@@ -922,7 +929,7 @@ impl Shell {
                         .children(finding_views),
                 )
             })
-            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)))
+            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)).child(self.dns_rows(tab, cx)))
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
     }
@@ -1043,8 +1050,24 @@ impl Shell {
             .child(kbd("W"))
     }
 
+    fn toggle_row(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        if let Some((target, section)) = self.ws.current().map(|t| (t.target.value.clone(), t.section)) {
+            self.tab_open.toggle(&target, section, id);
+        }
+        cx.notify();
+    }
+
+    fn dns_rows(&self, tab: &dg::Tab, cx: &mut Context<Self>) -> Div {
+        let rows = [zombo_ui::dns_data::nameserver_answers(&tab.propagation.rows), zombo_ui::dns_data::all_records(&tab.propagation.rows)];
+        div().w_full().min_w_0().flex().flex_col().gap(px(8.)).children(rows.into_iter().flatten().map(|c| {
+            let lines = c.lines.into_iter().map(|(k, v)| (k, v, t::GRAY_1000)).collect();
+            self.disclosure(c.id, c.title.to_string(), c.summary, lines, cx)
+        }))
+    }
+
     fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
-        let open = self.open.contains(id);
+        let open = self.ws.current().is_some_and(|t| self.tab_open.is_open(&t.target.value, t.section, id));
+        let slot = DISCLOSURES.iter().position(|&d| d == id).unwrap_or(0);
         let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
             div()
                 .id((id, i))
@@ -1074,6 +1097,7 @@ impl Shell {
             .child(
                 div()
                     .id((id, 9999usize))
+                    .track_focus(&self.row_focus[slot])
                     .h(px(32.))
                     .px(px(12.))
                     .flex()
@@ -1085,11 +1109,12 @@ impl Shell {
                     .role(Role::Button)
                     .aria_expanded(open)
                     .aria_label(format!("{title}, {summary}"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.open.remove(id) {
-                            this.open.insert(id);
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_row(id, cx)))
+                    .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                        if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+                            cx.stop_propagation();
+                            this.toggle_row(id, cx);
                         }
-                        cx.notify();
                     }))
                     .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
                     .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(title))
