@@ -7,7 +7,7 @@ use std::time::Duration;
 use common::{FakeDns, zone};
 use zombo_core::{
     Finding, Severity,
-    propagation::{Scope, Vantage, discover_nameservers, propagation_findings, propagation_with},
+    propagation::{Agreement, Scope, Vantage, discover_nameservers, propagation_findings, propagation_with},
 };
 
 const T: Duration = Duration::from_millis(500);
@@ -35,6 +35,7 @@ async fn resolvers_serving_old_records_are_called_cached_not_broken() {
     let (res, fs) = run(&[r("Fresh", &fresh), r("Old", &old)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
     assert_eq!(res.stale["MX"], ["Old"], "{:?}", res.stale);
     assert!(res.stale.keys().all(|k| k == "MX"), "{:?}", res.stale);
+    assert_eq!(res.agreement, Agreement::Cached);
     let f = code(&fs, "dns_propagation_stale_cache").expect("stale cache finding");
     assert_eq!(f.severity, Severity::Info);
     assert!(f.message.contains("Old") && !f.message.contains("Fresh"), "{}", f.message);
@@ -49,6 +50,7 @@ async fn everything_matching_the_nameservers_says_so() {
     let (res, fs) = run(&[r("A", &a), r("B", &b)], &[ns("ns1", &ns1)]).await;
     assert!(res.stale.is_empty() && res.ns_disagree.is_empty());
     assert!(code(&fs, "dns_authoritative_consistent").is_some(), "{fs:?}");
+    assert_eq!(res.agreement, Agreement::Agree);
 }
 
 /// example.zone has serial 2024, moved_mx.zone 2025.
@@ -59,6 +61,7 @@ async fn a_nameserver_on_an_older_serial_is_behind_not_broken() {
     let (res, fs) = run(&[r("A", &a)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
     assert_eq!(res.ns_disagree, ["MX"]);
     assert!(res.stale.is_empty(), "no truth to compare against: {:?}", res.stale);
+    assert_eq!(res.agreement, Agreement::NameserversDiffer);
     let f = code(&fs, "dns_authoritative_behind").expect("behind finding");
     assert_eq!(f.severity, Severity::Warning);
     assert!(f.message.contains("ns2") && f.message.contains("2024") && f.message.contains("2025"), "{}", f.message);
@@ -107,6 +110,7 @@ async fn an_answer_without_the_authoritative_flag_is_not_trusted() {
     let old = FakeDns::start(&zone("moved_mx")).await;
     let (res, fs) = run(&[r("Old", &old)], &[ns("ns1", &hijacked)]).await;
     assert_eq!(res.nameservers[0].authoritative, Some(false));
+    assert_eq!(res.agreement, Agreement::Inconclusive, "one resolver and no trusted nameserver: nothing to compare");
     assert!(res.stale.is_empty(), "an interceptor's answer must not be treated as the truth");
     assert!(code(&fs, "dns_authoritative_not_authoritative").is_some(), "{fs:?}");
 }
@@ -166,4 +170,23 @@ async fn asks_one_address_per_family_for_each_nameserver() {
     let found = discover_nameservers(&[rec.addr], "example.com", 53, T).await.unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].name, "ns1.example.com", "a lone address needs no suffix");
+}
+
+#[tokio::test]
+async fn resolvers_that_all_serve_old_records_are_cached_not_propagated() {
+    // The resolvers agree with each other, but not with the nameservers.
+    let ns1 = FakeDns::start(&zone("moved_mx")).await.authoritative();
+    let (a, b) = (FakeDns::start(&zone("example")).await, FakeDns::start(&zone("example")).await);
+    let (res, fs) = run(&[r("A", &a), r("B", &b)], &[ns("ns1", &ns1)]).await;
+    assert!(res.disagree.is_empty(), "the resolvers agree among themselves");
+    assert_eq!(res.agreement, Agreement::Cached);
+    assert!(code(&fs, "dns_propagation_consistent").is_none(), "must not claim Propagated: {fs:?}");
+    assert!(code(&fs, "dns_propagation_stale_cache").is_some());
+}
+
+#[tokio::test]
+async fn resolvers_that_disagree_with_no_trusted_nameserver_are_just_different() {
+    let (a, b) = (FakeDns::start(&zone("moved_mx")).await, FakeDns::start(&zone("example")).await);
+    let (res, _) = run(&[r("New", &a), r("Old", &b)], &[]).await;
+    assert_eq!(res.agreement, Agreement::ResolversDiffer);
 }

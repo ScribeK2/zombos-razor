@@ -118,6 +118,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         }
     }
     println!();
+    println!("Agreement: {} - {}", res.agreement.label(), res.agreement.reason());
+    println!();
     for f in &findings {
         let tag = match f.severity {
             Severity::Ok => "ok",

@@ -130,8 +130,49 @@ pub struct VantageAnswer {
     pub error: Option<String>,
 }
 
+/// The verdict on whether the Vantages return the same answer. Disagreement is
+/// the usual sign of caching or a change still propagating; which kind it is
+/// depends on whether the authoritative nameservers can be compared against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agreement {
+    /// Every Vantage that answered gives the same answer.
+    Agree,
+    /// The nameservers agree, and some resolvers still serve something else: old cached records.
+    Cached,
+    /// The authoritative nameservers disagree with each other: a zone problem.
+    NameserversDiffer,
+    /// Resolvers disagree, and there is no trusted nameserver answer to say which is right.
+    ResolversDiffer,
+    /// Too few Vantages answered to compare.
+    Inconclusive,
+}
+
+impl Agreement {
+    pub fn label(self) -> &'static str {
+        match self {
+            Agreement::Agree => "AGREE",
+            Agreement::Cached => "CACHED",
+            Agreement::NameserversDiffer => "NAMESERVERS DIFFER",
+            Agreement::ResolversDiffer => "RESOLVERS DIFFER",
+            Agreement::Inconclusive => "INCONCLUSIVE",
+        }
+    }
+
+    pub fn reason(self) -> &'static str {
+        match self {
+            Agreement::Agree => "Every vantage that answered gives the same answer.",
+            Agreement::Cached => "The nameservers agree, and some resolvers still serve old records.",
+            Agreement::NameserversDiffer => "The authoritative nameservers disagree with each other.",
+            Agreement::ResolversDiffer => "Resolvers disagree, and there is no authoritative answer to compare against.",
+            Agreement::Inconclusive => "Too few vantages answered to compare.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PropagationResult {
+    pub agreement: Agreement,
     pub types: Vec<String>,
     pub resolvers: Vec<VantageAnswer>,
     pub nameservers: Vec<VantageAnswer>,
@@ -198,7 +239,21 @@ pub async fn propagation_with(
     let disagree = disagreement(&res_answers, &types);
     let ns_disagree = disagreement(&ns_answers, &types);
     let stale = if ns_disagree.is_empty() { stale(&res_answers, &ns_answers, &types) } else { BTreeMap::new() };
+    // Only nameservers that answered with the AA flag count: an interceptor's answer proves nothing.
+    let usable = answered(&res_answers) + ns_answers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).count();
+    let agreement = if !ns_disagree.is_empty() {
+        Agreement::NameserversDiffer
+    } else if !stale.is_empty() {
+        Agreement::Cached
+    } else if !disagree.is_empty() {
+        Agreement::ResolversDiffer
+    } else if usable < 2 {
+        Agreement::Inconclusive
+    } else {
+        Agreement::Agree
+    };
     Ok(PropagationResult {
+        agreement,
         types: types.iter().map(ToString::to_string).collect(),
         resolvers: res_answers,
         nameservers: ns_answers,
@@ -505,7 +560,7 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
             message: "Only one resolver answered, so there is nothing to compare it with.".into(),
             recommendation: Some("Re-run; if resolvers keep failing, outbound DNS may be filtered on this network."),
         });
-    } else if records.is_empty() && addrs.is_empty() {
+    } else if records.is_empty() && addrs.is_empty() && r.stale.is_empty() {
         out.push(Finding {
             code: "dns_propagation_consistent",
             severity: Severity::Ok,

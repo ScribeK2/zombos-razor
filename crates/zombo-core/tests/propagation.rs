@@ -2,7 +2,7 @@ mod common;
 
 use common::{FakeDns, zone};
 use std::time::Duration;
-use zombo_core::propagation::{Scope, Vantage, propagation, propagation_findings};
+use zombo_core::propagation::{Agreement, Scope, Vantage, propagation, propagation_findings};
 
 fn resolver(name: &str, s: &FakeDns) -> Vantage {
     Vantage::resolver(name, "Test", s.addr)
@@ -22,6 +22,7 @@ async fn agrees_when_every_resolver_matches() {
     assert!(res.disagree.is_empty(), "{:?}", res.disagree);
     assert_eq!(res.resolvers[0].answers["MX"], ["10 mail.example.com."]);
     assert!(codes(&propagation_findings("example.com", &res)).contains(&"dns_propagation_consistent"));
+    assert_eq!(res.agreement, Agreement::Agree);
 }
 
 use hickory_proto::rr::RecordType;
@@ -42,6 +43,7 @@ async fn flags_resolvers_that_disagree() {
     .await
     .unwrap();
     assert!(res.disagree.contains(&"MX".into()) && !res.disagree.contains(&"NS".into()), "{:?}", res.disagree);
+    assert_eq!(res.agreement, Agreement::ResolversDiffer);
     assert!(res.resolvers[3].error.is_some(), "{:?}", res.resolvers[3]);
     let fs = propagation_findings("example.com", &res);
     let mismatch = fs.iter().find(|f| f.code == "dns_propagation_mismatch").expect("mismatch finding");
@@ -78,6 +80,7 @@ async fn too_few_answers_cannot_be_called_propagated() {
     let fs = propagation_findings("example.com", &res);
     let c = codes(&fs);
     assert!(!c.contains(&"dns_propagation_consistent") && c.contains(&"dns_propagation_insufficient"), "{c:?}");
+    assert_eq!(res.agreement, Agreement::Inconclusive);
 }
 
 #[tokio::test]
