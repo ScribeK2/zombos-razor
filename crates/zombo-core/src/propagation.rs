@@ -485,12 +485,12 @@ fn ns_disagree_finding(r: &PropagationResult) -> Finding {
         return Finding {
             code: "dns_authoritative_behind",
             severity: Severity::Warning,
-            title: "A nameserver is behind",
+            title: "A nameserver is behind".into(),
             message: format!(
                 "{} is on SOA serial {} while {} is on {}, so they hold different versions of the zone and visitors get different {types} depending on which one they reach. A nameserver that copies the zone catches up on its next refresh, which this zone sets to every {}.",
                 lag.vantage.name, ls.serial, lead.vantage.name, hs.serial, duration(ls.refresh),
             ),
-            recommendation: Some("Usually just wait. If it stays behind longer than the refresh interval, check that the zone transfer from the primary works."),
+            recommendation: Some("Usually just wait. If it stays behind longer than the refresh interval, check that the zone transfer from the primary works.".into()),
         };
     }
     let same = match low {
@@ -500,9 +500,9 @@ fn ns_disagree_finding(r: &PropagationResult) -> Finding {
     Finding {
         code: "dns_authoritative_mismatch",
         severity: Severity::Critical,
-        title: "Nameservers are out of sync",
+        title: "Nameservers are out of sync".into(),
         message: format!("The authoritative nameservers give different answers for {types}, so visitors get different records depending on which one they reach.{same}"),
-        recommendation: Some("Make the zone identical on every listed nameserver. If they copy the zone from one primary, increase its SOA serial (re-saving the zone in the DNS panel usually does it); otherwise check that each nameserver was updated."),
+        recommendation: Some("Make the zone identical on every listed nameserver. If they copy the zone from one primary, increase its SOA serial (re-saving the zone in the DNS panel usually does it); otherwise check that each nameserver was updated.".into()),
     }
 }
 
@@ -538,7 +538,7 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_propagation_unreachable",
             severity: Severity::Info,
-            title: "Some resolvers didn't answer",
+            title: "Some resolvers didn't answer".into(),
             message: format!("{} did not respond, so they are left out of the comparison.", down.join(", ")),
             recommendation: None,
         });
@@ -550,9 +550,9 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_propagation_nxdomain",
             severity: Severity::Warning,
-            title: "Exists on no resolver",
+            title: "Exists on no resolver".into(),
             message: format!("Every resolver that answered says {target} does not exist (NXDOMAIN)."),
-            recommendation: Some("Check the spelling and the domain's registration and delegation; there is nothing to propagate yet."),
+            recommendation: Some("Check the spelling and the domain's registration and delegation; there is nothing to propagate yet.".into()),
         });
         return out;
     }
@@ -568,19 +568,19 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_propagation_mismatch",
             severity: Severity::Warning,
-            title: "Not yet propagated",
+            title: "Not yet propagated".into(),
             message: format!(
                 "Resolvers around the world disagree on {}, so some visitors still see old records.",
                 records.join(", ")
             ),
-            recommendation: Some("If the records changed recently, wait out the old TTL and re-run; if not, check for a stale or split nameserver."),
+            recommendation: Some("If the records changed recently, wait out the old TTL and re-run; if not, check for a stale or split nameserver.".into()),
         });
     }
     if !addrs.is_empty() {
         out.push(Finding {
             code: "dns_propagation_addresses_vary",
             severity: Severity::Info,
-            title: "Addresses vary by region",
+            title: "Addresses vary by region".into(),
             message: format!(
                 "{} answers differ between resolvers. That is normal for CDNs and geo-DNS; otherwise the change is still propagating.",
                 addrs.join(" and ")
@@ -592,15 +592,15 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_propagation_insufficient",
             severity: Severity::Warning,
-            title: "Too few resolvers answered",
+            title: "Too few resolvers answered".into(),
             message: "Only one resolver answered, so there is nothing to compare it with.".into(),
-            recommendation: Some("Re-run; if resolvers keep failing, outbound DNS may be filtered on this network."),
+            recommendation: Some("Re-run; if resolvers keep failing, outbound DNS may be filtered on this network.".into()),
         });
     } else if records.is_empty() && addrs.is_empty() && r.stale.is_empty() && !r.intercepted {
         out.push(Finding {
             code: "dns_propagation_consistent",
             severity: Severity::Ok,
-            title: "Propagated",
+            title: "Propagated".into(),
             message: format!("All {answered} resolvers that answered agree on {target}."),
             recommendation: None,
         });
@@ -623,9 +623,9 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_authoritative_unreachable",
             severity: Severity::Warning,
-            title: "A nameserver didn't answer",
+            title: "A nameserver didn't answer".into(),
             message: format!("{down} did not answer when asked directly, so it is left out of the comparison."),
-            recommendation: Some("If it should be serving the zone, check that it is online and reachable on UDP and TCP port 53."),
+            recommendation: Some("If it should be serving the zone, check that it is online and reachable on UDP and TCP port 53.".into()),
         });
     }
     let faking = names(&|n| n.authoritative == Some(false));
@@ -636,9 +636,9 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_authoritative_not_authoritative",
             severity: Severity::Warning,
-            title: "Answer was not authoritative",
+            title: "Answer was not authoritative".into(),
             message: format!("{faking} answered without the authoritative flag. A forwarder or a network that intercepts DNS may be answering instead, so its answer is not treated as the truth."),
-            recommendation: Some("Re-run from another network, or check that the delegation points at a real nameserver."),
+            recommendation: Some("Re-run from another network, or check that the delegation points at a real nameserver.".into()),
         });
     }
     let live = r.nameservers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).count();
@@ -654,7 +654,7 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
             out.push(Finding {
                 code: "dns_authoritative_consistent",
                 severity: Severity::Ok,
-                title: "Matches the authoritative servers",
+                title: "Matches the authoritative servers".into(),
                 message: format!("{live} nameserver(s) agree, and every resolver that answered returns the same records."),
                 recommendation: None,
             });
@@ -673,7 +673,7 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
     out.push(Finding {
         code: "dns_propagation_stale_cache",
         severity: Severity::Info,
-        title: "Some resolvers still serve old records",
+        title: "Some resolvers still serve old records".into(),
         message: format!(
             "The authoritative nameservers agree, but {} of {} resolvers ({}) return something different for {}. {}{}",
             who.len(),
@@ -686,7 +686,7 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
             },
             if only_addrs { "Region-specific (geo-DNS) answers can look the same way." } else { "" },
         ),
-        recommendation: Some("Nothing is wrong with the zone. Wait for the cache to expire, or ask the affected visitors to flush their DNS cache."),
+        recommendation: Some("Nothing is wrong with the zone. Wait for the cache to expire, or ask the affected visitors to flush their DNS cache.".into()),
     });
     out
 }

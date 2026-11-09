@@ -11,6 +11,8 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+use std::borrow::Cow;
+
 use crate::finding::{Finding, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -523,7 +525,18 @@ pub fn registration_findings(_target: &str, r: &Registration) -> Vec<Finding> {
 /// `registration_findings` against a given clock.
 pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Finding> {
     let d = &r.domain;
-    let finding = |code, severity, title, message, recommendation| Finding { code, severity, title, message, recommendation };
+    let finding = |code, severity, title: &'static str, message, recommendation: Option<Cow<'static, str>>| Finding {
+        code,
+        severity,
+        title: title.into(),
+        message,
+        recommendation,
+    };
+    // Go named the registrar inside these recommendations: "Renew it at the registrar (X) now".
+    let at = match r.registrar.as_deref() {
+        Some(name) if !name.is_empty() => format!(" ({name})"),
+        _ => String::new(),
+    };
     if !r.registered {
         let via = match r.source {
             Source::Rdap => format!("The registry's RDAP service has no record of {d}."),
@@ -534,7 +547,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
             Severity::Critical,
             "Not registered",
             via,
-            Some("Check the spelling; if it is the customer's domain, it has lapsed or was never registered, so register it (or restore it at the registrar) as soon as possible."),
+            Some("Check the spelling; if it is the customer's domain, it has lapsed or was never registered, so register it (or restore it at the registrar) as soon as possible.".into()),
         )];
     }
     let mut out = vec![];
@@ -548,7 +561,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
                 Severity::Critical,
                 "Domain expired",
                 format!("{d} expired on {when}. Websites and email on it may stop working at any time."),
-                Some("Renew it at the registrar now, before it enters redemption and costs more to restore."),
+                Some(format!("Renew it at the registrar{at} now, before it enters redemption and costs more to restore.").into()),
             ));
         } else if days <= 30 {
             let n = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
@@ -557,7 +570,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
                 Severity::Warning,
                 "Expires within 30 days",
                 format!("{d} expires on {when}, in {n}."),
-                Some("Renew it now, or confirm auto-renew is on and the payment card on file is valid."),
+                Some("Renew it now, or confirm auto-renew is on and the payment card on file is valid.".into()),
             ));
         } else if days <= 60 {
             out.push(finding(
@@ -577,7 +590,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
             Severity::Critical,
             "Domain is on hold",
             format!("{d} has status {holds}: the registry has removed it from DNS, so its website and email are down. A clientHold is set by the registrar (often an unpaid renewal or unverified contact email); a serverHold by the registry (often a legal or abuse action)."),
-            Some("Contact the registrar to find out why and get the hold lifted."),
+            Some(format!("Contact the registrar{at} to find out why and get the hold lifted.").into()),
         ));
     }
     let deleting = among(&DELETION);
@@ -587,7 +600,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
             Severity::Critical,
             "Domain is being deleted",
             format!("{d} has status {deleting}: it expired and is on its way to being released. During the redemption period the registrar can still restore it, for a fee; once pending delete it cannot be saved."),
-            Some("Ask the registrar to restore it immediately if it is still in redemption."),
+            Some(format!("Ask the registrar{at} to restore it immediately if it is still in redemption.").into()),
         ));
     }
     if !out.iter().any(|f| matches!(f.severity, Severity::Critical | Severity::Warning)) {

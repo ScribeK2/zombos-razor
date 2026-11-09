@@ -1,15 +1,16 @@
 //! Findings: pure functions from an audit to conclusions. Codes, severities,
-//! titles and wording are the Go engine's; the titles are fixed text, so the
-//! few Go titles that embedded a value carry it in the message instead.
+//! titles and wording are the Go engine's.
 
 use super::{
     Bimi, DkimAudit, DmarcAudit, EffectiveAll, EmailAuthResult, MAX_LOOKUPS, Mechanism, MtaSts, Policy, Qualifier, SpfAudit, SpfNode, TlsRpt,
     spf::LOOKUP_CAP,
 };
+use std::borrow::Cow;
+
 use crate::{Finding, Severity};
 
-fn finding(code: &'static str, severity: Severity, title: &'static str, message: String, recommendation: Option<&'static str>) -> Finding {
-    Finding { code, severity, title, message, recommendation }
+fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: Option<&'static str>) -> Finding {
+    Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) }
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -330,7 +331,7 @@ pub fn dmarc_findings(domain: &str, r: &DmarcAudit) -> Vec<Finding> {
         fs.push(finding(
             "dmarc_partial",
             Info,
-            "DMARC applies to only part of mail",
+            format!("DMARC applies to {}% of mail", d.pct),
             format!("pct={}: the policy is applied to only part of failing mail; the rest gets the next weaker treatment.", d.pct),
             None,
         ));

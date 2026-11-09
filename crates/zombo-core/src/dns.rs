@@ -118,11 +118,11 @@ pub fn interception_finding(servers: &[&str]) -> Finding {
     Finding {
         code: "dns_network_intercepts",
         severity: Severity::Warning,
-        title: "This network appears to intercept DNS",
+        title: "This network appears to intercept DNS".into(),
         message: format!(
             "{} are different nameservers, yet all answered without the authoritative flag and offered recursion, which real authoritative servers do not do. A router, firewall or ISP is probably answering DNS queries itself, so these results do not show what the rest of the internet sees.",
             servers.join(", ")
         ),
-        recommendation: Some("Re-run from another network (a phone hotspot or a server), or ask the network owner to stop redirecting port 53."),
+        recommendation: Some("Re-run from another network (a phone hotspot or a server), or ask the network owner to stop redirecting port 53.".into()),
     }
 }

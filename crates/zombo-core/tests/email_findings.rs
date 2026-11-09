@@ -53,7 +53,7 @@ async fn a_domain_with_no_mail_records_is_told_so() {
     let fs = findings_of(&zone("email_missing")).await;
     want(&fs, &[("spf_missing", Severity::Warning), ("dkim_missing", Severity::Warning), ("dmarc_missing", Severity::Warning)]);
     let dkim = code(&fs, "dkim_missing").unwrap();
-    assert!(dkim.recommendation.unwrap().contains("Check more DKIM selectors"), "{dkim:?}");
+    assert!(dkim.recommendation.as_deref().unwrap().contains("Check more DKIM selectors"), "{dkim:?}");
     assert_eq!(dkim.message, "None of the 37 selectors checked has an active DKIM key for example.com. A provider may use a selector not on the list.");
 }
 
@@ -139,7 +139,7 @@ async fn failed_lookups_inside_the_tree_are_listed() {
     let r = email_auth(s.addr, "example.com", &[], T).await;
     let fs = spf_findings("example.com", &r.spf);
     let f = code(&fs, "spf_lookup_failed").expect("a failed-lookups Finding");
-    assert_eq!((f.severity, f.title), (Severity::Warning, "Some SPF lookups failed"));
+    assert_eq!((f.severity, &*f.title), (Severity::Warning, "Some SPF lookups failed"));
     assert!(f.message.starts_with("These lookups got no answer, so the counts above may be low: a:h.test: "), "{}", f.message);
 }
 
@@ -206,6 +206,7 @@ async fn dmarc_monitoring_only_is_a_warning_with_two_notes() {
     want(&fs, &[("dmarc_policy_none", Severity::Warning), ("dmarc_partial", Severity::Info), ("dmarc_no_rua", Severity::Info)]);
     let p = code(&fs, "dmarc_partial").unwrap();
     assert!(p.message.starts_with("pct=50: "), "{}", p.message);
+    assert_eq!(&*p.title, "DMARC applies to 50% of mail", "Go parity: the title carries the percentage");
 }
 
 #[tokio::test]
@@ -218,7 +219,7 @@ async fn dmarc_policies_and_their_titles() {
     ] {
         let fs = findings_of(&format!("_dmarc.example.com. 60 IN TXT \"{rec}\"\n")).await;
         let f = code(&fs, c).unwrap_or_else(|| panic!("{rec}: {:?}", codes(&fs)));
-        assert_eq!((f.severity, f.title), (sev, title), "{rec}");
+        assert_eq!((f.severity, &*f.title), (sev, title), "{rec}");
     }
     let fs = findings_of("_dmarc.example.com. 60 IN TXT \"v=DMARC1; p=reject; rua=mailto:a@x.test\"\n").await;
     assert_eq!(code(&fs, "dmarc_enforced").unwrap().message, "Receivers reject failing mail for example.com.");
@@ -253,7 +254,7 @@ async fn spf_missing_the_mail_provider_is_flagged() {
         assert_eq!(f.severity, Severity::Warning);
         assert!(f.title.contains(provider) && f.message.contains(provider), "{f:?}");
         assert!(f.message.starts_with(&format!("Mail for example.com is handled by {provider} (MX ")), "{}", f.message);
-        assert!(f.recommendation.unwrap().contains(&format!("include:{include}")), "{f:?}");
+        assert!(f.recommendation.as_deref().unwrap().contains(&format!("include:{include}")), "{f:?}");
     }
 }
 

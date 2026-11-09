@@ -43,7 +43,7 @@ async fn absent_records_are_info_not_a_problem() {
     for (prefix, code) in [("email_tlsrpt_", "email_tlsrpt_missing"), ("email_bimi_", "email_bimi_missing"), ("email_mtasts_", "email_mtasts_missing")] {
         let f = only(&fs, prefix);
         assert_eq!((f.code, f.severity), (code, Severity::Info));
-        assert!(f.recommendation.is_some_and(|r| r.starts_with("Optional.")), "{f:?}");
+        assert!(f.recommendation.as_deref().is_some_and(|r| r.starts_with("Optional.")), "{f:?}");
     }
 }
 

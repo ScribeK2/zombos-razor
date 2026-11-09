@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -14,7 +16,8 @@ pub enum Severity {
 pub struct Finding {
     pub code: &'static str,
     pub severity: Severity,
-    pub title: &'static str,
+    /// Usually a fixed sentence; a runtime string where the title carries a value.
+    pub title: Cow<'static, str>,
     pub message: String,
-    pub recommendation: Option<&'static str>,
+    pub recommendation: Option<Cow<'static, str>>,
 }

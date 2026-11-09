@@ -105,8 +105,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 - [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
 - [ ] DNSSEC expiry warning is `min(3 days, lifetime / 4)`, not a flat 3 days (Cloudflare signs for about 2 days). Accepted as a deliberate deviation; unsigned-yet (not-before) signatures have no finding
-- [ ] Email: the SPF walk is breadth-first with a 30-lookup cap, so which subtree is cut when the cap bites can differ from Go; DMARC "partial" and similar titles are fixed text because `Finding.title` is `&'static str` (same root cause as the registrar suffix below)
-- [ ] `Finding.recommendation` is `Option<&'static str>`, so the registration Check dropped Go's " (Registrar)" suffix on three recommendations (the registrar is printed above the findings instead). Widening to `Cow<'static, str>` would restore it but touches every `Some("...")` literal. Decide after workers B and C merge, to avoid conflicts.
+- [ ] Email: the SPF walk is breadth-first with a 30-lookup cap, so which subtree is cut when the cap bites can differ from Go
+- [x] `Finding.title` and `Finding.recommendation` are `Cow<'static, str>`: Go's " (Registrar)" suffix is back in three registration recommendations, and "DMARC applies to N% of mail" has its Go title again
 - [ ] ureq honours `HTTP_PROXY`/`HTTPS_PROXY`; keep (corporate networks) or turn off
 
 ## Live-verified from a clean network (VPS, 2026-11-09)

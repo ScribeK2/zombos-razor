@@ -231,15 +231,16 @@ async fn ask_server(addr: SocketAddr, apex_name: &Name, apex: &str, limit: Durat
     (state, child_ns)
 }
 
+fn add(out: &mut Vec<Finding>, code: &'static str, severity: Severity, title: &'static str, message: String, recommendation: Option<&'static str>) {
+    out.push(Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) });
+}
+
 pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
     let mut out = vec![];
     let list = |v: &mut dyn Iterator<Item = &String>| v.cloned().collect::<Vec<_>>().join(", ");
-    let mut push = |code, severity, title, message: String, recommendation: Option<&'static str>| {
-        out.push(Finding { code, severity, title, message, recommendation })
-    };
 
     if r.parent_ns.len() < 2 {
-        push(
+        add(&mut out,
             "dns_delegation_single_ns",
             Severity::Warning,
             "Only one nameserver",
@@ -249,7 +250,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
     }
     let down: Vec<&String> = r.servers.iter().filter(|s| s.state == ServerState::Unreachable).map(|s| &s.name).collect();
     if !down.is_empty() {
-        push(
+        add(&mut out,
             "dns_delegation_unreachable",
             Severity::Warning,
             "A delegated nameserver didn't answer",
@@ -272,10 +273,9 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
     let intercepted = distinct.len() >= 2 && answering.iter().all(|s| matches!(s.state, ServerState::Lame { recursive: true, .. }));
     if intercepted {
         let names: Vec<&str> = answering.iter().map(|s| s.name.as_str()).collect();
-        let f = crate::dns::interception_finding(&names);
-        push(f.code, f.severity, f.title, f.message, f.recommendation);
+        out.push(crate::dns::interception_finding(&names));
     } else if !lame.is_empty() {
-        push(
+        add(&mut out,
             "dns_delegation_lame",
             Severity::Critical,
             "Delegated to a server that doesn't serve the zone",
@@ -302,7 +302,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         if !only_child.is_empty() {
             parts.push(format!("{} only in the zone itself", list(&mut only_child.iter())));
         }
-        push(
+        add(&mut out,
             "dns_delegation_mismatch",
             Severity::Warning,
             "Parent and zone disagree about the nameservers",
@@ -330,7 +330,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         }
     }
     if !missing.is_empty() {
-        push(
+        add(&mut out,
             "dns_glue_missing",
             Severity::Critical,
             "Missing glue",
@@ -339,7 +339,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if !wrong.is_empty() {
-        push(
+        add(&mut out,
             "dns_glue_mismatch",
             Severity::Critical,
             "Glue doesn't match the zone",
@@ -348,7 +348,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if !r.unresolvable.is_empty() {
-        push(
+        add(&mut out,
             "dns_ns_unresolvable",
             Severity::Critical,
             "A nameserver name doesn't resolve",
@@ -357,7 +357,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if !r.cnames.is_empty() {
-        push(
+        add(&mut out,
             "dns_ns_is_cname",
             Severity::Critical,
             "A nameserver name is an alias",
@@ -369,7 +369,7 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dns_delegation_ok",
             severity: Severity::Ok,
-            title: "Delegation is consistent",
+            title: "Delegation is consistent".into(),
             message: format!(
                 "{} delegates {} to {} nameservers; the zone lists the same ones, each answers authoritatively, and the glue matches.",
                 r.parent,

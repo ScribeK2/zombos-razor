@@ -569,25 +569,25 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dnssec_bogus",
             severity: Severity::Critical,
-            title: "Validating resolvers reject this domain",
+            title: "Validating resolvers reject this domain".into(),
             message: format!(
                 "{} answer SERVFAIL for {} but answer normally when DNSSEC checking is turned off, so the domain's DNSSEC is broken. Validating resolvers refuse to answer, so the domain is unreachable for most users.{cause}",
                 bogus.join(", "),
                 r.apex
             ),
-            recommendation: Some("Fix the DNSSEC problem reported with this finding. If it cannot be fixed quickly, remove the DS record at the registrar: the domain then works again, without DNSSEC."),
+            recommendation: Some("Fix the DNSSEC problem reported with this finding. If it cannot be fixed quickly, remove the DS record at the registrar: the domain then works again, without DNSSEC.".into()),
         });
     }
     if ds_without_dnskey {
         out.push(Finding {
             code: "dnssec_ds_without_dnskey",
             severity: Severity::Critical,
-            title: "DS record but no DNSKEY",
+            title: "DS record but no DNSKEY".into(),
             message: format!(
                 "The parent zone publishes a DS record for {}, which says the zone is signed, but its nameservers serve no DNSKEY. The zone is unsigned or its DNS provider stopped signing, and validating resolvers will treat every answer as forged.",
                 r.apex
             ),
-            recommendation: Some("Turn DNSSEC signing back on at the DNS provider, or remove the DS record at the registrar."),
+            recommendation: Some("Turn DNSSEC signing back on at the DNS provider, or remove the DS record at the registrar.".into()),
         });
     }
     if ds_mismatch {
@@ -597,31 +597,31 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dnssec_ds_mismatch",
             severity: Severity::Critical,
-            title: "DS record matches none of the zone's keys",
+            title: "DS record matches none of the zone's keys".into(),
             message: format!(
                 "The parent zone publishes DS for key {} but the nameservers serve {}, so the chain of trust is broken and validating resolvers reject the zone. This usually happens after moving DNS to a new provider.",
                 ds.join(", "),
                 if served.is_empty() { "no signing key".to_string() } else { format!("signing key {}", served.into_iter().collect::<Vec<_>>().join(", ")) }
             ),
-            recommendation: Some("Give the registrar the new provider's DS record, or remove the DS record to turn DNSSEC off."),
+            recommendation: Some("Give the registrar the new provider's DS record, or remove the DS record to turn DNSSEC off.".into()),
         });
     }
     if !expired.is_empty() {
         out.push(Finding {
             code: "dnssec_signature_expired",
             severity: Severity::Critical,
-            title: "The zone's signatures have expired",
+            title: "The zone's signatures have expired".into(),
             message: format!("The signature on the zone's SOA record has expired: {}. Validating resolvers reject every answer from the zone.", expired.join(", ")),
-            recommendation: Some("Have the zone re-signed. DNS providers do this automatically, so ask the provider why it stopped."),
+            recommendation: Some("Have the zone re-signed. DNS providers do this automatically, so ask the provider why it stopped.".into()),
         });
     }
     if !expiring.is_empty() {
         out.push(Finding {
             code: "dnssec_signature_expiring",
             severity: Severity::Warning,
-            title: "The zone's signatures expire soon",
+            title: "The zone's signatures expire soon".into(),
             message: format!("The signature on the zone's SOA record is about to expire: {}. Zones are normally re-signed well before that, so signing may have stopped.", expiring.join(", ")),
-            recommendation: Some("Check that the zone is being re-signed. If it is not, validating resolvers will reject the domain when the signature expires."),
+            recommendation: Some("Check that the zone is being re-signed. If it is not, validating resolvers will reject the domain when the signature expires.".into()),
         });
     }
     let deprecated: std::collections::BTreeMap<u8, Algorithm> = r
@@ -636,12 +636,12 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dnssec_algorithm_deprecated",
             severity: Severity::Warning,
-            title: "Deprecated signing algorithm",
+            title: "Deprecated signing algorithm".into(),
             message: format!(
                 "The zone is signed with {}, which is deprecated: it is weak, and validating resolvers are dropping support for it, which can make the domain look unsigned or broken.",
                 deprecated.values().map(ToString::to_string).collect::<Vec<_>>().join(", ")
             ),
-            recommendation: Some("Ask the DNS provider to switch the zone to a modern algorithm such as ECDSAP256SHA256 (13)."),
+            recommendation: Some("Ask the DNS provider to switch the zone to a modern algorithm such as ECDSAP256SHA256 (13).".into()),
         });
     }
     let key_sets: Vec<std::collections::BTreeSet<(u16, u8, &[u8])>> =
@@ -651,12 +651,12 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dnssec_nameservers_disagree",
             severity: Severity::Warning,
-            title: "Nameservers serve different keys",
+            title: "Nameservers serve different keys".into(),
             message: format!(
                 "The nameservers do not serve the same DNSKEY set ({}). The zone is out of sync or in the middle of a key rollover, and validation can fail depending on which nameserver a resolver reaches.",
                 each.join("; ")
             ),
-            recommendation: Some("Make every nameserver serve the same signed zone. If a key rollover is under way, wait for it to finish and check again."),
+            recommendation: Some("Make every nameserver serve the same signed zone. If a key rollover is under way, wait for it to finish and check again.".into()),
         });
     }
     if r.ds.is_empty() && !answered.is_empty() {
@@ -664,15 +664,15 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
             out.push(Finding {
                 code: "dnssec_ds_missing",
                 severity: Severity::Info,
-                title: "Signed, but not linked to the parent",
+                title: "Signed, but not linked to the parent".into(),
                 message: format!("The nameservers serve DNSKEY records but the parent zone has no DS record for {}, so validating resolvers ignore the signatures and treat the zone as unsigned.", r.apex),
-                recommendation: Some("If DNSSEC should be on, publish the zone's DS record at the registrar."),
+                recommendation: Some("If DNSSEC should be on, publish the zone's DS record at the registrar.".into()),
             });
         } else {
             out.push(Finding {
                 code: "dnssec_not_signed",
                 severity: Severity::Info,
-                title: "DNSSEC is not enabled",
+                title: "DNSSEC is not enabled".into(),
                 message: format!("{} has no DS record at its parent and its nameservers serve no DNSKEY, so the zone is not signed. That works everywhere, but its answers cannot be verified.", r.apex),
                 recommendation: None,
             });
@@ -683,7 +683,7 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         out.push(Finding {
             code: "dnssec_secure",
             severity: Severity::Ok,
-            title: "DNSSEC is healthy",
+            title: "DNSSEC is healthy".into(),
             message: format!(
                 "{} confirm the answers for {} are authentic, the DS record at the parent matches the zone's key, and the signatures are valid{}.",
                 secure.join(", "),

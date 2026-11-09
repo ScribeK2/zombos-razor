@@ -148,7 +148,7 @@ fn print_findings(findings: &[Finding]) {
             Severity::Critical => "CRITICAL",
         };
         println!("[{tag}] {}: {}", f.title, f.message);
-        if let Some(r) = f.recommendation {
+        if let Some(r) = &f.recommendation {
             println!("        {r}");
         }
     }

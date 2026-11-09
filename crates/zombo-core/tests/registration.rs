@@ -458,3 +458,26 @@ async fn an_invalid_answer_fails_rather_than_saying_not_registered() {
     let err = check_registration("example.de", &whois_only("de", &denic.addr), T).await.unwrap_err();
     assert!(err.to_string().contains("is invalid"), "{err}");
 }
+
+#[test]
+fn the_registrar_is_named_inside_the_recommendation_that_needs_one() {
+    for (days, statuses, want, text) in [
+        (-5, &[][..], "registration_expired", "Renew it at the registrar (Example Registrar) now, before it enters redemption"),
+        (300, &["clientHold"], "registration_on_hold", "Contact the registrar (Example Registrar) to find out why"),
+        (-40, &["redemptionPeriod"], "registration_pending_delete", "Ask the registrar (Example Registrar) to restore it immediately"),
+    ] {
+        let fs = registration_findings("example.com", &reg(days, statuses));
+        let f = code(&fs, want).unwrap_or_else(|| panic!("{want}: {:?}", codes(&fs)));
+        let rec = f.recommendation.as_deref().unwrap_or_default();
+        assert!(rec.contains(text), "{want}: {rec}");
+    }
+}
+
+#[test]
+fn without_a_registrar_name_the_recommendation_has_no_empty_parentheses() {
+    let mut r = reg(-5, &[]);
+    r.registrar = None;
+    let fs = registration_findings("example.com", &r);
+    let rec = code(&fs, "registration_expired").unwrap().recommendation.as_deref().unwrap_or_default().to_string();
+    assert!(rec.starts_with("Renew it at the registrar now,"), "{rec}");
+}
