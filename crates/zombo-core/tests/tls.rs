@@ -270,6 +270,43 @@ async fn a_server_that_does_not_speak_tls_is_a_handshake_error() {
     assert!(matches!(e, TlsError::Handshake(_)), "{e:?}");
 }
 
+/// A server that reads the ClientHello and answers with one fatal TLS alert, as a server does
+/// when it cannot speak the versions the client offered.
+async fn alert_server(description: u8) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut tcp, _)) = listener.accept().await {
+            let mut hello = [0u8; 1024];
+            let _ = tcp.read(&mut hello).await;
+            let _ = tcp.write_all(&[0x15, 3, 3, 0, 2, 2, description]).await;
+        }
+    });
+    addr
+}
+
+/// rustls has no TLS 1.0 or 1.1 (a documented deviation from the Go app), so a server that offers
+/// only those answers with a protocol_version alert. The hint is what replaces the Go warning.
+#[tokio::test]
+async fn a_server_that_refuses_our_versions_gets_the_old_tls_hint() {
+    for (alert, name) in [(70u8, "protocol_version"), (40, "handshake_failure")] {
+        let addr = alert_server(alert).await;
+        let e = inspect(addr, &rustls::RootCertStore::empty(), NOW).await.unwrap_err();
+        let TlsError::Handshake(why) = e else { panic!("{name}: {e:?}") };
+        assert!(why.contains("may offer only TLS 1.0 or 1.1"), "{name}: {why}");
+        assert!(why.contains("no cipher suite in common"), "{name}: {why}");
+    }
+}
+
+#[tokio::test]
+async fn an_unrelated_alert_does_not_get_the_old_tls_hint() {
+    let addr = alert_server(80).await;
+    let e = inspect(addr, &rustls::RootCertStore::empty(), NOW).await.unwrap_err();
+    let TlsError::Handshake(why) = e else { panic!("{e:?}") };
+    assert!(!why.contains("TLS 1.0"), "{why}");
+}
+
 #[tokio::test]
 async fn a_refused_connection_is_a_connect_error() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
