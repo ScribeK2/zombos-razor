@@ -18,6 +18,7 @@ pub enum Action {
     PrevRecord,
     ToggleWatch,
     Cheatsheet,
+    Settings,
     Dismiss,
     MoveUp,
     MoveDown,
@@ -29,6 +30,7 @@ pub enum Mode {
     Browse,
     Palette,
     Sheet,
+    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +89,7 @@ const BINDINGS: &[Binding] = &[
     bind("]", false, false, false, When::NotTyping, Action::NextRecord, "Next record type"),
     bind("[", false, false, false, When::NotTyping, Action::PrevRecord, "Previous record type"),
     bind("?", false, false, false, When::NotTyping, Action::Cheatsheet, "Shortcut cheat sheet"),
+    bind(",", true, false, false, When::Always, Action::Settings, "Settings"),
 ];
 
 pub struct Entry {
@@ -145,6 +148,13 @@ pub fn action_for(mode: Mode, empty_state: bool, p: Press) -> Option<Action> {
                 ("up", true) => Some(Action::MoveUp),
                 ("down", true) => Some(Action::MoveDown),
                 ("enter", true) => Some(Action::Submit),
+                _ => None,
+            };
+        }
+        Mode::Settings => {
+            return match key {
+                "escape" if plain => Some(Action::Dismiss),
+                "," if p.ctrl => Some(Action::Settings),
                 _ => None,
             };
         }
@@ -275,6 +285,23 @@ mod tests {
         assert_eq!(action_for(Mode::Palette, false, ctrl("t")), None);
         assert_eq!(action_for(Mode::Sheet, false, plain("escape")), Some(Action::Dismiss));
         assert_eq!(action_for(Mode::Sheet, false, ctrl("l")), None);
+    }
+
+    #[test]
+    fn settings_opens_with_ctrl_comma_and_from_the_palette_and_escape_closes_it() {
+        assert_eq!(action_for(Mode::Browse, false, ctrl(",")), Some(Action::Settings));
+        assert_eq!(action_for(Mode::Omnibox, false, ctrl(",")), Some(Action::Settings));
+        assert_eq!(action_for(Mode::Settings, false, ctrl(",")), Some(Action::Settings));
+        assert_eq!(action_for(Mode::Settings, false, plain("escape")), Some(Action::Dismiss));
+        let e = entries();
+        assert_eq!(e.iter().find(|e| e.action == Action::Settings).map(|e| (e.label, e.shortcut.as_str())), Some(("Settings", "Ctrl+,")));
+    }
+
+    #[test]
+    fn the_settings_pane_takes_every_other_key_for_its_fields() {
+        for p in [plain("w"), plain("?"), plain("["), plain("enter"), ctrl("t"), ctrl("l"), ctrl("k"), plain("down")] {
+            assert_eq!(action_for(Mode::Settings, false, p), None, "{p:?}");
+        }
     }
 
     #[test]
