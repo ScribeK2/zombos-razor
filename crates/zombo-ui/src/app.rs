@@ -25,6 +25,7 @@ use zombo_core::Severity;
 
 mod copying;
 mod evidence;
+mod ondemand_ui;
 
 const FINDING_HANDLES: usize = 64;
 const TOAST_FOR: Duration = Duration::from_secs(8);
@@ -197,6 +198,7 @@ impl Shell {
         }
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
+        let smtp = tab.smtp_request();
         if section == Section::Dns {
             let settings = self.config.settings.clone();
             let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
@@ -224,7 +226,7 @@ impl Shell {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, tx));
+        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, smtp, tx));
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -335,8 +337,11 @@ impl Shell {
             },
             Action::ToggleWatch => self.toggle_watch(),
             Action::NextRecord | Action::PrevRecord => {
-                if self.ws.current().is_some_and(|t| t.section == Section::Dns) {
-                    self.ws.step_record(if action == Action::NextRecord { 1 } else { -1 });
+                let delta = if action == Action::NextRecord { 1 } else { -1 };
+                match self.ws.current().map(|t| t.section) {
+                    Some(Section::Dns) => self.ws.step_record(delta),
+                    Some(Section::Smtp) => self.ws.current_mut().into_iter().for_each(|t| t.step_port(delta)),
+                    _ => {}
                 }
             }
             Action::Jump(n) => self.ws.jump(n),
@@ -882,6 +887,7 @@ impl Shell {
                         }),
                 )
             })
+            .when(section == Section::Smtp, |s| s.child(self.port_field(tab, cx)))
             .when(state.can_retry(), |s| {
                 s.child(
                     div()

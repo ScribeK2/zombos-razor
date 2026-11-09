@@ -43,8 +43,8 @@ pub fn brief(section: Section) -> Option<Brief> {
         }
         Section::Smtp => Some(brief(
             "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
-            "The target's server on port 25, dialled by the name you typed. This machine's resolver looks up the name and the reverse name of the address.".into(),
-            "This build does not look up MX records first and the port is fixed at 25. For a domain whose mail is hosted elsewhere, open the mail host's name as the target.",
+            "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
+            "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
         )),
         Section::Blacklist => Some(brief(
             "Asks public blocklists whether the target's address, or a domain and its mail hosts, are listed for spam.",
@@ -82,7 +82,7 @@ mod tests {
     fn the_brief_names_the_servers_it_will_contact() {
         let ports = brief(Section::Ports).unwrap();
         assert!(ports.contacts.contains("25") && ports.contacts.contains("3306"));
-        assert!(brief(Section::Smtp).unwrap().contacts.contains("port 25"));
+        assert!(brief(Section::Smtp).unwrap().contacts.contains("MX hosts"));
         assert!(brief(Section::Blacklist).unwrap().contacts.contains("Nothing connects to the target"));
     }
 }

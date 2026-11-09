@@ -10,6 +10,7 @@ use crate::{
     outcome::{History, Run},
     record::RecordKind,
     section::Section,
+    smtp_plan,
     status::{CheckState, Glyph},
 };
 
@@ -258,11 +259,21 @@ pub struct Tab {
     pub propagation: Propagation,
     pub record: RecordKind,
     pub runs: HashMap<Section, Run>,
+    pub smtp_port: u16,
 }
 
 impl Tab {
     pub fn new(target: Target) -> Self {
-        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default(), runs: HashMap::new() }
+        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default(), runs: HashMap::new(), smtp_port: smtp_plan::PORTS[0] }
+    }
+
+    pub fn step_port(&mut self, delta: isize) {
+        let i = smtp_plan::PORTS.iter().position(|&p| p == self.smtp_port).unwrap_or(0) as isize;
+        self.smtp_port = smtp_plan::PORTS[(i + delta).rem_euclid(smtp_plan::PORTS.len() as isize) as usize];
+    }
+
+    pub fn smtp_request(&self) -> smtp_plan::Request {
+        smtp_plan::Request::new(self.target.kind, self.smtp_port)
     }
 
     pub fn run_mut(&mut self, section: Section) -> &mut Run {
@@ -651,6 +662,21 @@ mod tests {
         t.propagation.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
         assert_eq!(t.verdict_glyph(Section::Dns), Glyph::Info);
         assert_eq!(t.verdict_glyph(Section::Web), Glyph::Ring);
+    }
+
+    #[test]
+    fn the_smtp_port_steps_through_the_three_ports_and_a_domain_asks_for_mx() {
+        let mut t = tab();
+        assert_eq!(t.smtp_request(), smtp_plan::Request { port: 25, via_mx: true });
+        t.step_port(1);
+        t.step_port(1);
+        assert_eq!(t.smtp_port, 465);
+        t.step_port(1);
+        assert_eq!(t.smtp_port, 25);
+        t.step_port(-1);
+        assert_eq!(t.smtp_port, 465);
+        let host = Tab::new(Target { value: "mail.example.com".into(), kind: Kind::Hostname });
+        assert!(!host.smtp_request().via_mx);
     }
 
     #[test]

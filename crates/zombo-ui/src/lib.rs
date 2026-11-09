@@ -11,6 +11,7 @@ pub mod record;
 pub mod runtime;
 pub mod section;
 pub mod settings_model;
+pub mod smtp_plan;
 pub mod status;
 pub mod theme;
 pub mod watch;

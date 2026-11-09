@@ -10,7 +10,7 @@ use zombo_core::{
     propagation::{Scope, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
     registration::{Endpoints, Registration, check_registration, registration_findings},
-    resolver::system_resolvers,
+    resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
     tls::{TlsResult, check_tls, tls_findings},
@@ -23,6 +23,7 @@ use crate::{
     outcome::{CheckEvent, Fact, Outcome},
     section::Section,
     settings_model::{Settings, budget},
+    smtp_plan,
 };
 
 /// The Checks that run on their own when a target is submitted (DESIGN.md, "Checks per target kind").
@@ -91,16 +92,16 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
     let _ = tx.send(event);
 }
 
-pub async fn run_section(section: Section, name: String, settings: Settings, tx: UnboundedSender<CheckEvent>) {
+pub async fn run_section(section: Section, name: String, settings: Settings, smtp: smtp_plan::Request, tx: UnboundedSender<CheckEvent>) {
     let _ = tx.send(CheckEvent::Started);
-    let event = match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings)).await {
+    let event = match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings, smtp)).await {
         Ok(result) => CheckEvent::Finished(Box::new(result)),
         Err(_) => CheckEvent::TimedOut,
     };
     let _ = tx.send(event);
 }
 
-async fn produce(section: Section, name: &str, settings: &Settings) -> Result<Outcome, String> {
+async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_plan::Request) -> Result<Outcome, String> {
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section {
@@ -132,18 +133,25 @@ async fn produce(section: Section, name: &str, settings: &Settings) -> Result<Ou
             Ok(ports_outcome(name, &probe(&addresses, QUICK, PortTiming::default()).await))
         }
         Section::Smtp => {
-            let r = check_smtp(name, 25, &SmtpOptions::for_port(25)).await;
-            let mut expect = vec![];
-            if name.parse::<std::net::IpAddr>().is_err() {
-                expect.push(name.to_string());
-            }
             let resolvers = system_resolvers();
+            let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
+            let port = smtp.port;
+            let plan = smtp_plan::run(name, smtp, &Resolver::new(asked, Duration::from_secs(5)), |host| async move { check_smtp(&host, port, &SmtpOptions::for_port(port)).await }).await;
+            let r = &plan.result;
+            let mut expect = vec![];
+            if plan.host.parse::<std::net::IpAddr>().is_err() {
+                expect.push(plan.host.clone());
+            }
             if let (Some(ip), Reach::Answered, false) = (r.peer, r.reach, resolvers.is_empty())
                 && let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
             {
                 expect.extend(ptrs.into_iter().map(|p| p.name));
             }
-            Ok(smtp_outcome(&r, &expect))
+            let mut outcome = smtp_outcome(r, &expect);
+            let mut facts = smtp_plan::facts(&plan);
+            facts.append(&mut outcome.facts);
+            outcome.facts = facts;
+            Ok(outcome)
         }
         Section::Blacklist => {
             let resolvers = system_resolvers();

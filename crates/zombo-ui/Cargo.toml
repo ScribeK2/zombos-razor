@@ -9,6 +9,9 @@ license.workspace = true
 name = "zombo-razor"
 path = "src/main.rs"
 
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["macros"] }
+
 [dependencies]
 gpui-kit = "=0.9.1"
 notify-rust = "4.19.0"
