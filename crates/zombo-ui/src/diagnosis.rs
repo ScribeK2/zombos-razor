@@ -325,9 +325,10 @@ pub struct Tab {
 
 impl Tab {
     pub fn new(target: Target) -> Self {
+        let section = if target.kind == Kind::Ip { Section::Rdns } else { Section::Dns };
         Tab {
             target,
-            section: Section::Dns,
+            section,
             propagation: Propagation::new(),
             record: RecordKind::default(),
             runs: HashMap::new(),
@@ -817,6 +818,12 @@ mod tests {
         assert_eq!(t.options().map(|o| o.tls_port), Err(crate::tls_port::INVALID));
         t.tls_port.typed("2525");
         assert_eq!(t.options().map(|o| o.tls_port), Ok(2525));
+    }
+
+    #[test]
+    fn an_ip_tab_opens_on_reverse_dns_and_every_other_kind_on_dns() {
+        assert_eq!(Tab::new(Target { value: "192.0.2.1".into(), kind: Kind::Ip }).section, Section::Rdns);
+        assert_eq!(tab().section, Section::Dns);
     }
 
     #[test]

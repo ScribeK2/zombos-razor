@@ -8,6 +8,7 @@ pub enum Section {
     Web,
     Tls,
     Registration,
+    Rdns,
     Ports,
     Smtp,
     TlsPort,
@@ -15,7 +16,7 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 12] = [
+    pub const ALL: [Section; 13] = [
         Section::Summary,
         Section::Dns,
         Section::Delegation,
@@ -24,6 +25,7 @@ impl Section {
         Section::Web,
         Section::Tls,
         Section::Registration,
+        Section::Rdns,
         Section::Ports,
         Section::Smtp,
         Section::TlsPort,
@@ -31,7 +33,7 @@ impl Section {
     ];
 
     /// Ctrl+9 jumps here: the first of the Checks that only run when asked.
-    pub const FIRST_ON_DEMAND: usize = 8;
+    pub const FIRST_ON_DEMAND: usize = 9;
 
     pub fn label(self) -> &'static str {
         match self {
@@ -43,6 +45,7 @@ impl Section {
             Section::Web => "Web",
             Section::Tls => "TLS",
             Section::Registration => "Registration",
+            Section::Rdns => "Reverse DNS",
             Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
             Section::TlsPort => "TLS on a port",
@@ -93,6 +96,7 @@ mod tests {
                 "Web",
                 "TLS",
                 "Registration",
+                "Reverse DNS",
                 "Port scan",
                 "SMTP banner",
                 "TLS on a port",
@@ -105,12 +109,12 @@ mod tests {
     fn the_ninth_slot_is_the_first_on_demand_check() {
         assert_eq!(Section::at(7), Some(Section::Registration));
         assert_eq!(Section::at(Section::FIRST_ON_DEMAND), Some(Section::Ports));
-        assert_eq!(Section::at(12), None);
+        assert_eq!(Section::at(13), None);
     }
 
     #[test]
     fn exactly_the_last_four_are_on_demand() {
         let on: Vec<_> = Section::ALL.iter().filter(|s| s.is_on_demand()).map(|s| s.index()).collect();
-        assert_eq!(on, [8, 9, 10, 11]);
+        assert_eq!(on, [9, 10, 11, 12]);
     }
 }

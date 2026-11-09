@@ -13,7 +13,7 @@ use zombo_core::{
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
-    rdns::{RdnsResult, check_rdns},
+    rdns::{RdnsResult, check_rdns, rdns_findings},
     registration::{Endpoints, Registration, check_registration, registration_findings},
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
@@ -37,7 +37,7 @@ pub fn automatic(kind: Kind) -> &'static [Section] {
     match kind {
         Kind::Domain | Kind::Email => &[Dns, Delegation, Dnssec, Email, Web, Tls, Registration],
         Kind::Hostname => &[Dns, Web, Tls, Registration],
-        Kind::Ip => &[],
+        Kind::Ip => &[Rdns],
     }
 }
 
@@ -63,7 +63,11 @@ pub fn check_name(target: &Target) -> Option<String> {
 /// The name an on-demand Check connects to or asks about. An IP address is a valid subject
 /// here, unlike for the automatic Checks.
 pub fn name_for(section: Section, target: &Target) -> Option<String> {
-    if section.is_on_demand() && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
+    if (section.is_on_demand() || section == Section::Rdns) && target.kind == Kind::Ip {
+        Some(target.value.clone())
+    } else {
+        check_name(target)
+    }
 }
 
 /// The ten public resolvers, then the rep's own that are not already among them.
@@ -212,6 +216,13 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             facts.append(&mut outcome.facts);
             outcome.facts = facts;
             Ok(outcome)
+        }
+        Section::Rdns => {
+            let resolvers = system_resolvers();
+            if resolvers.is_empty() {
+                return Err("this machine has no DNS resolver configured".into());
+            }
+            Ok(rdns_outcome(&check_rdns(&resolvers, name, query).await))
         }
         Section::Blacklist => {
             let resolvers = system_resolvers();
@@ -476,6 +487,38 @@ pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
     Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
 }
 
+/// The PTR names of an address and whether each resolves back to it, or a host's addresses.
+pub fn rdns_outcome(r: &RdnsResult) -> Outcome {
+    let mut facts = vec![];
+    match r {
+        RdnsResult::Ip { ip, ptr_query, ptrs, ptr_error } => {
+            facts.push(Fact::new("Address", ip.to_string()));
+            facts.push(Fact::new("PTR question", ptr_query));
+            if ptrs.is_empty() && ptr_error.is_none() {
+                facts.push(Fact::new("PTR", "none"));
+            }
+            for p in ptrs {
+                facts.push(Fact::new("PTR", &p.name));
+                let forward = match (&p.forward_error, p.confirmed) {
+                    (Some(e), _) => format!("no answer: {e}"),
+                    (None, true) => format!("{}, which confirms {ip}", addresses_text(&p.addresses)),
+                    (None, false) => format!("{}, which does not confirm {ip}", addresses_text(&p.addresses)),
+                };
+                facts.push(Fact::new(format!("Forward lookup of {}", p.name), forward));
+            }
+        }
+        RdnsResult::Host { host, addresses, .. } => {
+            facts.push(Fact::new("Host", host));
+            facts.extend(addresses.iter().map(|a| Fact::new("Address", a.to_string())));
+        }
+    }
+    Outcome { findings: rdns_findings(r), facts, ..Outcome::default() }
+}
+
+fn addresses_text(a: &[std::net::IpAddr]) -> String {
+    if a.is_empty() { "no address".into() } else { a.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ") }
+}
+
 pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
     let mut facts = vec![];
     let mut details = vec![];
@@ -537,7 +580,7 @@ mod tests {
         assert_eq!(automatic(Kind::Domain).len(), 7);
         assert_eq!(automatic(Kind::Email), automatic(Kind::Domain));
         assert_eq!(automatic(Kind::Hostname), [Section::Dns, Section::Web, Section::Tls, Section::Registration]);
-        assert!(automatic(Kind::Ip).is_empty());
+        assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
     }
 
@@ -575,6 +618,54 @@ mod tests {
         let on_443 = tls_outcome("mail.example.com", &tls_result());
         assert_eq!(on_443.facts[0].key, "Protocol");
         assert!(on_443.findings.iter().any(|f| f.message.contains("mail.example.com:443")));
+    }
+
+    #[test]
+    fn an_ip_target_runs_reverse_dns_on_its_own_and_no_other_target_does() {
+        assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
+        for kind in [Kind::Domain, Kind::Hostname, Kind::Email] {
+            assert!(!automatic(kind).contains(&Section::Rdns), "{kind:?}");
+        }
+        let ip = t("192.0.2.1", Kind::Ip);
+        assert_eq!(name_for(Section::Rdns, &ip).as_deref(), Some("192.0.2.1"));
+        assert_eq!(name_for(Section::Dns, &ip), None, "the DNS Check still needs a name");
+    }
+
+    #[test]
+    fn a_reverse_lookup_lists_each_ptr_with_its_forward_confirmation() {
+        use zombo_core::rdns::Ptr;
+        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
+        let r = RdnsResult::Ip {
+            ip,
+            ptr_query: "1.2.0.192.in-addr.arpa.".into(),
+            ptr_error: None,
+            ptrs: vec![
+                Ptr { name: "mail.example.com".into(), addresses: vec![ip], forward_error: None, confirmed: true },
+                Ptr { name: "old.example.com".into(), addresses: vec![], forward_error: None, confirmed: false },
+            ],
+        };
+        let o = rdns_outcome(&r);
+        let rows: Vec<String> = o.facts.iter().map(Fact::record).collect();
+        assert!(
+            rows.contains(&"Forward lookup of mail.example.com: 192.0.2.1, which confirms 192.0.2.1".to_string()),
+            "{rows:?}"
+        );
+        assert!(
+            rows.contains(
+                &"Forward lookup of old.example.com: no address, which does not confirm 192.0.2.1".to_string()
+            ),
+            "{rows:?}"
+        );
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn an_address_with_no_ptr_says_none_and_a_failed_lookup_does_not() {
+        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
+        let none = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: None, ptrs: vec![] };
+        assert!(rdns_outcome(&none).facts.iter().any(|f| f.record() == "PTR: none"));
+        let failed = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: Some("timed out".into()), ptrs: vec![] };
+        assert!(!rdns_outcome(&failed).facts.iter().any(|f| f.key == "PTR"));
     }
 
     #[test]

@@ -106,7 +106,7 @@ const BINDINGS: &[Binding] = &[
     bind("6", true, false, false, When::Always, Action::Jump(5), "Go to Web"),
     bind("7", true, false, false, When::Always, Action::Jump(6), "Go to TLS"),
     bind("8", true, false, false, When::Always, Action::Jump(7), "Go to Registration"),
-    bind("9", true, false, false, When::Always, Action::Jump(8), "Go to the On demand Checks"),
+    bind("9", true, false, false, When::Always, Action::Jump(Section::FIRST_ON_DEMAND), "Go to the On demand Checks"),
     bind("up", false, true, false, When::Always, Action::PrevSection, "Previous section"),
     bind("down", false, true, false, When::Always, Action::NextSection, "Next section"),
     bind("t", true, false, false, When::Always, Action::NewTab, "New tab"),
@@ -252,7 +252,7 @@ mod tests {
             (ctrl("1"), Jump(0)),
             (ctrl("5"), Jump(4)),
             (ctrl("8"), Jump(7)),
-            (ctrl("9"), Jump(8)),
+            (ctrl("9"), Jump(Section::FIRST_ON_DEMAND)),
             (press("p", true, false, true), Run(Section::Ports)),
             (press("s", true, false, true), Run(Section::Smtp)),
             (press("t", true, false, true), Run(Section::TlsPort)),
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(shown(Action::NextSection).as_deref(), Some("Alt+Down"));
         assert_eq!(shown(Action::Submit).as_deref(), Some("Enter"));
         assert_eq!(shown(Action::Cheatsheet).as_deref(), Some("?"));
-        assert_eq!(shown(Action::Jump(8)).as_deref(), Some("Ctrl+9"));
+        assert_eq!(shown(Action::Jump(Section::FIRST_ON_DEMAND)).as_deref(), Some("Ctrl+9"));
         assert_eq!(shown(Action::Run(Section::Ports)).as_deref(), Some("Ctrl+Shift+P"));
         assert!(entries.iter().all(|e| !e.shortcut.is_empty() && !e.label.is_empty()));
     }
