@@ -3,6 +3,7 @@
 pub mod blacklist;
 pub mod dns;
 pub mod email_auth;
+pub mod evidence;
 pub mod delegation;
 pub mod dnssec;
 pub mod finding;

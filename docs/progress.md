@@ -8,18 +8,15 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 | Work | Owner | Notes |
 |---|---|---|
-| Evidence analysis: email headers and mail logs (`evidence/`, `zombo evidence headers|maillog`) | worker D | Pure text. Go: `headers.go`, `maillog.go`, `evidence.go` |
-| TLS certificate and chain level 1, TCP port test (`tls.rs`, `ports.rs`, `zombo tls`, `zombo ports`) | worker E | Go: `ssl.go`, `hosting.go`. Builds a reusable `inspect over a stream` seam for SMTP STARTTLS |
-| Blacklist, reverse DNS and FCrDNS (`blacklist.rs`, `rdns.rs`, `zombo blacklist`, `zombo rdns`) | worker F | Go: `blacklist.go`. Uses the system resolver, not public ones, for blocklists |
-| Web inspection: redirect chain, headers, origin vs CDN, CDN and ASN (`web.rs`, `zombo web`) | worker G | Go: `website.go`, `origin.go`. Reuses the `ureq` client pattern |
+| TLS certificate and chain level 1, TCP port test (`tls.rs`, `ports.rs`, `zombo tls`, `zombo ports`) | worker E | Go: `ssl.go`, `hosting.go`. Builds a reusable "inspect over a stream" seam for SMTP STARTTLS. Still running |
 
-Each worker follows `docs/agents/worker-rules.md`. Waiting on worker E: SMTP banner and STARTTLS.
+Waiting on worker E: SMTP banner and STARTTLS. Rules for workers: `docs/agents/worker-rules.md`.
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
 ## Done
 
-- [x] Workers A (registration), B (email) and C (DNSSEC) reviewed and merged into `rewrite`. 236 tests pass; clippy, `cargo deny` and `cargo audit` clean. Email auth (`email_auth/`, `zombo email`): SPF walker with the 10-lookup count, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record. MX comes from the lookup inside `email_auth`
+- [x] Workers A, B, C, D, F, G reviewed and merged into `rewrite` (E still running). 386 tests pass; clippy, `cargo deny` and `cargo audit` clean. Registration, email auth, DNSSEC, evidence, blacklist and rDNS, web inspection are in. 236 tests pass; clippy, `cargo deny` and `cargo audit` clean. Email auth (`email_auth/`, `zombo email`): SPF walker with the 10-lookup count, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record. MX comes from the lookup inside `email_auth`
 
 - [x] Planning session, ADR-0006 and ADR-0007, `CONTEXT.md` rewritten
 - [x] GPUI spike passed (Ubuntu 24.04.5 laptop with Orca, 24.04 and 26.04 containers, AMD, Intel)
@@ -54,20 +51,20 @@ Go sources to port: `email_auth.go`, `blacklist.go`, `headers.go`, `maillog.go`.
 - [x] DMARC
 - [x] MTA-STS, TLS-RPT, BIMI: DNS records only. The MTA-STS policy file over HTTPS is not fetched yet (the HTTP client from `registration` can do it)
 - [ ] SMTP banner and STARTTLS test
-- [ ] Blacklist lookup
-- [ ] Reverse DNS and forward-confirmed reverse DNS
+- [x] Blacklist lookup (`blacklist.rs`, `zombo blacklist`): Go zones, system resolver (not public ones), 127.255.255.x refusal handling, bounded
+- [x] Reverse DNS and forward-confirmed reverse DNS (`rdns.rs`, `zombo rdns`)
 - [ ] SMTP banner and STARTTLS test (no Go source; new)
-- [ ] Header analysis (Evidence)
-- [ ] Mail-log analysis (Evidence)
+- [x] Header analysis (Evidence) (`evidence/headers.rs`, `zombo evidence headers`)
+- [x] Mail-log analysis (Evidence) (`evidence/maillog.rs`, `zombo evidence maillog`)
 
 ## To do: hosting and web
 
 Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
-- [ ] HTTP redirect chain, headers, status
-- [ ] Origin versus CDN comparison
+- [x] HTTP redirect chain, headers, status (`web/`, `zombo web`)
+- [x] Origin versus CDN comparison (`--origin IP`; new, the Go `origin.go` was a UI guard)
 - [ ] Certificate and chain, level 1 (trust, expiry, SAN match, OCSP stapling, HSTS, CAA)
-- [ ] CDN and ASN detection
+- [x] CDN and ASN detection (headers, CNAME chain, Team Cymru DNS)
 - [ ] TCP port connect test
 
 ## To do: the app
@@ -114,6 +111,13 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 ## Decisions waiting
 
+- [ ] **Proxy policy is inconsistent.** `registration` honours `HTTP_PROXY`/`HTTPS_PROXY`; `web` turns the environment proxy off on purpose ("a diagnostic must show what the site does"). Decide one rule, or keep both and say so in the UI
+- [ ] **Web User-Agent** is `zombo/<version>` (Go sent a browser-like string to avoid WAF blocks): expect more 403s. Keep honest, or send a browser-like string
+- [ ] **Web cookies:** no cookie jar (Go kept cookies across hops), so a cookie-dependent redirect reads as a loop. Add a per-Check jar if it matters
+- [ ] **Web follows https to http downgrades** on redirect (same as Go). Decide whether to flag it as a finding or refuse
+- [ ] **`--origin` with a self-signed or Cloudflare Origin CA certificate** reads as "did not answer directly". Add `--insecure-origin`?
+- [ ] **`rdns` for a host** lists addresses only, without PTR confirmation per address; add it if the Diagnosis wants it
+
 - [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
 - [ ] DNSSEC expiry warning is `min(3 days, lifetime / 4)`, not a flat 3 days (Cloudflare signs for about 2 days). Accepted as a deliberate deviation; unsigned-yet (not-before) signatures have no finding
 - [ ] Email: the SPF walk is breadth-first with a 30-lookup cap, so which subtree is cut when the cap bites can differ from Go
@@ -128,10 +132,16 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [x] Earlier: propagation, stale cache, delegation
 - [ ] UI note: the `dnssec` nameserver list repeats identical lines per address; collapse identical rows in the UI
 
+## Network egress (what the app contacts), to document in `docs/network-egress.md`
+
+- [ ] Write the file: the target's own servers; the resolvers (public list, system resolver, nameservers found by discovery); RDAP bootstrap bases and registry WHOIS servers (port 43); Team Cymru DNS (`*.asn.cymru.com`); the DNSBL zones in the blacklist table; the release endpoint for updates. Nothing else, no telemetry
+
 ## Still unverified
 
 - [ ] NVIDIA GPUs
 - [ ] The AppImage without `libfuse2` on real hardware (the work laptop has `libfuse2t64` installed)
 - [ ] Broken-delegation paths against a real broken domain (fakes only so far)
+- [ ] Web: origin comparison against a real CDN whose origin differs; the HTTPS success path is covered only live, not offline (no TLS fake server yet)
+- [ ] Blacklist: a real Spamhaus refusal when queried through a public resolver (this network cannot show it); rerun from the VPS with and without `--resolver 8.8.8.8`
 - [ ] Registration: a real https redirect chain and the proxy path are untested; `.ru`/`.it` referral seen live only via IANA
 - [ ] Scroll frame rate
