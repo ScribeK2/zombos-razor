@@ -1,5 +1,6 @@
 mod app;
 mod assets;
+mod settings;
 
 use std::{
     any::Any,

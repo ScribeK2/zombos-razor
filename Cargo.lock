@@ -8756,7 +8756,10 @@ name = "zombo-ui"
 version = "0.0.0"
 dependencies = [
  "gpui-kit",
+ "notify-rust",
+ "serde",
  "tokio",
+ "toml 1.2.1+spec-1.1.0",
  "zombo-core",
 ]
 

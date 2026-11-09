@@ -22,10 +22,8 @@ use crate::{
     diagnosis::PropEvent,
     outcome::{CheckEvent, Fact, Outcome},
     section::Section,
+    settings_model::{Settings, budget},
 };
-
-const PER_VANTAGE: Duration = Duration::from_secs(4);
-const WHOLE_CHECK: Duration = Duration::from_secs(20);
 
 /// The Checks that run on their own when a target is submitted (DESIGN.md, "Checks per target kind").
 pub fn automatic(kind: Kind) -> &'static [Section] {
@@ -48,18 +46,6 @@ pub fn watchable(section: Section) -> bool {
     wired(section) && !section.is_on_demand()
 }
 
-fn limit(section: Section) -> Duration {
-    match section {
-        Section::Registration => Duration::from_secs(15),
-        Section::Email => Duration::from_secs(25),
-        Section::Web => Duration::from_secs(12),
-        Section::Tls => Duration::from_secs(10),
-        Section::Smtp => Duration::from_secs(40),
-        Section::Blacklist => Duration::from_secs(25),
-        _ => WHOLE_CHECK,
-    }
-}
-
 pub fn check_name(target: &Target) -> Option<String> {
     match target.kind {
         Kind::Domain | Kind::Hostname => Some(target.value.clone()),
@@ -74,57 +60,70 @@ pub fn name_for(section: Section, target: &Target) -> Option<String> {
     if section.is_on_demand() && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
 }
 
-pub async fn run_propagation(target: String, tx: UnboundedSender<PropEvent>) {
+/// The ten public resolvers, then the rep's own that are not already among them.
+fn propagation_resolvers(extra: &[SocketAddr]) -> Vec<zombo_core::propagation::Vantage> {
+    let mut resolvers = default_resolvers();
+    for &address in extra {
+        if !resolvers.iter().any(|r| r.address == address) {
+            resolvers.push(zombo_core::propagation::Vantage::resolver(&address.to_string(), "Added in settings", address));
+        }
+    }
+    resolvers
+}
+
+pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSender<PropEvent>) {
     let _ = tx.send(PropEvent::Started);
+    let limits = budget(Section::Dns, settings.timeout);
     let work = async {
-        let resolvers = default_resolvers();
+        let resolvers = propagation_resolvers(&settings.resolvers);
         let bootstrap: Vec<SocketAddr> = resolvers.iter().map(|r| r.address).collect();
-        let nameservers = discover_nameservers(&bootstrap, &target, 53, PER_VANTAGE).await.unwrap_or_default();
-        propagation_with(&resolvers, &nameservers, &target, Scope::All, PER_VANTAGE, |a| {
+        let nameservers = discover_nameservers(&bootstrap, &target, 53, limits.query).await.unwrap_or_default();
+        propagation_with(&resolvers, &nameservers, &target, Scope::All, limits.query, |a| {
             let _ = tx.send(PropEvent::Answer(Box::new(a.clone())));
         })
         .await
         .map_err(|e| e.to_string())
     };
-    let event = match tokio::time::timeout(WHOLE_CHECK, work).await {
+    let event = match tokio::time::timeout(limits.whole, work).await {
         Ok(result) => PropEvent::Finished(Box::new(result)),
         Err(_) => PropEvent::TimedOut,
     };
     let _ = tx.send(event);
 }
 
-pub async fn run_section(section: Section, name: String, tx: UnboundedSender<CheckEvent>) {
+pub async fn run_section(section: Section, name: String, settings: Settings, tx: UnboundedSender<CheckEvent>) {
     let _ = tx.send(CheckEvent::Started);
-    let event = match tokio::time::timeout(limit(section), produce(section, &name)).await {
+    let event = match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings)).await {
         Ok(result) => CheckEvent::Finished(Box::new(result)),
         Err(_) => CheckEvent::TimedOut,
     };
     let _ = tx.send(event);
 }
 
-async fn produce(section: Section, name: &str) -> Result<Outcome, String> {
+async fn produce(section: Section, name: &str, settings: &Settings) -> Result<Outcome, String> {
+    let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section {
-        Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), PER_VANTAGE)
+        Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
             .await
             .map(|r| delegation_outcome(&r))
             .map_err(|e| e.to_string()),
-        Section::Dnssec => check_dnssec(&bootstrap, &validating_resolvers(), name, 53, SystemTime::now(), PER_VANTAGE)
+        Section::Dnssec => check_dnssec(&bootstrap, &validating_resolvers(), name, 53, SystemTime::now(), query)
             .await
             .map(|r| dnssec_outcome(&r))
             .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
-            let r = email_auth(resolver, name, &[], PER_VANTAGE).await;
+            let r = email_auth(resolver, name, &settings.selectors, query).await;
             if r.answered() { Ok(email_outcome(name, &r)) } else { Err(format!("no answer from DNS resolver {resolver}")) }
         }
         Section::Web => {
             let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
-            let opts = WebOptions { timeout: Duration::from_secs(10), ..WebOptions::default() };
+            let opts = WebOptions { timeout: query, ..WebOptions::default() };
             Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
         }
-        Section::Tls => check_tls(name, 443, Duration::from_secs(8)).await.map(|r| tls_outcome(name, &r)).map_err(|e| e.to_string()),
-        Section::Registration => check_registration(name, &Endpoints::default(), Duration::from_secs(12))
+        Section::Tls => check_tls(name, 443, query).await.map(|r| tls_outcome(name, &r)).map_err(|e| e.to_string()),
+        Section::Registration => check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
             .await
             .map(|r| registration_outcome(name, &r))
             .map_err(|e| e.to_string()),
@@ -546,4 +545,14 @@ mod tests {
         assert!(blacklist_outcome("example.com", &r).records().contains(&"Mail host addresses: no mail host has an address".to_string()));
     }
 
+    #[test]
+    fn the_rep_s_resolvers_join_the_ten_public_ones_without_repeating_any() {
+        let own: SocketAddr = "192.0.2.53:53".parse().unwrap();
+        let already: SocketAddr = "1.1.1.1:53".parse().unwrap();
+        let all = propagation_resolvers(&[own, already, own]);
+        assert_eq!(all.len(), default_resolvers().len() + 1);
+        assert_eq!(all.last().map(|v| v.address), Some(own));
+        assert_eq!(all.iter().filter(|v| v.address == already).count(), 1);
+        assert_eq!(propagation_resolvers(&[]).len(), default_resolvers().len());
+    }
 }
