@@ -28,6 +28,8 @@ use rustls::{
     server::ParsedCertificate,
 };
 use serde::{Serialize, Serializer};
+
+use crate::text::printable;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsConnector;
@@ -301,7 +303,7 @@ fn handshake_error(e: io::Error) -> TlsError {
         ) => TlsError::Handshake(format!(
             "the server refused the handshake; it may offer only TLS 1.0 or 1.1 (deprecated, and not spoken by this tool) or no cipher suite in common ({e})"
         )),
-        _ => TlsError::Handshake(clean(&e.to_string())),
+        _ => TlsError::Handshake(printable(&e.to_string())),
     }
 }
 
@@ -346,7 +348,7 @@ pub fn assess(
     let parsed = match ParsedCertificate::try_from(first) {
         Ok(p) => p,
         Err(e) => {
-            let (trust, verify_error) = (Trust::Invalid, Some(clean(&e.to_string())));
+            let (trust, verify_error) = (Trust::Invalid, Some(printable(&e.to_string())));
             return Ok(Assessment { chain: certs, hostname_match: false, verified: false, trust, verify_error });
         }
     };
@@ -374,14 +376,9 @@ pub fn assess(
         Err(_) => Trust::Invalid,
     };
     let verify_error =
-        at_now.as_ref().err().or(name_error.as_ref()).or(trust_check.as_ref().err()).map(|e| clean(&e.to_string()));
+        at_now.as_ref().err().or(name_error.as_ref()).or(trust_check.as_ref().err()).map(|e| printable(&e.to_string()));
     let verified = at_now.is_ok() && name_error.is_none();
     Ok(Assessment { chain: certs, hostname_match: name_error.is_none(), verified, trust, verify_error })
-}
-
-/// Control characters from a certificate or an error must not reach a Finding.
-fn clean(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect()
 }
 
 fn describe(der: &CertificateDer<'_>, leaf: bool) -> Result<TlsCert, TlsError> {
@@ -392,7 +389,7 @@ fn describe(der: &CertificateDer<'_>, leaf: bool) -> Result<TlsCert, TlsError> {
         let cn = n.iter_common_name().next().map(|a| {
             a.as_str().map_or_else(|_| String::from_utf8_lossy(a.attr_value().data).into_owned(), str::to_string)
         });
-        clean(&cn.unwrap_or_else(|| n.to_string()))
+        printable(&cn.unwrap_or_else(|| n.to_string()))
     };
     let sans = match (leaf, c.subject_alternative_name()) {
         (true, Ok(Some(ext))) => ext
@@ -400,7 +397,7 @@ fn describe(der: &CertificateDer<'_>, leaf: bool) -> Result<TlsCert, TlsError> {
             .general_names
             .iter()
             .filter_map(|g| match g {
-                GeneralName::DNSName(d) => Some(clean(d)),
+                GeneralName::DNSName(d) => Some(printable(d)),
                 _ => None,
             })
             .collect(),

@@ -15,6 +15,7 @@ pub mod registration;
 pub mod resolver;
 pub mod smtp;
 pub mod target;
+pub mod text;
 pub mod tls;
 pub mod tls_extras;
 pub mod untrusted;

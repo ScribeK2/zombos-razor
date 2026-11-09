@@ -40,3 +40,17 @@ fn pure_text_functions_survive_nasty_text_in_bounded_time() {
         assert!(start.elapsed() < Duration::from_secs(5), "took {:?}", start.elapsed());
     }
 }
+
+#[test]
+fn bidirectional_and_invisible_characters_never_reach_displayed_text() {
+    let bad = |s: &str| s.contains('\u{202e}') || s.contains('\u{200b}');
+    assert!(!bad(&display_text("pasted \u{202e}evil\u{200b}")));
+    let n = zombo_ui::notice::watch_notice(&settings_model::Settings::default(), "example.com\u{202e} \u{200b}changed")
+        .unwrap();
+    assert!(!bad(&n.1), "{:?}", n.1);
+    let e = settings_model::parse("resolvers = [\"1.2.3\u{202e}.4\u{200b}\"]")
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(e.contains("1.2.3") && !bad(&e), "{e:?}");
+}

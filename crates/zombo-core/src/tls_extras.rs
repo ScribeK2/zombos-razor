@@ -9,9 +9,10 @@ use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 
 use crate::{
-    email_auth::{clip, printable},
+    email_auth::clip,
     finding::{Finding, Severity},
     resolver::Resolver,
+    text::printable,
     tls::TlsResult,
 };
 

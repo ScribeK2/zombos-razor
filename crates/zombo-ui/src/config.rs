@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use zombo_core::target::parse_target;
+use zombo_core::{target::parse_target, text::strip};
 
 use crate::{
     settings_model::{self, MAX_FILE_BYTES, Settings},
@@ -122,10 +122,7 @@ pub fn parse_recent(text: &str) -> Result<Vec<RecentEntry>, String> {
         match parse_target(&e.name) {
             Ok(t) if t.value == e.name => {}
             _ => {
-                return Err(format!(
-                    "{:?} is not a target name",
-                    e.name.chars().filter(|c| !c.is_control()).take(40).collect::<String>()
-                ));
+                return Err(format!("{:?} is not a target name", strip(&e.name).chars().take(40).collect::<String>()));
             }
         }
         if e.at < 0 {

@@ -2,6 +2,7 @@
 //! JSON is offered per section. Pure text builders; the shell only puts the text on the clipboard.
 
 use serde_json::{Value, json};
+use zombo_core::text::single_line;
 
 use crate::{
     diagnosis::Tab,
@@ -50,25 +51,16 @@ fn doc(tab: &Tab, section: Section) -> Doc {
     d
 }
 
-/// A value as it goes on the clipboard: no control characters.
-pub fn value(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).collect()
-}
-
-fn flat(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
-}
-
 fn section_md(tab: &Tab, section: Section, level: &str) -> String {
     let d = doc(tab, section);
-    let mut out = format!("{level} {}\n\n**{}.** {}\n\n", section.label(), flat(&d.word), flat(&d.why));
+    let mut out = format!("{level} {}\n\n**{}.** {}\n\n", section.label(), single_line(&d.word), single_line(&d.why));
     let findings: Vec<_> = d
         .findings
         .iter()
         .map(|f| zombo_core::Finding {
-            title: flat(&f.title).into(),
-            message: flat(&f.message),
-            recommendation: f.recommendation.as_deref().map(|r| flat(r).into()),
+            title: single_line(&f.title).into(),
+            message: single_line(&f.message),
+            recommendation: f.recommendation.as_deref().map(|r| single_line(r).into()),
             ..f.clone()
         })
         .collect();
@@ -78,7 +70,7 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
     }
     fact_lines(&mut out, &d.rows);
     if !d.details.is_empty() {
-        out.push_str(&format!("\n{level}# {}\n\n", flat(&d.details_title)));
+        out.push_str(&format!("\n{level}# {}\n\n", single_line(&d.details_title)));
         fact_lines(&mut out, &d.details);
     }
     out
@@ -149,6 +141,7 @@ mod tests {
     use zombo_core::{
         Finding, Severity,
         target::{Kind, Target},
+        text::strip,
     };
 
     use super::*;
@@ -165,7 +158,7 @@ mod tests {
         };
         let o = Outcome {
             findings: vec![f],
-            facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`b")],
+            facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`\u{202e}\u{200b}b")],
             details_title: "Redirect chain",
             details: vec![Fact::new("Hop 1", "301 http://example.com")],
         };
@@ -180,17 +173,19 @@ mod tests {
         assert!(md.starts_with("## Web\n\n**1 PROBLEM.** "), "{md}");
         assert!(md.contains("- **Warning** No HSTS: Add the header. [31m Set it.\n"), "{md}");
         assert!(md.contains("- Status: `200`\n"), "{md}");
-        assert!(md.contains("- Server: `a'b`\n"), "{md}");
+        assert!(md.contains("- Server: `a' b`\n"), "{md}");
         assert!(md.contains("\n### Redirect chain\n\n- Hop 1: `301 http://example.com`\n"), "{md}");
     }
 
     #[test]
     fn no_copied_text_holds_a_control_character() {
         let t = tab_with_web();
-        for text in [section_markdown(&t, Section::Web), diagnosis_markdown(&t), value("a\u{1b}[2Jb\nc")] {
-            assert!(!text.chars().any(|c| c.is_control() && c != '\n'), "{text:?}");
+        for text in
+            [section_markdown(&t, Section::Web), diagnosis_markdown(&t), strip("a\u{1b}[2J\u{202e}b\u{200b}\nc")]
+        {
+            assert!(!text.chars().any(|c| zombo_core::text::is_unsafe_char(c) && c != '\n'), "{text:?}");
         }
-        assert_eq!(value("a\u{7}b\r\nc"), "abc");
+        assert_eq!(strip("a\u{7}b\r\nc"), "abc");
     }
 
     #[test]

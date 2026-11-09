@@ -9,6 +9,7 @@ use zombo_core::{
         headers::{self, HeaderAnalysis},
         maillog::{self, MailLogAnalysis},
     },
+    text::{is_unsafe_char, single_line},
 };
 
 use crate::{
@@ -124,7 +125,7 @@ pub fn display_text(s: &str) -> String {
             '\n' => c,
             '\r' => '\u{fffd}',
             '\t' => ' ',
-            c if c.is_control() => '\u{fffd}',
+            c if is_unsafe_char(c) => '\u{fffd}',
             c => c,
         })
         .collect::<String>()
@@ -631,7 +632,7 @@ pub fn view(report: &Report, section: Section) -> View {
 
 /// A value as a Markdown code span: no control characters, and no backtick to end the span early.
 pub(crate) fn code(s: &str) -> String {
-    let flat: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let flat = single_line(s);
     format!("`{}`", flat.replace('`', "'"))
 }
 

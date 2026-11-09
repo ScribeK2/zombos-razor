@@ -1,10 +1,12 @@
+use zombo_core::text::strip;
+
 use crate::settings_model::Settings;
 
 const SUMMARY: &str = "Watch stopped";
 
 /// The desktop notification for a stopped Watch, or `None` when the rep turned them off.
 pub fn watch_notice(settings: &Settings, message: &str) -> Option<(&'static str, String)> {
-    settings.notifications.then(|| (SUMMARY, message.chars().filter(|c| !c.is_control()).collect()))
+    settings.notifications.then(|| (SUMMARY, strip(message)))
 }
 
 /// Send it and carry on. A desktop with no notification service is not an error for the app, so
@@ -34,6 +36,6 @@ mod tests {
     #[test]
     fn control_characters_never_reach_the_notification_service() {
         let n = watch_notice(&Settings::default(), "a\u{1b}[31m\nb").unwrap();
-        assert!(!n.1.chars().any(char::is_control));
+        assert!(!n.1.chars().any(zombo_core::text::is_unsafe_char));
     }
 }

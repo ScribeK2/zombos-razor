@@ -8,7 +8,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::email_auth::{clip, printable};
+use crate::{email_auth::clip, text::printable};
 
 /// RFC 5321 allows 512 bytes per reply line, CRLF included.
 pub const MAX_LINE: usize = 512;

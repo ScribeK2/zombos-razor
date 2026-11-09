@@ -14,6 +14,7 @@ use std::{
     time::Duration,
 };
 
+use crate::text::strip;
 use minisign_verify::{PublicKey, Signature};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -322,14 +323,9 @@ struct ApiAsset {
 
 /// Release notes as shown to the rep: bounded, one line, no control or bidirectional characters.
 pub fn notes_preview(notes: &str) -> String {
-    let mut out: String = notes
-        .chars()
-        .take(NOTES_CHARS)
-        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
-        .filter(|c| {
-            !c.is_control() && !matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-        })
-        .collect();
+    let mut out: String =
+        notes.chars().take(NOTES_CHARS).map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect();
+    out = strip(&out);
     if notes.chars().nth(NOTES_CHARS).is_some() {
         out.push_str("...");
     }
@@ -618,7 +614,7 @@ mod tests {
     fn notes_are_bounded_and_have_no_control_characters() {
         let long = format!("a\u{1b}[31m\nb\u{202e}{}", "x".repeat(700));
         let p = notes_preview(&long);
-        assert!(!p.chars().any(|c| c.is_control() || c == '\u{202e}'), "{p:?}");
+        assert!(!p.chars().any(crate::text::is_unsafe_char), "{p:?}");
         assert!(p.starts_with("a[31m b"), "{p:?}");
         assert!(p.chars().count() <= NOTES_CHARS + 3 && p.ends_with("..."));
         assert_eq!(notes_preview("short"), "short");

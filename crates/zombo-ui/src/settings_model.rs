@@ -1,7 +1,7 @@
 use std::{fmt, net::SocketAddr, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use zombo_core::{email_auth::parse_selectors, registration::check_proxy, resolver::parse_addr};
+use zombo_core::{email_auth::parse_selectors, registration::check_proxy, resolver::parse_addr, text::single_line};
 
 use crate::section::Section;
 
@@ -201,7 +201,7 @@ fn proxy(text: &str) -> Result<Option<String>, String> {
     if text.is_empty() {
         return Ok(None);
     }
-    if text.len() > MAX_PROXY || text.chars().any(char::is_control) {
+    if text.len() > MAX_PROXY || text.chars().any(zombo_core::text::is_unsafe_char) {
         return Err("not a usable proxy address".into());
     }
     check_proxy(text).map_err(|e| clip(&e))?;
@@ -210,12 +210,12 @@ fn proxy(text: &str) -> Result<Option<String>, String> {
 
 /// A bad value shown back to the rep: bounded, and with no control characters.
 fn shown(v: &str) -> String {
-    let clean: String = v.chars().map(|c| if c.is_control() { ' ' } else { c }).take(40).collect();
+    let clean: String = single_line(v).chars().take(40).collect();
     format!("\"{clean}{}\"", if v.chars().count() > 40 { "..." } else { "" })
 }
 
 fn clip(text: &str) -> String {
-    let clean: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).take(160).collect();
+    let clean: String = single_line(text).chars().take(160).collect();
     clean
 }
 
@@ -501,14 +501,14 @@ mod tests {
         assert!(parse(&many).is_ok());
         let mixed = "resolvers = [\"\u{0}\", \"\u{1b}[31m\"]\nproxy = \"\u{7}\"\n";
         let e = parse(mixed).unwrap_err().to_string();
-        assert!(!e.chars().any(char::is_control), "{e:?}");
+        assert!(!e.chars().any(zombo_core::text::is_unsafe_char), "{e:?}");
         assert!(parse("\u{feff}\u{0}\u{1}").is_err());
     }
 
     #[test]
     fn an_error_text_is_one_short_line_without_control_characters() {
         let e = parse(&format!("resolvers = [\"{}\"]", "x\u{1b}y".repeat(500))).unwrap_err().to_string();
-        assert!(e.len() < 200 && !e.chars().any(char::is_control), "{e:?}");
+        assert!(e.len() < 200 && !e.chars().any(zombo_core::text::is_unsafe_char), "{e:?}");
     }
 
     #[test]

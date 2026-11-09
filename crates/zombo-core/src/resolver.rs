@@ -14,10 +14,7 @@ use hickory_proto::{
     rr::{Name, RData, RecordType},
 };
 
-use crate::{
-    dns::exchange,
-    email_auth::{clip, printable},
-};
+use crate::{dns::exchange, email_auth::clip, text::printable};
 
 const RESOLV_CONF_MAX_BYTES: u64 = 64 * 1024;
 /// glibc's own limit.

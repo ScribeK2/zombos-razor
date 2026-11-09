@@ -10,6 +10,8 @@ use std::{borrow::Cow, io::Read, net::IpAddr};
 use regex::Regex;
 use serde::Serialize;
 
+use crate::text::{printable, printable_cow};
+
 /// Largest pasted text accepted; more is an error, not a silent cut.
 pub const MAX_INPUT: usize = 4 << 20;
 /// Longest line or header value looked at. Real log lines and headers are far shorter.
@@ -63,22 +65,10 @@ pub(crate) fn cut(s: &str, max: usize) -> &str {
 }
 
 pub(crate) fn clean(s: &str) -> Cow<'_, str> {
-    if !s.chars().any(char::is_control) {
-        return Cow::Borrowed(s);
+    if s.contains('\t') {
+        return Cow::Owned(printable(&s.replace('\t', " ")));
     }
-    Cow::Owned(
-        s.chars()
-            .map(|c| {
-                if c == '\t' {
-                    ' '
-                } else if c.is_control() {
-                    '\u{fffd}'
-                } else {
-                    c
-                }
-            })
-            .collect(),
-    )
+    printable_cow(s)
 }
 
 pub(crate) fn re(pattern: &str) -> Regex {
