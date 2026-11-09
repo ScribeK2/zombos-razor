@@ -229,5 +229,7 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 ## Go code removed (2026-11-09, user decision)
 
 - [x] No last Go release. `cmd/`, `internal/`, `web/`, `go.mod`, `go.sum` and the Go CI workflow deleted from `rewrite`; the Go source stays in git history at `main` (tip `b8fc3d5`) and the tag `v1.0.0`. 766 tests still pass. `testdata/` stays (the Rust tests read it)
-- [ ] Parity audit running (`docs/parity.md`); its scripts read Go from `main`
+- [x] Parity audit merged (`docs/parity.md`, `scripts/parity.sh`): 74 rows, 21 ported, 17 with deviation, 14 replaced, 18 dropped on purpose, 4 MISSING; 98 Go finding codes, 96 ported, 1 with deviation, 1 replaced; 225 cited tests all exist. Lost and fixed: the nine `dns_*` DNS Lookup findings (ported, not yet wired), the release version stamp (`zombo_core::VERSION`, `ZOMBO_VERSION`; the updater would have offered the same release forever)
 - [ ] Not verified: a signature made by the real `minisign` binary accepted by our verifier (owner to sign a test file and send it); the signing step has never run in GitHub Actions
+- [ ] Decisions taken from the audit (owner accepted the recommendations 2026-11-09): N1 wire dns findings, N2 accept the TLS 1.0/1.1 deviation and test the hint, N3 on-demand TLS port check, N4 fixed 'Not visible from here' lines, N5 'This machine' resolver row, N6 change lines and a footer in Diagnosis copy, N8 no single-instance rule, N9 cancel and j/k, Reverse DNS section for IP targets, UA uses the real version. A worker is building them
+- [x] N7 old Go Cases: accepted loss. There is no last Go release and no migration; `stackwell.db` stays on disk untouched and the Go source is at `main`
