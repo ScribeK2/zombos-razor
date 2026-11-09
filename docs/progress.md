@@ -222,3 +222,6 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] In progress: one shared `zombo_core::text` cleaner that also strips bidirectional and zero-width characters (U+202E and similar passed `is_control`), replacing about a dozen local helpers, plus a structure test that bans new `.is_control()` calls
 - [ ] Fuzz gaps: CAA rdata, propagation text parse and blacklist beyond the DNS path, OCSP content (not checked by design); ASAN runs failed to build `gpui-pre` so runs were coverage only; `fuzz/rust-toolchain.toml` untested without rustup
 - [ ] The fuzz and release workflows have never run on GitHub (no remote yet)
+- [x] Text policy merged (766 tests): `zombo_core::text` strips controls, bidirectional and zero-width characters (ZWJ kept); five local helpers deleted; `text_policy` tests ban new `.is_control()`. Weak: the redirect `Location` test passed under mutation, no web page title test
+- [x] First test AppImage built from `rewrite` (`VERSION=0.1.0-test`, 17.3 MB, SHA256SUMS verified), smoke passes on Ubuntu 24.04.5 and 26.04.1 with FUSE mount: first render 231 ms and 240 ms under llvmpipe, graceful message with a dead display and with no display variable
+- [ ] Work laptop measurements (cold start, scroll, memory, Orca, NVIDIA if any machine has one): waiting on the user
