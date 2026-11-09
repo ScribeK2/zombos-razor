@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::*;
@@ -6,6 +6,7 @@ use gpui_kit::*;
 use zombo_ui::{
     checks, diagnosis as dg,
     keys::{self, Action, Mode, Press},
+    outcome::Fact,
     record::RecordKind,
     runtime,
     section::Section,
@@ -24,6 +25,7 @@ pub struct Shell {
     rail_focus: Vec<FocusHandle>,
     finding_focus: Vec<FocusHandle>,
     palette: Option<usize>,
+    open: HashSet<&'static str>,
     sheet: bool,
     error: Option<String>,
     started: Instant,
@@ -99,6 +101,7 @@ impl Shell {
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             finding_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
+            open: HashSet::new(),
             sheet: false,
             error: None,
             started,
@@ -136,21 +139,42 @@ impl Shell {
         self.input.update(cx, |i, cx| i.focus(window, cx));
     }
 
-    fn start_propagation(&mut self, cx: &mut Context<Self>) {
+    fn start_section(&mut self, section: Section, cx: &mut Context<Self>) {
         let Some(tab) = self.ws.current() else { return };
-        if tab.propagation.state == zombo_ui::status::CheckState::Running {
+        if tab.state(section) == zombo_ui::status::CheckState::Running || !checks::wired(section) {
             return;
         }
         let key = tab.target.value.clone();
-        let Some(name) = checks::propagation_name(&tab.target) else { return };
-        let mut rx = runtime::stream(move |tx| checks::run_propagation(name, tx));
+        let Some(name) = checks::check_name(&tab.target) else { return };
+        if section == Section::Dns {
+            let mut rx = runtime::stream(move |tx| checks::run_propagation(name, tx));
+            cx.spawn(async move |this, cx| {
+                while let Some(event) = rx.recv().await {
+                    let key = key.clone();
+                    if this
+                        .update(cx, |app, cx| {
+                            if let Some(tab) = app.ws.tabs.iter_mut().find(|t| t.target.value == key) {
+                                tab.propagation.apply(&key, event);
+                                cx.notify();
+                            }
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+            return;
+        }
+        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, tx));
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
                 if this
                     .update(cx, |app, cx| {
                         if let Some(tab) = app.ws.tabs.iter_mut().find(|t| t.target.value == key) {
-                            tab.propagation.apply(&key, event);
+                            tab.run_mut(section).apply(event);
                             cx.notify();
                         }
                     })
@@ -161,6 +185,13 @@ impl Shell {
             }
         })
         .detach();
+    }
+
+    fn start_automatic(&mut self, cx: &mut Context<Self>) {
+        let Some(kind) = self.ws.current().map(|t| t.target.kind) else { return };
+        for &section in checks::automatic(kind) {
+            self.start_section(section, cx);
+        }
     }
 
     fn perform(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
@@ -178,7 +209,7 @@ impl Shell {
                         Ok(_) => {
                             self.error = None;
                             self.sync_omnibox(window, cx);
-                            self.start_propagation(cx);
+                            self.start_automatic(cx);
                             window.focus(&self.root_focus, cx);
                         }
                         Err(e) => self.error = Some(e),
@@ -187,8 +218,10 @@ impl Shell {
             }
             Action::Palette => self.palette = if self.palette.is_some() { None } else { Some(0) },
             Action::Rerun => {
-                if self.ws.current().is_some_and(|t| t.section == Section::Dns || t.section == Section::Summary) {
-                    self.start_propagation(cx);
+                match self.ws.current().map(|t| t.section) {
+                    Some(Section::Summary) => self.start_automatic(cx),
+                    Some(section) => self.start_section(section, cx),
+                    None => {}
                 }
             }
             Action::NextRecord | Action::PrevRecord => {
@@ -476,11 +509,19 @@ impl Shell {
 
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(tab) = self.ws.current() else { return div().id("none") };
+        let heading = |text: &'static str| {
+            div().px(px(8.)).pt(px(12.)).pb(px(4.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(text)
+        };
         let items = Section::ALL.iter().enumerate().map(|(i, &section)| {
             let state = tab.state(section);
             let selected = tab.section == section;
             let g = state.glyph();
-            div()
+            let group = match i {
+                1 => Some("CHECKS"),
+                Section::FIRST_ON_DEMAND => Some("ON DEMAND"),
+                _ => None,
+            };
+            let item = div()
                 .id(("rail", i))
                 .track_focus(&self.rail_focus[i])
                 .h(px(t::RAIL_ITEM_HEIGHT))
@@ -514,12 +555,13 @@ impl Shell {
                 .child(div().flex_1().child(section.label()))
                 .child(
                     div()
-                        .max_w(px(110.))
+                        .max_w(px(132.))
                         .truncate()
                         .text_size(px(t::TEXT_CAPTION))
                         .text_color(color(t::GRAY_900))
                         .child(state.label()),
-                )
+                );
+            div().flex().flex_col().when_some(group, |s, g| s.child(heading(g))).child(item)
         });
         div()
             .id("rail")
@@ -706,6 +748,124 @@ impl Shell {
                 )
             })
             .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)))
+            .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
+            .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
+    }
+
+    fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
+        let open = self.open.contains(id);
+        let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
+            div()
+                .id((id, i))
+                .min_h(px(t::ROW_HEIGHT))
+                .px(px(12.))
+                .py(px(4.))
+                .flex()
+                .gap(px(12.))
+                .border_t_1()
+                .border_color(color(t::GRAY_400))
+                .text_size(px(t::TEXT_LABEL))
+                .role(Role::Row)
+                .aria_label(format!("{k} {v}"))
+                .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(k))
+                .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
+        });
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .bg(color(t::GRAY_100))
+            .border_1()
+            .border_color(color(t::GRAY_400))
+            .rounded(px(t::RADIUS_SMALL))
+            .overflow_hidden()
+            .child(
+                div()
+                    .id((id, 9999usize))
+                    .h(px(32.))
+                    .px(px(12.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .focus_visible(focus_ring)
+                    .role(Role::Button)
+                    .aria_expanded(open)
+                    .aria_label(format!("{title}, {summary}"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.open.remove(id) {
+                            this.open.insert(id);
+                        }
+                        cx.notify();
+                    }))
+                    .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+                    .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child(summary)),
+            )
+            .when(open, |s| s.children(body))
+    }
+
+    fn facts(&self, tab: &dg::Tab, section: Section, cx: &mut Context<Self>) -> Div {
+        let Some(run) = tab.runs.get(&section) else { return div() };
+        let o = &run.outcome;
+        let rows = |f: &[Fact]| f.iter().map(|f| (f.key.clone(), f.value.clone(), t::GRAY_1000)).collect::<Vec<_>>();
+        let open_rows = rows(&o.facts);
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .when(!open_rows.is_empty(), |s| {
+                s.child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(format!("{} data", section.label())))
+                    .child(
+                        div()
+                            .id("facts")
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .bg(color(t::GRAY_100))
+                            .border_1()
+                            .border_color(color(t::GRAY_400))
+                            .rounded(px(t::RADIUS_SMALL))
+                            .overflow_hidden()
+                            .role(Role::Table)
+                            .aria_label(format!("{} data", section.label()))
+                            .children(open_rows.into_iter().enumerate().map(|(i, (k, v, c))| {
+                                let shown = if i > 0 && o.facts[i - 1].key == k { String::new() } else { k.clone() };
+                                div()
+                                    .id(("fact", i))
+                                    .min_h(px(t::ROW_HEIGHT))
+                                    .px(px(12.))
+                                    .py(px(4.))
+                                    .flex()
+                                    .gap(px(12.))
+                                    .when(i > 0, |s| s.border_t_1().border_color(color(t::GRAY_400)))
+                                    .text_size(px(t::TEXT_LABEL))
+                                    .role(Role::Row)
+                                    .aria_label(format!("{k}: {v}"))
+                                    .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(shown))
+                                    .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
+                            })),
+                    )
+            })
+            .when(!o.details.is_empty(), |s| {
+                let n = o.details.len();
+                s.child(self.disclosure("details", o.details_title.to_string(), format!("{n} {}", if n == 1 { "line" } else { "lines" }), rows(&o.details), cx))
+            })
+    }
+
+    fn changes_view(&self, d: zombo_ui::outcome::Diff, cx: &mut Context<Self>) -> Div {
+        let lines = d
+            .removed
+            .iter()
+            .map(|l| ("removed".to_string(), l.clone(), t::CRITICAL))
+            .chain(d.added.iter().map(|l| ("added".to_string(), l.clone(), t::OK)))
+            .collect();
+        self.disclosure("changes", "Changed since the previous run".into(), d.summary(), lines, cx)
     }
 
     fn resolver_table(&self, tab: &dg::Tab, cx: &mut Context<Self>) -> impl IntoElement {

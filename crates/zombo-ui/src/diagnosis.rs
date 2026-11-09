@@ -1,12 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use zombo_core::{
     Finding, Severity,
     propagation::{Agreement, PropagationResult, VantageAnswer, VantageKind},
-    target::Target,
+    target::{Kind, Target},
 };
 
 use crate::{
+    outcome::{History, Run},
     record::RecordKind,
     section::Section,
     status::{CheckState, Glyph},
@@ -175,16 +176,31 @@ pub struct Propagation {
     pub stale: BTreeMap<String, Vec<String>>,
     pub agreement: Option<Agreement>,
     pub findings: Vec<Finding>,
+    pub history: History,
+}
+
+/// Every record any Vantage returned, as "TYPE: value" lines, for comparing runs.
+pub fn propagation_records(r: &PropagationResult) -> Vec<String> {
+    let lines: BTreeSet<String> = r
+        .nameservers
+        .iter()
+        .chain(&r.resolvers)
+        .flat_map(|a| a.answers.iter().flat_map(|(t, vs)| vs.iter().map(move |v| format!("{t}: {v}"))))
+        .collect();
+    lines.into_iter().collect()
 }
 
 impl Propagation {
     pub fn new() -> Self {
-        Propagation { state: CheckState::NotRun, rows: vec![], settled: false, stale: BTreeMap::new(), agreement: None, findings: vec![] }
+        Propagation { state: CheckState::NotRun, rows: vec![], settled: false, stale: BTreeMap::new(), agreement: None, findings: vec![], history: History::default() }
     }
 
     pub fn apply(&mut self, target: &str, event: PropEvent) {
         match event {
-            PropEvent::Started => *self = Propagation { state: CheckState::Running, ..Propagation::new() },
+            PropEvent::Started => {
+                let history = std::mem::take(&mut self.history);
+                *self = Propagation { state: CheckState::Running, history, ..Propagation::new() };
+            }
             PropEvent::Answer(a) => {
                 if self.state == CheckState::Running {
                     self.rows.push(Row::from_answer(&a));
@@ -204,6 +220,7 @@ impl Propagation {
                         self.rows = r.nameservers.iter().chain(&r.resolvers).map(Row::from_answer).collect();
                         self.stale = r.stale.clone();
                         self.settled = true;
+                        self.history.settle(propagation_records(&r));
                         self.findings = ordered(&zombo_core::propagation::propagation_findings(target, &r));
                         self.agreement = Some(r.agreement);
                         self.state = CheckState::Done { problems: problems(&self.findings) };
@@ -234,18 +251,31 @@ pub struct Tab {
     pub section: Section,
     pub propagation: Propagation,
     pub record: RecordKind,
+    pub runs: HashMap<Section, Run>,
 }
 
 impl Tab {
     pub fn new(target: Target) -> Self {
-        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default() }
+        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default(), runs: HashMap::new() }
+    }
+
+    pub fn run_mut(&mut self, section: Section) -> &mut Run {
+        self.runs.entry(section).or_default()
     }
 
     pub fn state(&self, section: Section) -> CheckState {
         match section {
             Section::Dns => self.propagation.state.clone(),
             Section::Summary => self.summary_state(),
-            _ => CheckState::NotRun,
+            s => self.runs.get(&s).map(|r| r.state.clone()).unwrap_or(CheckState::NotRun),
+        }
+    }
+
+    pub fn history(&self, section: Section) -> Option<&History> {
+        match section {
+            Section::Dns => Some(&self.propagation.history),
+            Section::Summary => None,
+            s => self.runs.get(&s).map(|r| &r.history),
         }
     }
 
@@ -269,8 +299,11 @@ impl Tab {
     pub fn findings(&self, section: Section) -> Vec<Finding> {
         match section {
             Section::Dns => self.propagation.findings.clone(),
-            Section::Summary => ordered(&self.propagation.findings),
-            _ => vec![],
+            Section::Summary => {
+                let all: Vec<Finding> = Section::ALL.iter().filter(|&&s| s != Section::Summary).flat_map(|&s| self.findings(s)).collect();
+                ordered(&all)
+            }
+            s => self.runs.get(&s).map(|r| r.outcome.findings.clone()).unwrap_or_default(),
         }
     }
 
@@ -278,16 +311,16 @@ impl Tab {
         let state = self.state(section);
         let v = |w: &str, y: &str| Verdict { word: w.into(), why: y.into() };
         match &state {
-            CheckState::NotRun if section == Section::Dns && crate::checks::propagation_name(&self.target).is_none() => {
-                v("NOT RUN", "Propagation needs a domain or host name, so it does not apply to an IP address.")
-            }
-            CheckState::NotRun => v("NOT RUN", &not_run_reason(section)),
+            CheckState::NotRun => v("NOT RUN", &self.not_run_reason(section)),
             CheckState::Running => v("RUNNING", "Results appear here as each answer arrives."),
             CheckState::Failed { reason } => v("FAILED", reason),
             CheckState::TimedOut => v("TIMED OUT", "The Check did not finish in time. Retry it, or try again from another network."),
             CheckState::Done { problems } => match (section, self.propagation.agreement) {
                 (Section::Dns, Some(a)) => v(a.label(), a.reason()),
-                _ if *problems == 0 => v("NO PROBLEMS", "Every Check that ran found nothing wrong. Checks that have not run are listed as not run."),
+                _ if *problems == 0 && section == Section::Summary => {
+                    v("NO PROBLEMS", "Every Check that ran found nothing wrong. Checks that have not run are listed as not run.")
+                }
+                _ if *problems == 0 => v("NO PROBLEMS", "This Check found nothing wrong. Read the findings below for what it looked at."),
                 _ => v(&format!("{problems} PROBLEM{}", if *problems == 1 { "" } else { "S" }), "Read the findings below, worst first."),
             },
         }
@@ -306,11 +339,21 @@ impl Tab {
     }
 }
 
-fn not_run_reason(section: Section) -> String {
-    match section {
-        Section::Dns => "The propagation Check has not started for this target.".into(),
-        Section::Summary => "No Check has run for this target yet.".into(),
-        s => format!("The {} Check is not part of this build yet, so nothing was checked.", s.label()),
+impl Tab {
+    fn not_run_reason(&self, section: Section) -> String {
+        let kind = self.target.kind;
+        match section {
+            Section::Summary => "No Check has run for this target yet.".into(),
+            s if s.is_on_demand() => format!(
+                "The {} Check runs only when you ask for it, because it connects to the target's servers. Asking for it from the app is not built yet, so nothing was checked.",
+                s.label()
+            ),
+            s if kind == Kind::Ip => format!("The {} Check needs a domain or host name, so it does not apply to an IP address.", s.label()),
+            s if !crate::checks::automatic(kind).contains(&s) => {
+                format!("The {} Check does not start on its own for a host name. Press Ctrl+R to run it.", s.label())
+            }
+            s => format!("The {} Check has not started for this target.", s.label()),
+        }
     }
 }
 
@@ -469,14 +512,57 @@ mod tests {
     }
 
     #[test]
-    fn sections_without_a_check_say_not_run_honestly() {
+    fn sections_that_have_not_run_say_not_run_honestly() {
         let t = tab();
         for s in [Section::Delegation, Section::Dnssec, Section::Email, Section::Web, Section::Tls, Section::Registration] {
             assert_eq!(t.state(s), CheckState::NotRun);
             let v = t.verdict(s);
             assert_eq!(v.word, "NOT RUN");
-            assert!(v.why.contains("nothing was checked"));
+            assert!(v.why.contains("has not started"), "{}", v.why);
         }
+        for s in [Section::Ports, Section::Smtp, Section::Blacklist] {
+            assert_eq!(t.state(s), CheckState::NotRun);
+            assert!(t.verdict(s).why.contains("only when you ask"));
+        }
+    }
+
+    #[test]
+    fn an_ip_address_and_a_host_name_explain_why_a_check_does_not_start() {
+        let ip = Tab::new(Target { value: "192.0.2.1".into(), kind: Kind::Ip });
+        assert!(ip.verdict(Section::Dns).why.contains("does not apply to an IP address"));
+        let host = Tab::new(Target { value: "www.example.com".into(), kind: Kind::Hostname });
+        assert!(host.verdict(Section::Dnssec).why.contains("Ctrl+R"));
+        assert!(host.verdict(Section::Web).why.contains("has not started"));
+    }
+
+    #[test]
+    fn a_wired_check_streams_into_its_own_section_and_the_summary() {
+        use crate::outcome::{CheckEvent, Outcome};
+        let mut t = tab();
+        let f = finding(Severity::Warning, "w");
+        t.run_mut(Section::Registration).apply(CheckEvent::Started);
+        assert_eq!(t.state(Section::Summary), CheckState::Running);
+        t.run_mut(Section::Registration).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f], ..Outcome::default() }))));
+        assert_eq!(t.state(Section::Registration), CheckState::Done { problems: 1 });
+        assert_eq!(t.state(Section::Dns), CheckState::NotRun);
+        assert_eq!(t.findings(Section::Summary).len(), 1);
+        assert_eq!(t.verdict(Section::Registration).word, "1 PROBLEM");
+    }
+
+    #[test]
+    fn a_propagation_rerun_reports_records_added_and_removed() {
+        let mut p = Propagation::new();
+        p.apply("e", PropEvent::Started);
+        p.apply("e", PropEvent::Finished(Box::new(Ok(result(&[])))));
+        assert_eq!(p.history.changes, None);
+        let mut second = result(&[]);
+        second.resolvers = vec![answer("Google", false, "newer")];
+        second.nameservers = vec![answer("ns1", true, "newer")];
+        p.apply("e", PropEvent::Started);
+        p.apply("e", PropEvent::Finished(Box::new(Ok(second))));
+        let d = p.history.changes.clone().unwrap();
+        assert_eq!(d.added, ["TXT: newer"]);
+        assert_eq!(d.removed, ["TXT: new", "TXT: old"]);
     }
 
     #[test]
