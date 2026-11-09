@@ -11,6 +11,7 @@ use zombo_core::{
     target::{Kind, parse_target},
 };
 use zombo_core::{ports::{FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for}, tls::{Trust, check_tls, tls_findings}};
+use zombo_core::{smtp::{Mode, Reach, SmtpOptions, Starttls, check_smtp, smtp_findings, valid_ehlo_name}, tls_extras::{caa_findings, check_caa, ocsp_findings}};
 use zombo_core::evidence::{headers, maillog};
 use zombo_core::web::{WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
@@ -54,6 +55,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("evidence") => evidence(it),
         Some("tls") => tls(it).await,
         Some("ports") => ports(it).await,
+        Some("smtp") => smtp(it).await,
+        Some("caa") => caa(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -741,7 +744,8 @@ async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     let port = port.unwrap_or(443);
     let r = check_tls(&t.value, port, timeout).await.map_err(|e| e.to_string())?;
-    let findings = tls_findings(&t.value, port, &r);
+    let mut findings = tls_findings(&t.value, port, &r);
+    findings.extend(ocsp_findings(&t.value, port, &r));
     if json {
         let out = serde_json::json!({ "result": r, "findings": findings });
         println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
@@ -755,6 +759,7 @@ async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         Trust::UnknownAuthority => "unknown authority",
         Trust::Invalid => "does not verify",
     };
+    println!("  OCSP stapling: {}", if r.ocsp_stapled { "yes" } else { "no" });
     println!("  trust: {trust}; name {}; verified: {}", if r.hostname_match { "matches" } else { "does NOT match" }, if r.verified { "yes" } else { "NO" });
     for (i, c) in r.chain.iter().enumerate() {
         println!("  [{i}] {} (issuer {})", c.subject, c.issuer);
@@ -814,6 +819,169 @@ async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             PortState::NoRoute => "no route from this network",
         };
         println!("  {:<40} {:>5}  {:<22} {state}{}", p.address.to_string(), p.port, p.service, p.banner.as_deref().map(|b| format!("  {b}")).unwrap_or_default());
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+const SMTP_USAGE: &str = "usage: zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+const CAA_USAGE: &str = "usage: zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+
+async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout, mut resolvers, mut mode, mut ehlo) = (None, false, Duration::from_secs(10), vec![], None, None);
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--implicit-tls" => mode = Some(Mode::Implicit),
+            "--starttls" => mode = Some(Mode::Starttls),
+            "--ehlo" => ehlo = Some(value("--ehlo")?),
+            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{SMTP_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(SMTP_USAGE.into()),
+        }
+    }
+    let raw = target.ok_or(SMTP_USAGE)?;
+    let (host, port) = split_port(&raw);
+    let t = parse_target(host)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname | Kind::Ip) {
+        return Err(format!("smtp needs a mail host name or IP, not {:?}", t.kind));
+    }
+    let port = port.unwrap_or(25);
+    let mut o = SmtpOptions::for_port(port);
+    o.mode = mode.unwrap_or(o.mode);
+    if let Some(name) = ehlo {
+        if !valid_ehlo_name(&name) {
+            return Err(format!("{name:?} is not usable as an EHLO name"));
+        }
+        o.ehlo_name = name;
+    }
+    o.timing.connect = timeout;
+    o.timing.step = timeout;
+    o.timing.overall = timeout * 3;
+    let r = check_smtp(&t.value, port, &o).await;
+
+    let mut expect = vec![];
+    if t.kind != Kind::Ip {
+        expect.push(t.value.clone());
+    }
+    if let (Some(ip), true) = (r.peer, r.reach == Reach::Answered) {
+        if resolvers.is_empty() {
+            resolvers = system_resolvers();
+        }
+        if !resolvers.is_empty() {
+            if let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await {
+                expect.extend(ptrs.into_iter().map(|p| p.name));
+            }
+        }
+    }
+    let findings = smtp_findings(&r, &expect);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    let peer = r.peer.map(|p| format!(" ({p})")).unwrap_or_default();
+    println!("{}:{}{peer}  {}", r.host, r.port, if r.mode == Mode::Implicit { "implicit TLS" } else { "STARTTLS" });
+    if let Some(b) = &r.banner {
+        println!("  banner: {} {}", b.code, b.text);
+    }
+    let show = |label: &str, e: &zombo_core::smtp::Extensions| {
+        let mut parts = vec![];
+        for (on, name) in [(e.starttls, "STARTTLS"), (e.pipelining, "PIPELINING"), (e.eight_bit_mime, "8BITMIME")] {
+            if on {
+                parts.push(name.to_string());
+            }
+        }
+        if let Some(n) = e.size {
+            parts.push(format!("SIZE {n}"));
+        }
+        if !e.auth.is_empty() {
+            parts.push(format!("AUTH {}", e.auth.join(" ")));
+        }
+        parts.extend(e.other.iter().cloned());
+        println!("  {label}: {}", parts.join(", "));
+    };
+    if let Some(e) = &r.extensions {
+        show(if r.mode == Mode::Implicit { "offers" } else { "offers before TLS" }, e);
+    }
+    match &r.starttls {
+        Starttls::Upgraded => println!("  STARTTLS: accepted"),
+        Starttls::Refused { code, text } => println!("  STARTTLS: refused ({code} {text})"),
+        Starttls::HandshakeFailed(why) => println!("  STARTTLS: handshake failed ({why})"),
+        Starttls::NotOffered => println!("  STARTTLS: not offered"),
+        Starttls::NotApplicable | Starttls::NotAttempted => {}
+    }
+    if let Some(e) = &r.extensions_after_tls {
+        show("offers after TLS", e);
+    }
+    if let Some(c) = &r.tls {
+        println!("  TLS: {} {}; name {}; verified: {}", c.version, c.cipher, if c.hostname_match { "matches" } else { "does NOT match" }, if c.verified { "yes" } else { "NO" });
+        for (i, cert) in c.chain.iter().enumerate() {
+            println!("  [{i}] {} (issuer {}) valid {} to {}", cert.subject, cert.issuer, cert.not_before.date(), cert.not_after.date());
+        }
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn caa(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout, mut resolvers, mut port, mut cert) = (None, false, Duration::from_secs(4), vec![], 443u16, true);
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--no-cert" => cert = false,
+            "--port" => port = value("--port")?.parse().map_err(|_| "--port needs a number")?,
+            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{CAA_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(CAA_USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(CAA_USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname) {
+        return Err(format!("caa needs a domain or host name, not {:?}", t.kind));
+    }
+    if resolvers.is_empty() {
+        resolvers = system_resolvers();
+    }
+    if resolvers.is_empty() {
+        return Err("no DNS resolver found in /etc/resolv.conf; pass --resolver ip[:port]".into());
+    }
+    let r = check_caa(&resolvers, &t.value, timeout).await;
+    let (served, cert_error) = if cert {
+        match check_tls(&t.value, port, timeout * 2).await {
+            Ok(c) => (Some(c), None),
+            Err(e) => (None, Some(e.to_string())),
+        }
+    } else {
+        (None, None)
+    };
+    let findings = caa_findings(&r, served.as_ref());
+    if json {
+        let out = serde_json::json!({ "result": r, "certificate_error": cert_error, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{} via {}", t.value, join(&resolvers));
+    match &r.found_at {
+        Some(at) => println!("  CAA records on {at}:"),
+        None => println!("  no CAA records"),
+    }
+    for c in &r.records {
+        println!("    {}{} \"{}\"", if c.critical { "critical " } else { "" }, c.tag, c.value);
+    }
+    if let Some(c) = &served {
+        println!("  served certificate on port {port}: issued by {}", c.chain.first().map_or("?", |l| l.issuer.as_str()));
+    }
+    if let Some(e) = cert_error {
+        println!("  could not read the certificate on port {port} ({e}); the issuer was not compared");
     }
     println!();
     print_findings(&findings);
