@@ -1,4 +1,4 @@
-use crate::section::Section;
+use crate::{evidence_model::Kind, section::Section};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -18,6 +18,10 @@ pub enum Action {
     PrevRecord,
     ToggleWatch,
     Cheatsheet,
+    OpenEvidence(Kind),
+    Analyse,
+    CopySection,
+    CopyAll,
     Settings,
     Dismiss,
     MoveUp,
@@ -27,6 +31,8 @@ pub enum Action {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Omnibox,
+    /// The Evidence paste pane's text area: typing, like the omnibox, but Enter adds a line.
+    Paste,
     Browse,
     Palette,
     Sheet,
@@ -70,6 +76,11 @@ const BINDINGS: &[Binding] = &[
     bind("p", true, false, true, When::Always, Action::Run(Section::Ports), "Run port scan"),
     bind("s", true, false, true, When::Always, Action::Run(Section::Smtp), "Run SMTP banner check"),
     bind("b", true, false, true, When::Always, Action::Run(Section::Blacklist), "Run blacklist check"),
+    bind("h", true, false, true, When::Always, Action::OpenEvidence(Kind::Headers), "Analyse pasted headers"),
+    bind("m", true, false, true, When::Always, Action::OpenEvidence(Kind::MailLog), "Analyse pasted mail log"),
+    bind("enter", true, false, false, When::Always, Action::Analyse, "Analyse the pasted text"),
+    bind("c", true, false, true, When::Always, Action::CopySection, "Copy the section as Markdown"),
+    bind("c", true, true, false, When::Always, Action::CopyAll, "Copy the whole Evidence as Markdown"),
     bind("1", true, false, false, When::Always, Action::Jump(0), "Go to Summary"),
     bind("2", true, false, false, When::Always, Action::Jump(1), "Go to DNS"),
     bind("3", true, false, false, When::Always, Action::Jump(2), "Go to Delegation"),
@@ -158,9 +169,9 @@ pub fn action_for(mode: Mode, empty_state: bool, p: Press) -> Option<Action> {
                 _ => None,
             };
         }
-        Mode::Omnibox | Mode::Browse => {}
+        Mode::Omnibox | Mode::Paste | Mode::Browse => {}
     }
-    if mode == Mode::Omnibox && plain && key == "escape" {
+    if matches!(mode, Mode::Omnibox | Mode::Paste) && plain && key == "escape" {
         return Some(Action::Dismiss);
     }
     if mode == Mode::Omnibox && empty_state && plain {
@@ -180,7 +191,7 @@ pub fn action_for(mode: Mode, empty_state: bool, p: Press) -> Option<Action> {
                 && match b.when {
                     When::Always => true,
                     When::InOmnibox => mode == Mode::Omnibox,
-                    When::NotTyping => mode != Mode::Omnibox,
+                    When::NotTyping => !matches!(mode, Mode::Omnibox | Mode::Paste),
                 }
         })
         .map(|b| b.action)
@@ -239,6 +250,35 @@ mod tests {
         assert_eq!(action_for(Mode::Browse, false, plain("]")), Some(Action::NextRecord));
         assert_eq!(action_for(Mode::Browse, false, plain("[")), Some(Action::PrevRecord));
         assert_eq!(action_for(Mode::Omnibox, false, plain("]")), None);
+    }
+
+    #[test]
+    fn the_paste_pane_types_text_and_ctrl_enter_analyses() {
+        for k in ["w", "[", "]", "?", "enter"] {
+            assert_eq!(action_for(Mode::Paste, false, plain(k)), None, "{k} must reach the text area");
+        }
+        assert_eq!(action_for(Mode::Paste, false, ctrl("enter")), Some(Action::Analyse));
+        assert_eq!(action_for(Mode::Paste, false, plain("escape")), Some(Action::Dismiss));
+        assert_eq!(action_for(Mode::Paste, false, ctrl("t")), Some(Action::NewTab));
+        assert_eq!(action_for(Mode::Paste, false, ctrl("v")), None);
+        assert_eq!(action_for(Mode::Paste, false, ctrl("c")), None);
+    }
+
+    #[test]
+    fn the_evidence_shortcuts_are_bound_shown_and_do_not_clash() {
+        let h = press("h", true, false, true);
+        let m = press("m", true, false, true);
+        assert_eq!(action_for(Mode::Browse, false, h), Some(Action::OpenEvidence(Kind::Headers)));
+        assert_eq!(action_for(Mode::Omnibox, false, m), Some(Action::OpenEvidence(Kind::MailLog)));
+        assert_eq!(action_for(Mode::Browse, false, press("c", true, false, true)), Some(Action::CopySection));
+        assert_eq!(action_for(Mode::Browse, false, press("c", true, true, false)), Some(Action::CopyAll));
+        let entries = entries();
+        let shown = |a: Action| entries.iter().find(|e| e.action == a).map(|e| (e.label, e.shortcut.clone()));
+        assert_eq!(shown(Action::OpenEvidence(Kind::Headers)), Some(("Analyse pasted headers", "Ctrl+Shift+H".to_string())));
+        assert_eq!(shown(Action::OpenEvidence(Kind::MailLog)), Some(("Analyse pasted mail log", "Ctrl+Shift+M".to_string())));
+        assert_eq!(shown(Action::Analyse).map(|s| s.1).as_deref(), Some("Ctrl+Enter"));
+        let mut seen = std::collections::HashSet::new();
+        assert!(entries.iter().all(|e| seen.insert(e.shortcut.clone())), "two actions share a shortcut");
     }
 
     #[test]

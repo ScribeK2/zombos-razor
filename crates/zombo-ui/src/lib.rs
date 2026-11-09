@@ -1,6 +1,7 @@
 pub mod checks;
 pub mod config;
 pub mod diagnosis;
+pub mod evidence_model;
 pub mod keys;
 pub mod notice;
 pub mod ondemand;

@@ -1,6 +1,6 @@
-use std::{collections::HashSet, time::{Duration, Instant}};
+use std::{collections::{HashMap, HashSet}, time::{Duration, Instant}};
 
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use crate::settings::{PaneEvent, SettingsPane};
@@ -8,6 +8,7 @@ use zombo_ui::{
     checks,
     config::{self, Config, Dirs},
     diagnosis as dg,
+    evidence_model as ev,
     keys::{self, Action, Mode, Press},
     notice, ondemand,
     outcome::{CheckEvent, Fact},
@@ -17,9 +18,11 @@ use zombo_ui::{
     status::Glyph,
     theme as t,
     watch::Watches,
-    workspace::{Workspace, relative},
+    workspace::{Slot, Workspace, relative},
 };
 use zombo_core::Severity;
+
+mod evidence;
 
 const FINDING_HANDLES: usize = 64;
 const TOAST_FOR: Duration = Duration::from_secs(8);
@@ -34,6 +37,7 @@ pub struct Shell {
     palette: Option<usize>,
     open: HashSet<&'static str>,
     watches: Watches,
+    pastes: HashMap<u64, Entity<TextareaState>>,
     toast: Option<(String, Instant)>,
     sheet: bool,
     error: Option<String>,
@@ -131,6 +135,7 @@ impl Shell {
             palette: None,
             open: HashSet::new(),
             watches: Watches::default(),
+            pastes: HashMap::new(),
             toast,
             sheet: false,
             error: None,
@@ -150,6 +155,8 @@ impl Shell {
             Mode::Sheet
         } else if self.input.read(cx).focus_handle(cx).is_focused(window) {
             Mode::Omnibox
+        } else if self.pastes.values().any(|p| p.read(cx).focus_handle(cx).is_focused(window)) {
+            Mode::Paste
         } else {
             Mode::Browse
         }
@@ -179,7 +186,7 @@ impl Shell {
     }
 
     fn start_section_for(&mut self, key: &str, section: Section, cx: &mut Context<Self>) {
-        let Some(tab) = self.ws.tabs.iter().find(|t| t.target.value == key) else { return };
+        let Some(tab) = self.ws.tabs.iter().filter_map(Slot::diagnosis).find(|t| t.target.value == key) else { return };
         if tab.state(section) == zombo_ui::status::CheckState::Running || !checks::wired(section) {
             return;
         }
@@ -196,7 +203,7 @@ impl Shell {
                     let key = key.clone();
                     if this
                         .update(cx, |app, cx| {
-                            if let Some(tab) = app.ws.tabs.iter_mut().find(|t| t.target.value == key) {
+                            if let Some(tab) = app.ws.diagnosis_mut_for(&key) {
                                 tab.propagation.apply(&key, event);
                                 cx.notify();
                             }
@@ -211,7 +218,7 @@ impl Shell {
             .detach();
             return;
         }
-        if let Some(tab) = self.ws.tabs.iter_mut().find(|t| t.target.value == key) {
+        if let Some(tab) = self.ws.diagnosis_mut_for(&key) {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
@@ -221,7 +228,7 @@ impl Shell {
                 let key = key.clone();
                 if this
                     .update(cx, |app, cx| {
-                        if let Some(tab) = app.ws.tabs.iter_mut().find(|t| t.target.value == key) {
+                        if let Some(tab) = app.ws.diagnosis_mut_for(&key) {
                             tab.run_mut(section).apply(event);
                             cx.notify();
                         }
@@ -237,7 +244,7 @@ impl Shell {
     }
 
     fn after_run(&mut self, key: &str, section: Section) {
-        let Some(settled) = self.ws.tabs.iter().find(|t| t.target.value == key).and_then(|t| t.settled(section)) else { return };
+        let Some(settled) = self.ws.tabs.iter().filter_map(Slot::diagnosis).find(|t| t.target.value == key).and_then(|t| t.settled(section)) else { return };
         let now = Instant::now();
         if let Some(stopped) = self.watches.finished(key, section, settled.as_deref(), now) {
             let message = stopped.message();
@@ -250,7 +257,7 @@ impl Shell {
 
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let alive: Vec<String> = self.ws.tabs.iter().map(|t| t.target.value.clone()).collect();
+        let alive: Vec<String> = self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
@@ -341,6 +348,7 @@ impl Shell {
             }
             Action::CloseTab => {
                 self.ws.close_active();
+                self.drop_closed_pastes();
                 self.sync_omnibox(window, cx);
                 if self.ws.is_empty_state() {
                     self.focus_omnibox(window, cx);
@@ -350,6 +358,10 @@ impl Shell {
                 self.ws.step_tab(if action == Action::NextTab { 1 } else { -1 });
                 self.sync_omnibox(window, cx);
             }
+            Action::OpenEvidence(kind) => self.open_evidence(kind, window, cx),
+            Action::Analyse => self.analyse_pasted(window, cx),
+            Action::CopySection => self.copy_evidence(false, cx),
+            Action::CopyAll => self.copy_evidence(true, cx),
             Action::Cheatsheet => self.sheet = !self.sheet,
             Action::Settings => self.toggle_settings(window, cx),
             Action::Dismiss => {
@@ -516,14 +528,14 @@ impl Shell {
                 .when(active, |s| s.bg(color(t::BG_100)).border_1().border_color(color(t::GRAY_400)).border_b_0())
                 .hover(|s| s.bg(color(t::GRAY_200)))
                 .role(Role::Tab)
-                .aria_label(format!("Tab {} of {}: {}", i + 1, self.ws.tabs.len(), tab.target.value))
+                .aria_label(format!("Tab {} of {}: {}", i + 1, self.ws.tabs.len(), tab.label()))
                 .aria_selected(active)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.ws.select_tab(i);
                     this.sync_omnibox(window, cx);
                     cx.notify();
                 }))
-                .child(tab.target.value.clone())
+                .child(tab.label().to_string())
                 .child(
                     div()
                         .id(("tab-close", i))
@@ -532,7 +544,7 @@ impl Shell {
                         .items_center()
                         .justify_center()
                         .role(Role::Button)
-                        .aria_label(format!("Close tab {}", tab.target.value))
+                        .aria_label(format!("Close tab {}", tab.label()))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
                             this.ws.select_tab(i);
@@ -727,56 +739,7 @@ impl Shell {
         let show_chips = !findings.is_empty();
         let watchable = checks::watchable(section) && state != zombo_ui::status::CheckState::NotRun;
         let watching = self.watches.is_watching(&tab.target.value, section);
-        let finding_views = findings.iter().enumerate().map(|(i, f)| {
-            let c = severity_color(f.severity);
-            let label = dg::finding_label(f);
-            div()
-                .id(("finding", i))
-                .w_full()
-                .min_w_0()
-                .track_focus(&self.finding_focus[i.min(FINDING_HANDLES - 1)])
-                .flex()
-                .gap(px(12.))
-                .items_start()
-                .px(px(12.))
-                .py(px(10.))
-                .bg(color(t::GRAY_100))
-                .border_1()
-                .border_color(color(t::GRAY_400))
-                .rounded(px(t::RADIUS_SMALL))
-                .focus_visible(|s| focus_ring(s).bg(color(t::GRAY_200)))
-                .role(Role::ListItem)
-                .aria_label(label)
-                .child(
-                    div()
-                        .w(px(96.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .h(px(20.))
-                        .text_size(px(t::TEXT_CAPTION))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(color(c))
-                        .child(glyph(dg::severity_glyph(f.severity), 16.))
-                        .child(dg::severity_word(f.severity).to_uppercase()),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.))
-                        .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).font_weight(FontWeight::MEDIUM).child(f.title.to_string()))
-                        .when(!f.message.is_empty(), |s| {
-                            s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(f.message.clone()))
-                        })
-                        .when_some(f.recommendation.clone(), |s, r| {
-                            s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(r.to_string()))
-                        }),
-                )
-        });
+        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f));
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
@@ -960,6 +923,57 @@ impl Shell {
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
     }
+
+    fn finding_card(&self, i: usize, f: &zombo_core::Finding) -> Stateful<Div> {
+        let c = severity_color(f.severity);
+        let label = dg::finding_label(f);
+        div()
+            .id(("finding", i))
+            .w_full()
+            .min_w_0()
+            .track_focus(&self.finding_focus[i.min(FINDING_HANDLES - 1)])
+            .flex()
+            .gap(px(12.))
+            .items_start()
+            .px(px(12.))
+            .py(px(10.))
+            .bg(color(t::GRAY_100))
+            .border_1()
+            .border_color(color(t::GRAY_400))
+            .rounded(px(t::RADIUS_SMALL))
+            .focus_visible(|s| focus_ring(s).bg(color(t::GRAY_200)))
+            .role(Role::ListItem)
+            .aria_label(label)
+            .child(
+                div()
+                    .w(px(96.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .h(px(20.))
+                    .text_size(px(t::TEXT_CAPTION))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(color(c))
+                    .child(glyph(dg::severity_glyph(f.severity), 16.))
+                    .child(dg::severity_word(f.severity).to_uppercase()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).font_weight(FontWeight::MEDIUM).child(f.title.to_string()))
+                    .when(!f.message.is_empty(), |s| {
+                        s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(f.message.clone()))
+                    })
+                    .when_some(f.recommendation.clone(), |s, r| {
+                        s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(r.to_string()))
+                    }),
+            )
+}
 
     fn watch_button(&self, watching: bool, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -1330,6 +1344,8 @@ impl Render for Shell {
         }
         let body = if self.ws.is_empty_state() {
             div().flex_1().flex().flex_col().child(self.empty_state(cx).into_any_element())
+        } else if self.ws.current_evidence().is_some() {
+            div().flex_1().min_h_0().flex().child(self.evidence_rail(cx)).child(self.evidence_pane(cx))
         } else {
             div().flex_1().min_h_0().flex().child(self.rail(cx)).child(self.pane(cx))
         };

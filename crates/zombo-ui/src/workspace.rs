@@ -2,7 +2,11 @@ use std::time::{Duration, Instant};
 
 use zombo_core::target::parse_target;
 
-use crate::{diagnosis::Tab, section::Section};
+use crate::{
+    diagnosis::Tab,
+    evidence_model::{self, EvidenceTab},
+    section::Section,
+};
 
 pub const RECENT_LIMIT: usize = 8;
 
@@ -23,21 +27,91 @@ pub fn relative(elapsed: Duration) -> String {
     }
 }
 
+/// A tab is a Diagnosis of one target or an Evidence analysis of pasted text.
+#[derive(Debug)]
+pub enum Slot {
+    Diagnosis(Tab),
+    Evidence(EvidenceTab),
+}
+
+impl Slot {
+    pub fn label(&self) -> &str {
+        match self {
+            Slot::Diagnosis(t) => &t.target.value,
+            Slot::Evidence(e) => &e.label,
+        }
+    }
+
+    pub fn diagnosis(&self) -> Option<&Tab> {
+        match self {
+            Slot::Diagnosis(t) => Some(t),
+            Slot::Evidence(_) => None,
+        }
+    }
+
+    pub fn diagnosis_mut(&mut self) -> Option<&mut Tab> {
+        match self {
+            Slot::Diagnosis(t) => Some(t),
+            Slot::Evidence(_) => None,
+        }
+    }
+
+    pub fn evidence(&self) -> Option<&EvidenceTab> {
+        match self {
+            Slot::Evidence(e) => Some(e),
+            Slot::Diagnosis(_) => None,
+        }
+    }
+
+    pub fn evidence_mut(&mut self) -> Option<&mut EvidenceTab> {
+        match self {
+            Slot::Evidence(e) => Some(e),
+            Slot::Diagnosis(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Workspace {
-    pub tabs: Vec<Tab>,
+    pub tabs: Vec<Slot>,
     pub active: Option<usize>,
     pub recent: Vec<Recent>,
     pub recent_selected: usize,
+    pub next_evidence: u64,
 }
 
 impl Workspace {
+    /// The active Diagnosis tab; `None` on an Evidence tab and in the empty state.
     pub fn current(&self) -> Option<&Tab> {
-        self.active.and_then(|i| self.tabs.get(i))
+        self.active.and_then(|i| self.tabs.get(i)).and_then(Slot::diagnosis)
     }
 
     pub fn current_mut(&mut self) -> Option<&mut Tab> {
-        self.active.and_then(|i| self.tabs.get_mut(i))
+        self.active.and_then(|i| self.tabs.get_mut(i)).and_then(Slot::diagnosis_mut)
+    }
+
+    pub fn current_evidence(&self) -> Option<&EvidenceTab> {
+        self.active.and_then(|i| self.tabs.get(i)).and_then(Slot::evidence)
+    }
+
+    pub fn current_evidence_mut(&mut self) -> Option<&mut EvidenceTab> {
+        self.active.and_then(|i| self.tabs.get_mut(i)).and_then(Slot::evidence_mut)
+    }
+
+    pub fn diagnosis_mut_for(&mut self, target: &str) -> Option<&mut Tab> {
+        self.tabs.iter_mut().filter_map(Slot::diagnosis_mut).find(|t| t.target.value == target)
+    }
+
+    pub fn evidence_mut_for(&mut self, id: u64) -> Option<&mut EvidenceTab> {
+        self.tabs.iter_mut().filter_map(Slot::evidence_mut).find(|e| e.id == id)
+    }
+
+    pub fn open_evidence(&mut self, kind: evidence_model::Kind, unix_secs: u64) -> u64 {
+        let id = self.next_evidence;
+        self.next_evidence += 1;
+        self.tabs.push(Slot::Evidence(EvidenceTab::new(id, kind, unix_secs)));
+        self.active = Some(self.tabs.len() - 1);
+        id
     }
 
     pub fn is_empty_state(&self) -> bool {
@@ -58,10 +132,10 @@ impl Workspace {
         self.recent.insert(0, Recent { value: target.value.clone(), at: now });
         self.recent.truncate(RECENT_LIMIT);
         self.recent_selected = 0;
-        let index = match self.tabs.iter().position(|t| t.target.value == target.value) {
+        let index = match self.tabs.iter().position(|t| t.diagnosis().is_some_and(|t| t.target.value == target.value)) {
             Some(i) => i,
             None => {
-                self.tabs.push(Tab::new(target));
+                self.tabs.push(Slot::Diagnosis(Tab::new(target)));
                 self.tabs.len() - 1
             }
         };
@@ -95,13 +169,21 @@ impl Workspace {
     }
 
     pub fn jump(&mut self, index: usize) {
-        if let (Some(tab), Some(section)) = (self.current_mut(), Section::at(index)) {
+        if let Some(e) = self.current_evidence_mut() {
+            if let Some(&s) = evidence_model::sections(e.kind).get(index) {
+                e.section = s;
+            }
+        } else if let (Some(tab), Some(section)) = (self.current_mut(), Section::at(index)) {
             tab.section = section;
         }
     }
 
     pub fn step_section(&mut self, delta: isize) {
-        if let Some(tab) = self.current_mut() {
+        if let Some(e) = self.current_evidence_mut() {
+            let all = evidence_model::sections(e.kind);
+            let at = all.iter().position(|&s| s == e.section).unwrap_or(0) as isize;
+            e.section = all[(at + delta).rem_euclid(all.len() as isize) as usize];
+        } else if let Some(tab) = self.current_mut() {
             tab.section = tab.section.step(delta);
         }
     }
@@ -175,7 +257,7 @@ mod tests {
         ws.new_tab();
         ws.move_recent(1);
         let i = ws.submit("", Instant::now()).unwrap();
-        assert_eq!(ws.tabs[i].target.value, "a.example.com");
+        assert_eq!(ws.tabs[i].label(), "a.example.com");
         assert!(ws.submit("", Instant::now()).is_err());
     }
 
@@ -205,7 +287,7 @@ mod tests {
         ws.select_tab(0);
         ws.close_active();
         assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.tabs[0].target.value, "b.example.com");
+        assert_eq!(ws.tabs[0].label(), "b.example.com");
     }
 
     #[test]
@@ -233,7 +315,7 @@ mod tests {
         ws.jump(4);
         ws.step_section(1);
         assert_eq!(ws.current().unwrap().section, Section::Web);
-        assert_eq!(ws.tabs[0].section, Section::Dns);
+        assert_eq!(ws.tabs[0].diagnosis().unwrap().section, Section::Dns);
         ws.new_tab();
         ws.jump(0);
         ws.step_section(1);
@@ -246,5 +328,42 @@ mod tests {
         assert_eq!(relative(Duration::from_secs(180)), "3 min ago");
         assert_eq!(relative(Duration::from_secs(7300)), "2 h ago");
         assert_eq!(relative(Duration::from_secs(200_000)), "2 d ago");
+    }
+
+    #[test]
+    fn an_evidence_tab_opens_beside_diagnosis_tabs_and_a_target_still_opens_its_own() {
+        let mut ws = ws_with(&["a.example.com"]);
+        let first = ws.open_evidence(evidence_model::Kind::Headers, 0);
+        let second = ws.open_evidence(evidence_model::Kind::MailLog, 0);
+        assert_ne!(first, second);
+        assert!(ws.current().is_none() && ws.current_evidence().is_some());
+        ws.new_tab();
+        ws.submit("b.example.com", Instant::now()).unwrap();
+        assert_eq!(ws.tabs.len(), 4);
+        assert_eq!(ws.current().unwrap().target.value, "b.example.com");
+        ws.submit("a.example.com", Instant::now()).unwrap();
+        assert_eq!(ws.active, Some(0));
+    }
+
+    #[test]
+    fn evidence_sections_jump_and_step_inside_their_own_list() {
+        let mut ws = Workspace::default();
+        ws.open_evidence(evidence_model::Kind::Headers, 0);
+        ws.jump(1);
+        assert_eq!(ws.current_evidence().unwrap().section, evidence_model::Section::Authentication);
+        ws.jump(7);
+        assert_eq!(ws.current_evidence().unwrap().section, evidence_model::Section::Authentication);
+        ws.step_section(2);
+        assert_eq!(ws.current_evidence().unwrap().section, evidence_model::Section::Path);
+        ws.step_section(-1);
+        assert_eq!(ws.current_evidence().unwrap().section, evidence_model::Section::Findings);
+    }
+
+    #[test]
+    fn closing_an_evidence_tab_drops_it() {
+        let mut ws = Workspace::default();
+        ws.open_evidence(evidence_model::Kind::Headers, 0);
+        ws.close_active();
+        assert!(ws.tabs.is_empty() && ws.is_empty_state());
     }
 }
