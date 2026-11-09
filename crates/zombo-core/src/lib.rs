@@ -31,3 +31,25 @@ pub const VERSION: &str = match option_env!("ZOMBO_VERSION") {
     Some(v) => v,
     None => env!("CARGO_PKG_VERSION"),
 };
+
+/// The User-Agent of every HTTP client (web, registration). The updater builds its own from the
+/// running version it is given, which the app takes from `VERSION`. Never from `CARGO_PKG_VERSION`
+/// directly: a stamped release would still say `zombo/0.0.0`.
+pub fn user_agent() -> String {
+    user_agent_for(VERSION)
+}
+
+pub fn user_agent_for(version: &str) -> String {
+    format!("zombo/{version}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_user_agent_carries_the_given_version() {
+        assert_eq!(user_agent_for("9.9.9"), "zombo/9.9.9");
+        assert_eq!(user_agent(), format!("zombo/{VERSION}"));
+    }
+}

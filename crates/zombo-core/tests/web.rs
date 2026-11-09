@@ -311,7 +311,8 @@ async fn sends_a_plain_user_agent_and_no_cookies() {
     assert!(seen.len() >= 2);
     for q in &seen {
         assert!(
-            q.header("user-agent").is_some_and(|u| u.starts_with("zombo/") && !u.contains("Mozilla")),
+            q.header("user-agent")
+                .is_some_and(|u| u == format!("zombo/{}", zombo_core::VERSION) && !u.contains("Mozilla")),
             "{:?}",
             q.header("user-agent")
         );

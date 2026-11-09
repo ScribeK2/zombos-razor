@@ -27,12 +27,18 @@ pub enum Action {
     Dismiss,
     MoveUp,
     MoveDown,
+    /// Stop the Check that is running in this section.
+    Cancel,
+    /// `j` and the Down arrow: the next finding or row.
+    FocusNext,
+    FocusPrev,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Omnibox,
-    /// The Evidence paste pane's text area: typing, like the omnibox, but Enter adds a line.
+    /// A text field other than the omnibox (the Evidence paste area, the TLS port field): typing, so
+    /// no plain key is a shortcut.
     Paste,
     Browse,
     Palette,
@@ -84,6 +90,7 @@ const BINDINGS: &[Binding] = &[
     bind("r", true, false, false, When::Always, Action::Rerun, "Re-run this section's Check"),
     bind("p", true, false, true, When::Always, Action::Run(Section::Ports), "Run port scan"),
     bind("s", true, false, true, When::Always, Action::Run(Section::Smtp), "Run SMTP banner check"),
+    bind("t", true, false, true, When::Always, Action::Run(Section::TlsPort), "Run TLS on a port check"),
     bind("b", true, false, true, When::Always, Action::Run(Section::Blacklist), "Run blacklist check"),
     bind("h", true, false, true, When::Always, Action::OpenEvidence(Kind::Headers), "Analyse pasted headers"),
     bind("m", true, false, true, When::Always, Action::OpenEvidence(Kind::MailLog), "Analyse pasted mail log"),
@@ -99,7 +106,7 @@ const BINDINGS: &[Binding] = &[
     bind("6", true, false, false, When::Always, Action::Jump(5), "Go to Web"),
     bind("7", true, false, false, When::Always, Action::Jump(6), "Go to TLS"),
     bind("8", true, false, false, When::Always, Action::Jump(7), "Go to Registration"),
-    bind("9", true, false, false, When::Always, Action::Jump(8), "Go to the On demand Checks"),
+    bind("9", true, false, false, When::Always, Action::Jump(Section::FIRST_ON_DEMAND), "Go to the On demand Checks"),
     bind("up", false, true, false, When::Always, Action::PrevSection, "Previous section"),
     bind("down", false, true, false, When::Always, Action::NextSection, "Next section"),
     bind("t", true, false, false, When::Always, Action::NewTab, "New tab"),
@@ -107,6 +114,9 @@ const BINDINGS: &[Binding] = &[
     bind("tab", true, false, false, When::Always, Action::NextTab, "Next tab"),
     bind("tab", true, false, true, When::Always, Action::PrevTab, "Previous tab"),
     bind("w", false, false, false, When::NotTyping, Action::ToggleWatch, "Watch this result"),
+    bind("escape", false, false, false, When::NotTyping, Action::Cancel, "Cancel this Check"),
+    bind("j", false, false, false, When::NotTyping, Action::FocusNext, "Next finding or row"),
+    bind("k", false, false, false, When::NotTyping, Action::FocusPrev, "Previous finding or row"),
     bind("]", false, false, false, When::NotTyping, Action::NextRecord, "Next record type"),
     bind("[", false, false, false, When::NotTyping, Action::PrevRecord, "Previous record type"),
     bind("?", false, false, false, When::NotTyping, Action::Cheatsheet, "Shortcut cheat sheet"),
@@ -129,6 +139,7 @@ fn shortcut_text(b: &Binding) -> String {
         "down" => "Down".to_string(),
         "tab" => "Tab".to_string(),
         "enter" => "Enter".to_string(),
+        "escape" => "Esc".to_string(),
         k => k.to_uppercase(),
     };
     let mut parts = vec![];
@@ -188,6 +199,13 @@ pub fn action_for(mode: Mode, empty_state: bool, p: Press) -> Option<Action> {
             _ => {}
         }
     }
+    if mode == Mode::Browse && plain && !p.shift {
+        match key {
+            "down" => return Some(Action::FocusNext),
+            "up" => return Some(Action::FocusPrev),
+            _ => {}
+        }
+    }
     BINDINGS
         .iter()
         .find(|b| {
@@ -234,15 +252,40 @@ mod tests {
             (ctrl("1"), Jump(0)),
             (ctrl("5"), Jump(4)),
             (ctrl("8"), Jump(7)),
-            (ctrl("9"), Jump(8)),
+            (ctrl("9"), Jump(Section::FIRST_ON_DEMAND)),
             (press("p", true, false, true), Run(Section::Ports)),
             (press("s", true, false, true), Run(Section::Smtp)),
+            (press("t", true, false, true), Run(Section::TlsPort)),
             (press("b", true, false, true), Run(Section::Blacklist)),
         ];
         for (p, want) in cases {
             assert_eq!(action_for(Mode::Browse, false, p), Some(want), "{p:?}");
             assert_eq!(action_for(Mode::Omnibox, false, p), Some(want), "{p:?} in the omnibox");
         }
+    }
+
+    #[test]
+    fn escape_cancels_and_j_k_and_the_arrows_walk_the_results_but_only_when_not_typing() {
+        assert_eq!(action_for(Mode::Browse, false, plain("escape")), Some(Action::Cancel));
+        assert_eq!(action_for(Mode::Browse, false, plain("j")), Some(Action::FocusNext));
+        assert_eq!(action_for(Mode::Browse, false, plain("k")), Some(Action::FocusPrev));
+        assert_eq!(action_for(Mode::Browse, false, plain("down")), Some(Action::FocusNext));
+        assert_eq!(action_for(Mode::Browse, false, plain("up")), Some(Action::FocusPrev));
+        for mode in [Mode::Omnibox, Mode::Paste] {
+            for k in ["j", "k"] {
+                assert_eq!(action_for(mode, false, plain(k)), None, "{k} must reach the text field in {mode:?}");
+            }
+        }
+        assert_eq!(action_for(Mode::Palette, false, plain("j")), None);
+        assert_eq!(action_for(Mode::Palette, false, plain("escape")), Some(Action::Dismiss));
+        assert_eq!(action_for(Mode::Browse, false, ctrl("k")), Some(Action::Palette), "Ctrl+K is still the palette");
+        assert_eq!(action_for(Mode::Browse, false, press("up", false, true, false)), Some(Action::PrevSection));
+    }
+
+    #[test]
+    fn the_palette_lists_cancel_with_its_key() {
+        let e = entries().into_iter().find(|e| e.action == Action::Cancel).unwrap();
+        assert_eq!((e.label, e.shortcut.as_str()), ("Cancel this Check", "Esc"));
     }
 
     #[test]
@@ -307,7 +350,11 @@ mod tests {
     #[test]
     fn escape_leaves_the_omnibox_for_the_pane() {
         assert_eq!(action_for(Mode::Omnibox, false, plain("escape")), Some(Action::Dismiss));
-        assert_eq!(action_for(Mode::Browse, false, plain("escape")), None);
+        assert_eq!(
+            action_for(Mode::Browse, false, plain("escape")),
+            Some(Action::Cancel),
+            "in the pane it stops a running Check"
+        );
     }
 
     #[test]
@@ -328,7 +375,7 @@ mod tests {
     fn modifier_must_match_exactly() {
         assert_eq!(action_for(Mode::Browse, false, plain("l")), None);
         assert_eq!(action_for(Mode::Browse, false, press("l", true, true, false)), None);
-        assert_eq!(action_for(Mode::Browse, false, press("up", false, false, false)), None);
+        assert_eq!(action_for(Mode::Browse, false, press("up", false, false, true)), None, "Shift+Up is not Up");
         assert_eq!(action_for(Mode::Browse, false, press("tab", true, false, false)), Some(Action::NextTab));
     }
 
@@ -379,7 +426,7 @@ mod tests {
         assert_eq!(shown(Action::NextSection).as_deref(), Some("Alt+Down"));
         assert_eq!(shown(Action::Submit).as_deref(), Some("Enter"));
         assert_eq!(shown(Action::Cheatsheet).as_deref(), Some("?"));
-        assert_eq!(shown(Action::Jump(8)).as_deref(), Some("Ctrl+9"));
+        assert_eq!(shown(Action::Jump(Section::FIRST_ON_DEMAND)).as_deref(), Some("Ctrl+9"));
         assert_eq!(shown(Action::Run(Section::Ports)).as_deref(), Some("Ctrl+Shift+P"));
         assert!(entries.iter().all(|e| !e.shortcut.is_empty() && !e.label.is_empty()));
     }

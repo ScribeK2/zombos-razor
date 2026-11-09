@@ -12,8 +12,8 @@ use zombo_core::{
     dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
-    propagation::{Scope, default_resolvers, discover_nameservers, propagation_with},
-    rdns::{RdnsResult, check_rdns},
+    propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
+    rdns::{RdnsResult, check_rdns, rdns_findings},
     registration::{Endpoints, Registration, check_registration, registration_findings},
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
@@ -37,7 +37,7 @@ pub fn automatic(kind: Kind) -> &'static [Section] {
     match kind {
         Kind::Domain | Kind::Email => &[Dns, Delegation, Dnssec, Email, Web, Tls, Registration],
         Kind::Hostname => &[Dns, Web, Tls, Registration],
-        Kind::Ip => &[],
+        Kind::Ip => &[Rdns],
     }
 }
 
@@ -63,7 +63,11 @@ pub fn check_name(target: &Target) -> Option<String> {
 /// The name an on-demand Check connects to or asks about. An IP address is a valid subject
 /// here, unlike for the automatic Checks.
 pub fn name_for(section: Section, target: &Target) -> Option<String> {
-    if section.is_on_demand() && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
+    if (section.is_on_demand() || section == Section::Rdns) && target.kind == Kind::Ip {
+        Some(target.value.clone())
+    } else {
+        check_name(target)
+    }
 }
 
 /// The ten public resolvers, then the rep's own that are not already among them.
@@ -88,11 +92,20 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
         let resolvers = propagation_resolvers(&settings.resolvers);
         let bootstrap: Vec<SocketAddr> = resolvers.iter().map(|r| r.address).collect();
         let nameservers = discover_nameservers(&bootstrap, &target, 53, limits.query).await.unwrap_or_default();
-        propagation_with(&resolvers, &nameservers, &target, Scope::All, limits.query, |a| {
-            let _ = tx.send(PropEvent::Answer(Box::new(a.clone())));
-        })
-        .await
-        .map_err(|e| e.to_string())
+        let ask_local = async {
+            let answer = match crate::this_machine::vantage(&system_resolvers()) {
+                Some(v) => ask_vantage(v, &target, Scope::All, limits.query).await,
+                None => crate::this_machine::unavailable(),
+            };
+            let _ = tx.send(PropEvent::Local(Box::new(answer)));
+        };
+        let (result, ()) = tokio::join!(
+            propagation_with(&resolvers, &nameservers, &target, Scope::All, limits.query, |a| {
+                let _ = tx.send(PropEvent::Answer(Box::new(a.clone())));
+            }),
+            ask_local
+        );
+        result.map_err(|e| e.to_string())
     };
     let event = match tokio::time::timeout(limits.whole, work).await {
         Ok(result) => PropEvent::Finished(Box::new(result)),
@@ -101,30 +114,41 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
     let _ = tx.send(event);
 }
 
+/// What the tab asks of the Checks that take a choice: the SMTP port and host, the TLS port.
+#[derive(Debug, Clone, Copy)]
+pub struct Options {
+    pub smtp: smtp_plan::Request,
+    pub tls_port: u16,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { smtp: smtp_plan::Request::default(), tls_port: crate::tls_port::PRESETS[0] }
+    }
+}
+
 pub async fn run_section(
     section: Section,
     name: String,
     settings: Settings,
-    smtp: smtp_plan::Request,
+    options: Options,
     tx: UnboundedSender<CheckEvent>,
 ) {
     let _ = tx.send(CheckEvent::Started);
-    let event =
-        match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings, smtp))
-            .await
-        {
-            Ok(result) => CheckEvent::Finished(Box::new(result)),
-            Err(_) => CheckEvent::TimedOut,
-        };
+    let event = match tokio::time::timeout(
+        budget(section, settings.timeout).whole,
+        produce(section, &name, &settings, options),
+    )
+    .await
+    {
+        Ok(result) => CheckEvent::Finished(Box::new(result)),
+        Err(_) => CheckEvent::TimedOut,
+    };
     let _ = tx.send(event);
 }
 
-async fn produce(
-    section: Section,
-    name: &str,
-    settings: &Settings,
-    smtp: smtp_plan::Request,
-) -> Result<Outcome, String> {
+async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
+    let smtp = options.smtp;
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section {
@@ -154,6 +178,10 @@ async fn produce(
             let (tls, caa) = tokio::join!(check_tls(name, 443, query), check_caa(&bootstrap, name, query));
             tls.map(|r| with_caa(tls_outcome(name, &r), &caa, Some(&r))).map_err(|e| e.to_string())
         }
+        Section::TlsPort => check_tls(name, options.tls_port, query)
+            .await
+            .map(|r| tls_outcome_on(name, options.tls_port, &r))
+            .map_err(|e| e.to_string()),
         Section::Registration => {
             check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
                 .await
@@ -188,6 +216,13 @@ async fn produce(
             facts.append(&mut outcome.facts);
             outcome.facts = facts;
             Ok(outcome)
+        }
+        Section::Rdns => {
+            let resolvers = system_resolvers();
+            if resolvers.is_empty() {
+                return Err("this machine has no DNS resolver configured".into());
+            }
+            Ok(rdns_outcome(&check_rdns(&resolvers, name, query).await))
         }
         Section::Blacklist => {
             let resolvers = system_resolvers();
@@ -296,12 +331,22 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
 }
 
 pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
-    let mut facts = vec![
+    tls_outcome_on(host, 443, r)
+}
+
+/// The TLS section's rows and findings for a handshake on any port. Off 443 the port is the
+/// first row, so a copied section says which service it describes.
+pub fn tls_outcome_on(host: &str, port: u16, r: &TlsResult) -> Outcome {
+    let mut facts = vec![];
+    if port != 443 {
+        facts.push(Fact::new("Port", port.to_string()));
+    }
+    facts.extend([
         Fact::new("Protocol", &r.version),
         Fact::new("Cipher", &r.cipher),
         Fact::new("Trust", format!("{:?}", r.trust)),
         Fact::new("Name matches", if r.hostname_match { "yes" } else { "no" }),
-    ];
+    ]);
     if let Some(leaf) = r.chain.first() {
         facts.push(Fact::new("Subject", &leaf.subject));
         facts.push(Fact::new("Issuer", &leaf.issuer));
@@ -315,8 +360,8 @@ pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
             Fact::new(format!("Certificate {}", i + 1), format!("{} issued by {}, {}", c.subject, c.issuer, c.key))
         })
         .collect();
-    let mut findings = tls_findings(host, 443, r);
-    findings.extend(ocsp_findings(host, 443, r));
+    let mut findings = tls_findings(host, port, r);
+    findings.extend(ocsp_findings(host, port, r));
     Outcome { findings, facts, details_title: "Certificate chain", details }
 }
 
@@ -442,6 +487,38 @@ pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
     Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
 }
 
+/// The PTR names of an address and whether each resolves back to it, or a host's addresses.
+pub fn rdns_outcome(r: &RdnsResult) -> Outcome {
+    let mut facts = vec![];
+    match r {
+        RdnsResult::Ip { ip, ptr_query, ptrs, ptr_error } => {
+            facts.push(Fact::new("Address", ip.to_string()));
+            facts.push(Fact::new("PTR question", ptr_query));
+            if ptrs.is_empty() && ptr_error.is_none() {
+                facts.push(Fact::new("PTR", "none"));
+            }
+            for p in ptrs {
+                facts.push(Fact::new("PTR", &p.name));
+                let forward = match (&p.forward_error, p.confirmed) {
+                    (Some(e), _) => format!("no answer: {e}"),
+                    (None, true) => format!("{}, which confirms {ip}", addresses_text(&p.addresses)),
+                    (None, false) => format!("{}, which does not confirm {ip}", addresses_text(&p.addresses)),
+                };
+                facts.push(Fact::new(format!("Forward lookup of {}", p.name), forward));
+            }
+        }
+        RdnsResult::Host { host, addresses, .. } => {
+            facts.push(Fact::new("Host", host));
+            facts.extend(addresses.iter().map(|a| Fact::new("Address", a.to_string())));
+        }
+    }
+    Outcome { findings: rdns_findings(r), facts, ..Outcome::default() }
+}
+
+fn addresses_text(a: &[std::net::IpAddr]) -> String {
+    if a.is_empty() { "no address".into() } else { a.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ") }
+}
+
 pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
     let mut facts = vec![];
     let mut details = vec![];
@@ -503,8 +580,92 @@ mod tests {
         assert_eq!(automatic(Kind::Domain).len(), 7);
         assert_eq!(automatic(Kind::Email), automatic(Kind::Domain));
         assert_eq!(automatic(Kind::Hostname), [Section::Dns, Section::Web, Section::Tls, Section::Registration]);
-        assert!(automatic(Kind::Ip).is_empty());
+        assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
+    }
+
+    fn tls_result() -> TlsResult {
+        use zombo_core::tls::{KeyInfo, TlsCert, Trust};
+        let now = time::OffsetDateTime::now_utc();
+        TlsResult {
+            version: "TLS 1.3".into(),
+            cipher: "TLS_AES_128_GCM_SHA256".into(),
+            chain: vec![TlsCert {
+                subject: "other.example".into(),
+                issuer: "Test CA".into(),
+                sans: vec!["other.example".into()],
+                not_before: now - time::Duration::days(30),
+                not_after: now + time::Duration::days(300),
+                self_signed: false,
+                is_ca: false,
+                key: KeyInfo::Rsa(2048),
+                signature: "SHA256-RSA".into(),
+            }],
+            hostname_match: false,
+            verified: false,
+            trust: Trust::Ok,
+            verify_error: None,
+            ocsp_stapled: false,
+        }
+    }
+
+    #[test]
+    fn a_tls_check_on_another_port_names_the_port_in_its_rows_and_findings() {
+        let on_993 = tls_outcome_on("mail.example.com", 993, &tls_result());
+        assert_eq!(on_993.facts[0], Fact::new("Port", "993"));
+        assert!(on_993.findings.iter().any(|f| f.message.contains("mail.example.com:993")), "{:?}", on_993.findings);
+        assert!(on_993.findings.iter().all(|f| !f.message.contains(":443")), "{:?}", on_993.findings);
+        let on_443 = tls_outcome("mail.example.com", &tls_result());
+        assert_eq!(on_443.facts[0].key, "Protocol");
+        assert!(on_443.findings.iter().any(|f| f.message.contains("mail.example.com:443")));
+    }
+
+    #[test]
+    fn an_ip_target_runs_reverse_dns_on_its_own_and_no_other_target_does() {
+        assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
+        for kind in [Kind::Domain, Kind::Hostname, Kind::Email] {
+            assert!(!automatic(kind).contains(&Section::Rdns), "{kind:?}");
+        }
+        let ip = t("192.0.2.1", Kind::Ip);
+        assert_eq!(name_for(Section::Rdns, &ip).as_deref(), Some("192.0.2.1"));
+        assert_eq!(name_for(Section::Dns, &ip), None, "the DNS Check still needs a name");
+    }
+
+    #[test]
+    fn a_reverse_lookup_lists_each_ptr_with_its_forward_confirmation() {
+        use zombo_core::rdns::Ptr;
+        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
+        let r = RdnsResult::Ip {
+            ip,
+            ptr_query: "1.2.0.192.in-addr.arpa.".into(),
+            ptr_error: None,
+            ptrs: vec![
+                Ptr { name: "mail.example.com".into(), addresses: vec![ip], forward_error: None, confirmed: true },
+                Ptr { name: "old.example.com".into(), addresses: vec![], forward_error: None, confirmed: false },
+            ],
+        };
+        let o = rdns_outcome(&r);
+        let rows: Vec<String> = o.facts.iter().map(Fact::record).collect();
+        assert!(
+            rows.contains(&"Forward lookup of mail.example.com: 192.0.2.1, which confirms 192.0.2.1".to_string()),
+            "{rows:?}"
+        );
+        assert!(
+            rows.contains(
+                &"Forward lookup of old.example.com: no address, which does not confirm 192.0.2.1".to_string()
+            ),
+            "{rows:?}"
+        );
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn an_address_with_no_ptr_says_none_and_a_failed_lookup_does_not() {
+        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
+        let none = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: None, ptrs: vec![] };
+        assert!(rdns_outcome(&none).facts.iter().any(|f| f.record() == "PTR: none"));
+        let failed = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: Some("timed out".into()), ptrs: vec![] };
+        assert!(!rdns_outcome(&failed).facts.iter().any(|f| f.key == "PTR"));
     }
 
     #[test]

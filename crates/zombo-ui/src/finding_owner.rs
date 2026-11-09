@@ -2,11 +2,10 @@ use crate::section::Section;
 
 /// Which rail section owns a finding, by the prefix of its code. The first matching row wins,
 /// so a specific prefix goes above a general one. `None` is a deliberate "no section owns this":
-/// Evidence findings live in their own tab, and reverse DNS has no section of its own yet.
+/// Evidence findings live in their own tab.
 const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_headers_", None),
     ("mail_log_", None),
-    ("rdns_", None),
     ("dns_delegation_", Some(Section::Delegation)),
     ("dns_glue_", Some(Section::Delegation)),
     ("dns_ns_", Some(Section::Delegation)),
@@ -22,6 +21,7 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("tls_", Some(Section::Tls)),
     ("caa_", Some(Section::Tls)),
     ("registration_", Some(Section::Registration)),
+    ("rdns_", Some(Section::Rdns)),
     ("hosting_reachability_", Some(Section::Ports)),
     ("smtp_", Some(Section::Smtp)),
     ("blacklist_", Some(Section::Blacklist)),
@@ -39,14 +39,18 @@ pub fn owner(code: &str) -> Option<Section> {
 /// The section a "go there" button should open from `current`: the owner, unless the rep is
 /// already looking at it.
 pub fn jump_target(code: &str, current: Section) -> Option<Section> {
-    owner(code).filter(|&s| s != current)
+    owner(code).filter(|&s| s != current && !(current == Section::TlsPort && s == Section::Tls))
 }
 
-/// The digit of the Ctrl+digit shortcut that opens `section`, when it has one. Ctrl+9 opens the
-/// first on-demand Check; the other two on-demand Checks have no digit.
+/// The digit of the Ctrl+digit shortcut that opens `section`, when it has one. Ctrl+1 to 8 open
+/// the first eight sections and Ctrl+9 the first on-demand Check; Reverse DNS and the other
+/// on-demand Checks have no digit.
 pub fn jump_digit(section: Section) -> Option<usize> {
-    let i = section.index();
-    (i <= Section::FIRST_ON_DEMAND).then_some(i + 1)
+    match section.index() {
+        i if i < 8 => Some(i + 1),
+        i if i == Section::FIRST_ON_DEMAND => Some(9),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -105,7 +109,7 @@ mod tests {
             ("email_bimi_ok", Some(Section::Email)),
             ("email_headers_spf_fail", None),
             ("mail_log_bounced", None),
-            ("rdns_no_ptr", None),
+            ("rdns_no_ptr", Some(Section::Rdns)),
             ("dns_delegation_lame", Some(Section::Delegation)),
             ("dns_glue_missing", Some(Section::Delegation)),
             ("dns_ns_is_cname", Some(Section::Delegation)),
@@ -129,10 +133,18 @@ mod tests {
     }
 
     #[test]
+    fn a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section() {
+        assert_eq!(jump_target("tls_expired", Section::TlsPort), None);
+        assert_eq!(jump_target("tls_expired", Section::Summary), Some(Section::Tls));
+        assert_eq!(jump_target("caa_no_issue", Section::TlsPort), None);
+    }
+
+    #[test]
     fn the_digit_matches_the_ctrl_number_bindings() {
         assert_eq!(jump_digit(Section::Email), Some(5));
         assert_eq!(jump_digit(Section::Registration), Some(8));
         assert_eq!(jump_digit(Section::Ports), Some(9));
+        assert_eq!(jump_digit(Section::Rdns), None);
         assert_eq!(jump_digit(Section::Smtp), None);
         assert_eq!(jump_digit(Section::Blacklist), None);
     }
@@ -141,6 +153,7 @@ mod tests {
     fn a_finding_has_no_button_in_the_section_that_owns_it() {
         assert_eq!(jump_target("dkim_missing", Section::Summary), Some(Section::Email));
         assert_eq!(jump_target("dkim_missing", Section::Email), None);
-        assert_eq!(jump_target("rdns_no_ptr", Section::Summary), None);
+        assert_eq!(jump_target("rdns_no_ptr", Section::Summary), Some(Section::Rdns));
+        assert_eq!(jump_target("rdns_no_ptr", Section::Rdns), None);
     }
 }

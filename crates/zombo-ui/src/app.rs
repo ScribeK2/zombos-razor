@@ -5,7 +5,7 @@ use std::{
 
 use crate::settings::{PaneEvent, SettingsPane};
 use crate::update_ui::UpdateCard;
-use gpui_kit::component::input::{Input, InputState, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use zombo_core::Severity;
@@ -35,12 +35,13 @@ mod frame;
 mod ondemand_ui;
 
 const FINDING_HANDLES: usize = 64;
-const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
+const DISCLOSURES: [&str; 5] = ["nameservers", "records", "details", "changes", "blind"];
 const TOAST_FOR: Duration = Duration::from_secs(8);
 
 pub struct Shell {
     ws: Workspace,
     input: Entity<InputState>,
+    port_input: Entity<InputState>,
     root_focus: FocusHandle,
     pane_focus: FocusHandle,
     rail_focus: Vec<FocusHandle>,
@@ -50,6 +51,9 @@ pub struct Shell {
     open: HashSet<&'static str>,
     tab_open: OpenState,
     row_focus: Vec<FocusHandle>,
+    nav_rows: Vec<FocusHandle>,
+    nav: Option<zombo_ui::focus_nav::Stop>,
+    jobs: HashMap<(String, Section), runtime::Cancel>,
     motion: Motion,
     fx: Feedback<(&'static str, usize)>,
     fade: Fade<(String, Section, &'static str)>,
@@ -129,6 +133,19 @@ impl Shell {
     pub fn new(started: Instant, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("domain, host, IP or email"));
         input.update(cx, |i, cx| i.focus(window, cx));
+        let port_input = cx.new(|cx| InputState::new(window, cx).placeholder("other port"));
+        cx.subscribe_in(&port_input, window, |this, input, ev: &InputEvent, window, cx| match ev {
+            InputEvent::Change => {
+                let text = input.read(cx).value().to_string();
+                if let Some(tab) = this.ws.current_mut() {
+                    tab.tls_port.typed(&text);
+                }
+                cx.notify();
+            }
+            InputEvent::PressEnter { .. } => this.perform(Action::Run(Section::TlsPort), window, cx),
+            _ => {}
+        })
+        .detach();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -164,6 +181,7 @@ impl Shell {
         Shell {
             ws,
             input,
+            port_input,
             root_focus: cx.focus_handle(),
             pane_focus: cx.focus_handle(),
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
@@ -178,6 +196,9 @@ impl Shell {
             toast_leave: None,
             tab_open: OpenState::default(),
             row_focus: DISCLOSURES.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            nav_rows: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            nav: None,
+            jobs: HashMap::new(),
             watches: Watches::default(),
             pastes: HashMap::new(),
             toast,
@@ -200,7 +221,9 @@ impl Shell {
             Mode::Sheet
         } else if self.input.read(cx).focus_handle(cx).is_focused(window) {
             Mode::Omnibox
-        } else if self.pastes.values().any(|p| p.read(cx).focus_handle(cx).is_focused(window)) {
+        } else if self.port_input.read(cx).focus_handle(cx).is_focused(window)
+            || self.pastes.values().any(|p| p.read(cx).focus_handle(cx).is_focused(window))
+        {
             Mode::Paste
         } else {
             Mode::Browse
@@ -219,6 +242,12 @@ impl Shell {
     fn sync_omnibox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.ws.current().map(|t| t.target.value.clone()).unwrap_or_default();
         self.set_omnibox(&text, window, cx);
+        self.sync_port_input(window, cx);
+    }
+
+    fn sync_port_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let port = self.ws.current().map(|t| t.tls_port.text().to_string()).unwrap_or_default();
+        self.port_input.update(cx, |i, cx| i.set_value(port, window, cx));
     }
 
     fn focus_omnibox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -240,17 +269,19 @@ impl Shell {
         }
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
-        let smtp = tab.smtp_request();
+        let options = tab.options();
         if section == Section::Dns {
             let settings = self.config.settings.clone();
-            let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
+            let (mut rx, cancel) = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
+            self.jobs.insert((key.clone(), Section::Dns), cancel);
             cx.spawn(async move |this, cx| {
                 while let Some(event) = rx.recv().await {
                     let key = key.clone();
                     if this
                         .update(cx, |app, cx| {
                             if let Some(tab) = app.ws.diagnosis_mut_for(&key) {
-                                tab.propagation.apply(&key, event);
+                                let target = tab.target.clone();
+                                tab.propagation.apply(&target, event);
                                 cx.notify();
                             }
                             app.after_run(&key, Section::Dns);
@@ -264,11 +295,19 @@ impl Shell {
             .detach();
             return;
         }
+        let options = match options {
+            Ok(o) => o,
+            Err(e) => {
+                self.toast = Some((e.into(), Instant::now()));
+                return;
+            }
+        };
         if let Some(tab) = self.ws.diagnosis_mut_for(&key) {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, smtp, tx));
+        let (mut rx, cancel) = runtime::stream(move |tx| checks::run_section(section, name, settings, options, tx));
+        self.jobs.insert((key.clone(), section), cancel);
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -315,6 +354,13 @@ impl Shell {
         let alive: Vec<String> =
             self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
+        self.jobs.retain(|(target, _), job| {
+            let keep = alive.iter().any(|a| a == target);
+            if !keep {
+                job.abort();
+            }
+            keep
+        });
         self.tab_open.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
@@ -356,8 +402,55 @@ impl Shell {
         }
     }
 
+    /// Stop what is running in the section on screen, and abort the tasks behind it.
+    fn cancel_running(&mut self) {
+        let Some(tab) = self.ws.current_mut() else { return };
+        let (key, section) = (tab.target.value.clone(), tab.section);
+        let stopped = tab.cancel(section);
+        for &s in &stopped {
+            if let Some(job) = self.jobs.remove(&(key.clone(), s)) {
+                job.abort();
+            }
+        }
+        let message = match stopped.as_slice() {
+            [] => return,
+            [one] => format!("Cancelled the {} Check.", one.label()),
+            many => format!("Cancelled {} Checks.", many.len()),
+        };
+        self.toast = Some((message, Instant::now()));
+    }
+
+    /// `j`, `k` and the arrows: focus the next or previous finding, then row, of this section.
+    fn walk(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        use zombo_ui::focus_nav::{Stop, step};
+        let Some(tab) = self.ws.current() else { return };
+        let section = tab.section;
+        let rows = match section {
+            Section::Dns => tab.propagation.view(tab.record).len(),
+            Section::Summary => 0,
+            s => tab.runs.get(&s).map_or(0, |r| r.outcome.facts.len()),
+        };
+        let findings = tab.findings(section).len();
+        self.nav = step(findings, rows, self.nav, delta);
+        let last = FINDING_HANDLES - 1;
+        let handle = match self.nav {
+            Some(Stop::Finding(i)) => self.finding_focus.get(i.min(last)),
+            Some(Stop::Row(i)) => self.nav_rows.get(i.min(last)),
+            None => None,
+        };
+        if let Some(h) = handle {
+            window.focus(h, cx);
+        }
+    }
+
     fn perform(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(action, Action::FocusNext | Action::FocusPrev) {
+            self.nav = None;
+        }
         match action {
+            Action::Cancel => self.cancel_running(),
+            Action::FocusNext => self.walk(1, window, cx),
+            Action::FocusPrev => self.walk(-1, window, cx),
             Action::FocusOmnibox => self.focus_omnibox(window, cx),
             Action::Submit => {
                 if let Some(selected) = self.palette.take() {
@@ -403,6 +496,10 @@ impl Shell {
                 match self.ws.current().map(|t| t.section) {
                     Some(Section::Dns) => self.ws.step_record(delta),
                     Some(Section::Smtp) => self.ws.current_mut().into_iter().for_each(|t| t.step_port(delta)),
+                    Some(Section::TlsPort) => {
+                        self.ws.current_mut().into_iter().for_each(|t| t.step_tls_port(delta));
+                        self.sync_port_input(window, cx);
+                    }
                     _ => {}
                 }
             }
@@ -1031,6 +1128,7 @@ impl Shell {
                 )
             })
             .when(section == Section::Smtp, |s| s.child(self.port_field(tab, cx)))
+            .when(section == Section::TlsPort, |s| s.child(self.tls_port_field(tab, cx)))
             .when(state.can_retry(), |s| {
                 s.child(
                     div()
@@ -1073,6 +1171,16 @@ impl Shell {
             .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)).child(self.dns_rows(tab, cx)))
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
+            .when(!zombo_ui::blind_spots::lines(section).is_empty(), |s| s.child(self.blind_spots_view(section, cx)))
+    }
+
+    fn blind_spots_view(&self, section: Section, cx: &mut Context<Self>) -> Div {
+        let lines: Vec<_> = zombo_ui::blind_spots::lines(section)
+            .iter()
+            .map(|l| ("Cannot see".to_string(), l.to_string(), t::GRAY_900))
+            .collect();
+        let n = lines.len();
+        self.disclosure("blind", zombo_ui::blind_spots::TITLE.into(), format!("{n} limits of this Check"), lines, cx)
     }
 
     fn finding_card(
@@ -1383,6 +1491,8 @@ impl Shell {
                                 .gap(px(12.))
                                 .when(i > 0, |s| s.border_t_1().border_color(color(t::GRAY_400)))
                                 .text_size(px(t::TEXT_LABEL))
+                                .when_some(self.nav_rows.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
+                                .focus_visible(focus_ring)
                                 .role(Role::Row)
                                 .aria_label(format!("{k}: {v}"))
                                 .cursor_pointer()
@@ -1446,7 +1556,7 @@ impl Shell {
             .map(|(i, r)| {
                 let status_color = match r.status {
                     dg::RowStatus::Truth | dg::RowStatus::Match => t::OK,
-                    dg::RowStatus::Stale => t::WARNING,
+                    dg::RowStatus::Stale | dg::RowStatus::Differs => t::WARNING,
                     dg::RowStatus::NoAnswer => t::CRITICAL,
                     dg::RowStatus::Answered => t::GRAY_900,
                 };
@@ -1462,6 +1572,8 @@ impl Shell {
                     .font_family(t::FONT_MONO)
                     .text_size(px(t::TEXT_LABEL))
                     .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
+                    .when_some(self.nav_rows.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
+                    .focus_visible(focus_ring)
                     .role(Role::Row)
                     .aria_label(r.label())
                     .cursor_pointer()

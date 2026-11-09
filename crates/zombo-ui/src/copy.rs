@@ -73,6 +73,7 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
         out.push_str(&format!("\n{level}# {}\n\n", single_line(&d.details_title)));
         fact_lines(&mut out, &d.details);
     }
+    out.push_str(&crate::blind_spots::markdown(section, level));
     out
 }
 
@@ -84,11 +85,11 @@ pub enum Format {
 }
 
 /// The text to copy and the sentence that confirms it.
-pub fn build(tab: &Tab, format: Format) -> (String, String) {
+pub fn build(tab: &Tab, format: Format, now: i64) -> (String, String) {
     let s = tab.section;
     match format {
         Format::Section => (section_markdown(tab, s), format!("Copied the {} section as Markdown.", s.label())),
-        Format::Whole => (diagnosis_markdown(tab), "Copied the whole Diagnosis as Markdown.".into()),
+        Format::Whole => (diagnosis_markdown(tab, now), "Copied the whole Diagnosis as Markdown.".into()),
         Format::Json => (section_json(tab, s), format!("Copied the {} section as JSON.", s.label())),
     }
 }
@@ -98,7 +99,7 @@ pub fn section_markdown(tab: &Tab, section: Section) -> String {
 }
 
 /// The whole Diagnosis: every section that ran, in rail order, then the ones that did not.
-pub fn diagnosis_markdown(tab: &Tab) -> String {
+pub fn diagnosis_markdown(tab: &Tab, now: i64) -> String {
     let mut out = format!("# Diagnosis: {}\n\n", code(&tab.target.value));
     let mut not_run = vec![];
     for s in Section::ALL {
@@ -109,13 +110,52 @@ pub fn diagnosis_markdown(tab: &Tab) -> String {
             out.push('\n');
         }
     }
+    out.push_str(&changes_md(tab));
     if !not_run.is_empty() {
         out.push_str(&format!(
             "## Not run\n\n{}\n",
             not_run.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")
         ));
     }
+    out.push_str(&format!("\n{}\n", footer(now)));
     out
+}
+
+/// What changed in each section since its previous run in this tab. Empty when nothing did, or
+/// when no section has run twice.
+fn changes_md(tab: &Tab) -> String {
+    let mut out = String::new();
+    for s in Section::ALL {
+        let Some(d) = tab.history(s).and_then(|h| h.changes.as_ref()).filter(|d| !d.is_empty()) else { continue };
+        out.push_str(&format!("### {}\n\n", s.label()));
+        let rows = d.removed.iter().map(|l| ("removed", l)).chain(d.added.iter().map(|l| ("added", l)));
+        for (what, line) in rows {
+            out.push_str(&format!("- {what}: {}\n", code(line)));
+        }
+        out.push('\n');
+    }
+    if out.is_empty() { out } else { format!("## Changed since the previous run\n\n{out}") }
+}
+
+/// The last line of a copied Diagnosis: which build made it, and when (UTC).
+fn footer(now: i64) -> String {
+    format!("Zombo's Razor {}, {}", zombo_core::VERSION, utc_stamp(now))
+}
+
+/// `2026-11-09 18:37 UTC`. The wall clock is UTC for the same reason Evidence tab labels are.
+pub fn utc_stamp(unix: i64) -> String {
+    let (days, secs) = (unix.div_euclid(86_400), unix.rem_euclid(86_400));
+    // Days since 1970-01-01 to a civil date (Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02} UTC", secs / 3600, secs % 3600 / 60)
 }
 
 fn facts_json(rows: &[Fact]) -> Vec<Value> {
@@ -178,10 +218,19 @@ mod tests {
     }
 
     #[test]
+    fn a_copied_section_ends_with_what_it_cannot_see_and_the_summary_does_not() {
+        let t = tab_with_web();
+        let md = section_markdown(&t, Section::Web);
+        assert!(md.contains("\n### Not visible from here\n\n- Application logs"), "{md}");
+        assert!(!section_markdown(&t, Section::Summary).contains("Not visible"));
+        assert!(diagnosis_markdown(&t, 0).contains("Not visible from here"));
+    }
+
+    #[test]
     fn no_copied_text_holds_a_control_character() {
         let t = tab_with_web();
         for text in
-            [section_markdown(&t, Section::Web), diagnosis_markdown(&t), strip("a\u{1b}[2J\u{202e}b\u{200b}\nc")]
+            [section_markdown(&t, Section::Web), diagnosis_markdown(&t, 0), strip("a\u{1b}[2J\u{202e}b\u{200b}\nc")]
         {
             assert!(!text.chars().any(|c| zombo_core::text::is_unsafe_char(c) && c != '\n'), "{text:?}");
         }
@@ -190,7 +239,7 @@ mod tests {
 
     #[test]
     fn the_whole_diagnosis_lists_sections_that_ran_in_rail_order_and_names_the_rest() {
-        let md = diagnosis_markdown(&tab_with_web());
+        let md = diagnosis_markdown(&tab_with_web(), 0);
         assert!(md.starts_with("# Diagnosis: `example.com`\n"), "{md}");
         let at = |s: &str| md.find(s).unwrap_or_else(|| panic!("missing {s}\n{md}"));
         assert!(at("## Summary") < at("## Web"));
@@ -199,9 +248,54 @@ mod tests {
         assert!(md.contains("- DNS\n") && md.contains("- Blacklist"), "{md}");
     }
 
+    fn rerun_web(t: &mut Tab, status: &str) {
+        let o = Outcome { facts: vec![Fact::new("Status", status)], ..Outcome::default() };
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
+    }
+
+    #[test]
+    fn the_diagnosis_lists_what_changed_since_the_previous_run_per_section() {
+        let mut t = tab_with_web();
+        assert!(!diagnosis_markdown(&t, 0).contains("Changed since"), "a first run has nothing to compare");
+        rerun_web(&mut t, "200");
+        let md = diagnosis_markdown(&t, 0);
+        assert!(md.contains("## Changed since the previous run\n\n### Web\n\n- removed: `Server: a' b`"), "{md}");
+        assert!(!md.contains("- added: `Status: 200`"), "an unchanged line is not a change: {md}");
+        rerun_web(&mut t, "503");
+        let md = diagnosis_markdown(&t, 0);
+        assert!(md.contains("- removed: `Status: 200`\n- added: `Status: 503`\n"), "{md}");
+        assert!(md.find("## Changed since").unwrap() < md.find("## Not run").unwrap(), "{md}");
+    }
+
+    #[test]
+    fn a_rerun_that_changed_nothing_adds_no_section() {
+        let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
+        rerun_web(&mut t, "200");
+        rerun_web(&mut t, "200");
+        assert!(!diagnosis_markdown(&t, 0).contains("Changed since"));
+    }
+
+    #[test]
+    fn the_whole_diagnosis_ends_with_a_one_line_footer_and_a_section_copy_has_none() {
+        let t = tab_with_web();
+        let md = diagnosis_markdown(&t, 1_794_249_420);
+        let last = md.trim_end().lines().last().unwrap();
+        assert_eq!(last, format!("Zombo's Razor {}, 2026-11-09 18:37 UTC", zombo_core::VERSION));
+        assert!(!section_markdown(&t, Section::Web).contains("Zombo's Razor"));
+    }
+
+    #[test]
+    fn the_utc_stamp_is_right_on_known_dates() {
+        assert_eq!(utc_stamp(0), "1970-01-01 00:00 UTC");
+        assert_eq!(utc_stamp(951_782_400 + 86_399), "2000-02-29 23:59 UTC");
+        assert_eq!(utc_stamp(1_794_249_420), "2026-11-09 18:37 UTC");
+        assert_eq!(utc_stamp(-1), "1969-12-31 23:59 UTC");
+    }
+
     #[test]
     fn a_target_nothing_ran_for_copies_only_the_not_run_list() {
-        let md = diagnosis_markdown(&Tab::new(Target { value: "example.com".into(), kind: Kind::Domain }));
+        let md = diagnosis_markdown(&Tab::new(Target { value: "example.com".into(), kind: Kind::Domain }), 0);
         assert!(!md.contains("## Summary") && md.contains("## Not run"), "{md}");
     }
 
@@ -221,10 +315,10 @@ mod tests {
     fn each_format_names_what_it_copied() {
         let mut t = tab_with_web();
         t.section = Section::Web;
-        assert_eq!(build(&t, Format::Section).1, "Copied the Web section as Markdown.");
-        assert_eq!(build(&t, Format::Json).1, "Copied the Web section as JSON.");
-        assert_eq!(build(&t, Format::Whole).1, "Copied the whole Diagnosis as Markdown.");
-        assert!(build(&t, Format::Json).0.starts_with('{'));
+        assert_eq!(build(&t, Format::Section, 0).1, "Copied the Web section as Markdown.");
+        assert_eq!(build(&t, Format::Json, 0).1, "Copied the Web section as JSON.");
+        assert_eq!(build(&t, Format::Whole, 0).1, "Copied the whole Diagnosis as Markdown.");
+        assert!(build(&t, Format::Json, 0).0.starts_with('{'));
     }
 
     #[test]

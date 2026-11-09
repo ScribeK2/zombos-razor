@@ -381,7 +381,12 @@ fn rdap_get(
         .http_status_as_error(false)
         .build()
         .into();
-    let mut resp = agent.get(url).header("Accept", "application/rdap+json, application/json").call().map_err(fail)?;
+    let mut resp = agent
+        .get(url)
+        .header("Accept", "application/rdap+json, application/json")
+        .header("User-Agent", crate::user_agent())
+        .call()
+        .map_err(fail)?;
     let status = resp.status();
     if status != 200 {
         return Ok((status, vec![]));

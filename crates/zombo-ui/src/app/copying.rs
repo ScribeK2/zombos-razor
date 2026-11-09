@@ -20,7 +20,7 @@ impl Shell {
             self.toast = Some(("Enter a target first, then copy its results.".into(), Instant::now()));
             return;
         };
-        let (text, message) = copy::build(tab, format);
+        let (text, message) = copy::build(tab, format, zombo_ui::config::unix_now());
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.toast = Some((message, Instant::now()));
     }

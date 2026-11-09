@@ -99,6 +99,8 @@ pub enum CheckEvent {
     Started,
     Finished(Box<Result<Outcome, String>>),
     TimedOut,
+    /// The rep stopped it. The Check goes back to not run, with a note, and is not a failure.
+    Cancelled,
 }
 
 /// A Check that answers once: the five states, its Outcome, and its change history.
@@ -107,11 +109,12 @@ pub struct Run {
     pub state: CheckState,
     pub outcome: Outcome,
     pub history: History,
+    pub cancelled: bool,
 }
 
 impl Run {
     pub fn new() -> Run {
-        Run { state: CheckState::NotRun, outcome: Outcome::default(), history: History::default() }
+        Run { state: CheckState::NotRun, outcome: Outcome::default(), history: History::default(), cancelled: false }
     }
 
     pub fn apply(&mut self, event: CheckEvent) {
@@ -119,6 +122,13 @@ impl Run {
             CheckEvent::Started => {
                 self.state = CheckState::Running;
                 self.outcome = Outcome::default();
+                self.cancelled = false;
+            }
+            CheckEvent::Cancelled => {
+                if self.state == CheckState::Running {
+                    self.state = CheckState::NotRun;
+                    self.cancelled = true;
+                }
             }
             CheckEvent::TimedOut => {
                 if self.state == CheckState::Running {
@@ -241,6 +251,27 @@ mod tests {
         }))));
         assert_eq!(r.outcome.findings[0].code, "c");
         assert_eq!(r.state, CheckState::Done { problems: 1 });
+    }
+
+    #[test]
+    fn a_cancelled_check_is_not_run_with_a_note_and_not_failed() {
+        let mut r = Run::new();
+        r.apply(CheckEvent::Started);
+        r.apply(CheckEvent::Cancelled);
+        assert_eq!((r.state.clone(), r.cancelled), (CheckState::NotRun, true));
+        r.apply(run_with(&[("a", "b")]));
+        assert_eq!(r.state, CheckState::NotRun, "a result that arrives after the cancel is dropped");
+        r.apply(CheckEvent::Started);
+        assert!(!r.cancelled, "running again clears the note");
+    }
+
+    #[test]
+    fn cancelling_a_check_that_is_not_running_changes_nothing() {
+        let mut r = Run::new();
+        r.apply(CheckEvent::Started);
+        r.apply(run_with(&[("a", "b")]));
+        r.apply(CheckEvent::Cancelled);
+        assert_eq!((r.state.clone(), r.cancelled), (CheckState::Done { problems: 0 }, false));
     }
 
     #[test]
