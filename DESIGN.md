@@ -73,6 +73,8 @@ The omnibox, focused, with the placeholder "domain, host, IP or email". Below it
 | `Ctrl+Alt+C` | Copy the whole Diagnosis |
 | `Ctrl+T`, `Ctrl+W`, `Ctrl+Tab` | New tab, close tab, next tab |
 | `W` | Watch the focused result |
+| `Ctrl+Shift+H`, `Ctrl+Shift+M` | Analyse pasted headers, analyse pasted mail log |
+| `Ctrl+Enter` | Analyse in the paste pane |
 | `?` | Shortcut cheat sheet |
 
 Every action also appears in the palette with its shortcut shown.

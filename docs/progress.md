@@ -79,7 +79,7 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Table cell labels for screen readers on every result view
 - [ ] Tabs, rail with five Check states, status bar with Watches, empty state with recent targets
 - [ ] Copy at three levels (value, section, Diagnosis) in Markdown, plus JSON per section
-- [ ] Evidence paste tabs (worker running); [x] settings pane (merged 2026-11-09: file, validation, recents, Watch notification; 588 tests)
+- [x] Evidence paste tabs (merged 2026-11-09, 612 tests); [x] settings pane (merged 2026-11-09: file, validation, recents, Watch notification; 588 tests)
 - [x] Main screen sketch: `docs/sketches/main-screen.html` (+ PNG). Built as HTML, not Pencil: the Pencil tool needs the Cursor IDE running with its extension. Shows the stale-cache case on the test domain
 - [ ] Window title and app ID set; clear error when the compositor has no `wl_seat`
 - [ ] Recent-lookups list (no Cases)
@@ -190,3 +190,12 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] TLS on a port for an IP target (DESIGN.md says later)
 
 - [ ] Settings unverified: a real Watch-stop desktop notification, a real proxied registration, keyboard-only checkbox toggle. Deviation to confirm: Save over a broken config copies it to `config.toml.bak` instead of refusing
+
+## Open from Evidence tabs
+
+- [ ] **Misleading rail mark:** Message path and Authentication always show a green check with "done", even when the Authentication verdict is Failed (the spoofed fixture shows it). Only Findings carries the problem count. Carry the verdict to the rail mark
+- [ ] Core parses no ARC headers, so Authentication shows Authentication-Results, Received-SPF, DKIM-Signature and alignment only
+- [ ] Copy exists only on Evidence tabs; Diagnosis copy (value, section, whole) is unbuilt
+- [ ] No way back to edit pasted text after a successful analysis (open a new tab)
+- [ ] Tab times are UTC (local time is not safe to read in a threaded process)
+- [ ] Unverified: a pasted `message/rfc822` clipboard from a real mail client, a real hostile paste live, X11, GNOME, screen reader
