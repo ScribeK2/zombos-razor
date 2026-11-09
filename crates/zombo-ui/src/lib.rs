@@ -7,4 +7,5 @@ pub mod runtime;
 pub mod section;
 pub mod status;
 pub mod theme;
+pub mod watch;
 pub mod workspace;

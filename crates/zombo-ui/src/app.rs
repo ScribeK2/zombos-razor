@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, time::{Duration, Instant}};
 
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::*;
@@ -12,11 +12,13 @@ use zombo_ui::{
     section::Section,
     status::Glyph,
     theme as t,
+    watch::Watches,
     workspace::{Workspace, relative},
 };
 use zombo_core::Severity;
 
 const FINDING_HANDLES: usize = 64;
+const TOAST_FOR: Duration = Duration::from_secs(8);
 
 pub struct Shell {
     ws: Workspace,
@@ -26,6 +28,8 @@ pub struct Shell {
     finding_focus: Vec<FocusHandle>,
     palette: Option<usize>,
     open: HashSet<&'static str>,
+    watches: Watches,
+    toast: Option<(String, Instant)>,
     sheet: bool,
     error: Option<String>,
     started: Instant,
@@ -94,6 +98,15 @@ impl Shell {
     pub fn new(started: Instant, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("domain, host, IP or email"));
         input.update(cx, |i, cx| i.focus(window, cx));
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                if this.update(cx, |app, cx| app.tick(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         Shell {
             ws: Workspace::default(),
             input,
@@ -102,6 +115,8 @@ impl Shell {
             finding_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
             open: HashSet::new(),
+            watches: Watches::default(),
+            toast: None,
             sheet: false,
             error: None,
             started,
@@ -140,11 +155,16 @@ impl Shell {
     }
 
     fn start_section(&mut self, section: Section, cx: &mut Context<Self>) {
-        let Some(tab) = self.ws.current() else { return };
+        let Some(key) = self.ws.current().map(|t| t.target.value.clone()) else { return };
+        self.start_section_for(&key, section, cx);
+    }
+
+    fn start_section_for(&mut self, key: &str, section: Section, cx: &mut Context<Self>) {
+        let Some(tab) = self.ws.tabs.iter().find(|t| t.target.value == key) else { return };
         if tab.state(section) == zombo_ui::status::CheckState::Running || !checks::wired(section) {
             return;
         }
-        let key = tab.target.value.clone();
+        let key = key.to_string();
         let Some(name) = checks::check_name(&tab.target) else { return };
         if section == Section::Dns {
             let mut rx = runtime::stream(move |tx| checks::run_propagation(name, tx));
@@ -157,6 +177,7 @@ impl Shell {
                                 tab.propagation.apply(&key, event);
                                 cx.notify();
                             }
+                            app.after_run(&key, Section::Dns);
                         })
                         .is_err()
                     {
@@ -177,6 +198,7 @@ impl Shell {
                             tab.run_mut(section).apply(event);
                             cx.notify();
                         }
+                        app.after_run(&key, section);
                     })
                     .is_err()
                 {
@@ -185,6 +207,42 @@ impl Shell {
             }
         })
         .detach();
+    }
+
+    fn after_run(&mut self, key: &str, section: Section) {
+        let Some(settled) = self.ws.tabs.iter().find(|t| t.target.value == key).and_then(|t| t.settled(section)) else { return };
+        let now = Instant::now();
+        if let Some(stopped) = self.watches.finished(key, section, settled.as_deref(), now) {
+            self.toast = Some((stopped.message(), now));
+        }
+    }
+
+    fn tick(&mut self, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let alive: Vec<String> = self.ws.tabs.iter().map(|t| t.target.value.clone()).collect();
+        self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
+        for (target, section) in self.watches.due(now) {
+            self.start_section_for(&target, section, cx);
+        }
+        if self.toast.as_ref().is_some_and(|(_, at)| now.duration_since(*at) > TOAST_FOR) {
+            self.toast = None;
+        }
+        if !self.watches.is_empty() || self.toast.is_some() {
+            cx.notify();
+        }
+    }
+
+    fn toggle_watch(&mut self) {
+        let Some(tab) = self.ws.current() else { return };
+        let (target, section) = (tab.target.value.clone(), tab.section);
+        if section == Section::Summary || !checks::wired(section) {
+            return;
+        }
+        if self.watches.is_watching(&target, section) {
+            self.watches.stop(&target, section);
+        } else {
+            self.watches.start(&target, section, tab.records(section), Instant::now());
+        }
     }
 
     fn start_automatic(&mut self, cx: &mut Context<Self>) {
@@ -224,6 +282,7 @@ impl Shell {
                     None => {}
                 }
             }
+            Action::ToggleWatch => self.toggle_watch(),
             Action::NextRecord | Action::PrevRecord => {
                 if self.ws.current().is_some_and(|t| t.section == Section::Dns) {
                     self.ws.step_record(if action == Action::NextRecord { 1 } else { -1 });
@@ -585,6 +644,8 @@ impl Shell {
         let findings = tab.findings(section);
         let counts = dg::counts(&findings);
         let show_chips = !findings.is_empty();
+        let watchable = section != Section::Summary && checks::wired(section) && state != zombo_ui::status::CheckState::NotRun;
+        let watching = self.watches.is_watching(&tab.target.value, section);
         let finding_views = findings.iter().enumerate().map(|(i, f)| {
             let c = severity_color(f.severity);
             let label = dg::finding_label(f);
@@ -686,7 +747,7 @@ impl Shell {
                                     .child(verdict.why.clone()),
                             ),
                     )
-                    .when(show_chips, |s| {
+                    .child(div().flex().flex_none().items_center().gap(px(8.)).when(watchable, |s| s.child(self.watch_button(watching, cx))).when(show_chips, |s| {
                         s.child(div().flex().flex_none().gap(px(8.)).children(counts.map(|(sev, n)| {
                             div()
                                 .id(("chip", dg::severity_rank(sev) as usize))
@@ -705,7 +766,7 @@ impl Shell {
                                 .child(div().font_weight(FontWeight::SEMIBOLD).child(n.to_string()))
                                 .child(dg::severity_word(sev).to_lowercase())
                         })))
-                    }),
+                    })),
             )
             .when(state.can_retry(), |s| {
                 s.child(
@@ -750,6 +811,33 @@ impl Shell {
             .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)))
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
+    }
+
+    fn watch_button(&self, watching: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("watch")
+            .h(px(28.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .border_1()
+            .border_color(color(if watching { t::ACCENT } else { t::GRAY_500 }))
+            .rounded(px(t::RADIUS_SMALL))
+            .bg(color(if watching { t::GRAY_300 } else { t::GRAY_100 }))
+            .text_size(px(t::TEXT_CAPTION))
+            .cursor_pointer()
+            .hover(|s| s.bg(color(t::GRAY_200)))
+            .active(|s| s.bg(color(t::GRAY_300)))
+            .focus_visible(focus_ring)
+            .role(Role::Button)
+            .aria_label(if watching { "Stop watching this Check" } else { "Watch this Check until its answer changes" })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_watch();
+                cx.notify();
+            }))
+            .child(if watching { "Watching" } else { "Watch" })
+            .child(kbd("W"))
     }
 
     fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
@@ -995,6 +1083,12 @@ impl Shell {
     }
 
     fn status_bar(&self) -> impl IntoElement {
+        let lines = self.watches.status_lines(Instant::now());
+        let watch_text = match lines.as_slice() {
+            [] => "No active Watches".to_string(),
+            [one] => one.clone(),
+            [first, rest @ ..] => format!("{first} (+{} more)", rest.len()),
+        };
         let hint = |k: &'static str, text: &'static str| {
             div().flex().items_center().gap(px(6.)).child(kbd(k)).child(text)
         };
@@ -1013,7 +1107,7 @@ impl Shell {
             .text_color(color(t::GRAY_900))
             .role(Role::Status)
             .aria_label("Status bar")
-            .child(div().flex_1().child("No active Watches"))
+            .child(div().flex_1().min_w_0().truncate().child(watch_text))
             .child(hint("Ctrl K", "palette"))
             .child(hint("?", "shortcuts"))
     }
@@ -1109,6 +1203,35 @@ impl Render for Shell {
             .when(!self.ws.tabs.is_empty(), |s| s.child(self.tab_strip(cx)))
             .child(body)
             .child(self.status_bar())
+            .when_some(self.toast.clone(), |s, (text, _)| {
+                s.child(
+                    div()
+                        .id("toast")
+                        .absolute()
+                        .bottom(px(t::STATUS_BAR_HEIGHT + 12.))
+                        .right(px(16.))
+                        .w(px(420.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .px(px(12.))
+                        .py(px(8.))
+                        .bg(color(t::GRAY_100))
+                        .border_1()
+                        .border_color(color(t::GRAY_500))
+                        .rounded(px(t::RADIUS_LARGE))
+                        .text_size(px(t::TEXT_LABEL))
+                        .cursor_pointer()
+                        .role(Role::Alert)
+                        .aria_label(text.clone())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toast = None;
+                            cx.notify();
+                        }))
+                        .child(glyph(Glyph::Info, 16.))
+                        .child(div().flex_1().min_w_0().child(text)),
+                )
+            })
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
     }

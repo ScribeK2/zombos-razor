@@ -271,6 +271,21 @@ impl Tab {
         }
     }
 
+    /// `None` until the Check has finished. `Some(None)` when it finished without an
+    /// answer (failed or timed out), `Some(Some(records))` when it answered.
+    pub fn settled(&self, section: Section) -> Option<Option<Vec<String>>> {
+        match self.state(section) {
+            CheckState::Done { .. } => Some(self.records(section)),
+            CheckState::Failed { .. } | CheckState::TimedOut => Some(None),
+            CheckState::NotRun | CheckState::Running => None,
+        }
+    }
+
+    /// The records of the last run that finished with an answer.
+    pub fn records(&self, section: Section) -> Option<Vec<String>> {
+        self.history(section).and_then(|h| h.records()).map(<[String]>::to_vec)
+    }
+
     pub fn history(&self, section: Section) -> Option<&History> {
         match section {
             Section::Dns => Some(&self.propagation.history),
@@ -547,6 +562,21 @@ mod tests {
         assert_eq!(t.state(Section::Dns), CheckState::NotRun);
         assert_eq!(t.findings(Section::Summary).len(), 1);
         assert_eq!(t.verdict(Section::Registration).word, "1 PROBLEM");
+    }
+
+    #[test]
+    fn a_tab_reports_a_settled_check_for_the_watch_and_nothing_while_it_runs() {
+        use crate::outcome::{CheckEvent, Fact, Outcome};
+        let mut t = tab();
+        assert_eq!(t.settled(Section::Web), None);
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        assert_eq!(t.settled(Section::Web), None);
+        let o = Outcome { facts: vec![Fact::new("Status", "200")], ..Outcome::default() };
+        t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
+        assert_eq!(t.settled(Section::Web), Some(Some(vec!["Status: 200".to_string()])));
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Web).apply(CheckEvent::TimedOut);
+        assert_eq!(t.settled(Section::Web), Some(None));
     }
 
     #[test]
