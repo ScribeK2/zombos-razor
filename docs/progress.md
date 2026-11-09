@@ -10,6 +10,9 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 |---|---|---|---|
 | WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker A | worktree branch off `rewrite` (`c5d70ca`) | Port of `internal/app/registration.go`. Chooses the HTTP client. Merge: `Cargo.toml`, `lib.rs`, `main.rs` will conflict mechanically with worker B. |
 | Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
+| DNSSEC (`zombo-core::dnssec`, `zombo dnssec`) | worker C | worktree branch off `rewrite` (`92d23d1`) | New design: validating-resolver CD=0 vs CD=1 verdict plus local DS/DNSKEY/RRSIG analysis; no crypto library. Premise verified live on a clean network. Adds `exchange_with` to `dns.rs` additively. |
+
+**Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
 ## Done
 
@@ -32,7 +35,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 - [ ] Interception canary probe for resolver-only runs (`--no-authoritative`): needs a short extra probe to an address that must never answer, so it is opt-in to keep clean runs fast
 - [ ] WHOIS/RDAP: registrar, status, expiry, nameservers, holds, deletion states (in progress)
-- [ ] DNSSEC validation (DS at parent vs DNSKEY, RRSIG expiry, chain)
+- [ ] DNSSEC (in progress, worker C). Full chain-to-root validation is deliberately out of scope: validating resolvers do that, and the CD trick plus DS/DNSKEY/RRSIG analysis explains failures
 - [ ] More record types in lookup (SRV, PTR, DNSKEY, DS) if needed by the UI
 
 ## To do: email
