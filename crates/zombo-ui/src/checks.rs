@@ -2,11 +2,16 @@ use std::{net::SocketAddr, time::{Duration, SystemTime}};
 
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
+    blacklist::{BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist},
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
+    ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, default_resolvers, discover_nameservers, propagation_with},
+    rdns::{RdnsResult, check_rdns},
     registration::{Endpoints, Registration, check_registration, registration_findings},
+    resolver::system_resolvers,
+    smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
     tls::{TlsResult, check_tls, tls_findings},
     tls_extras::ocsp_findings,
@@ -34,7 +39,7 @@ pub fn automatic(kind: Kind) -> &'static [Section] {
 
 /// Whether this build has a Check behind the rail section.
 pub fn wired(section: Section) -> bool {
-    !matches!(section, Section::Summary | Section::Ports | Section::Smtp | Section::Blacklist)
+    section != Section::Summary
 }
 
 fn limit(section: Section) -> Duration {
@@ -43,6 +48,8 @@ fn limit(section: Section) -> Duration {
         Section::Email => Duration::from_secs(25),
         Section::Web => Duration::from_secs(12),
         Section::Tls => Duration::from_secs(10),
+        Section::Smtp => Duration::from_secs(40),
+        Section::Blacklist => Duration::from_secs(25),
         _ => WHOLE_CHECK,
     }
 }
@@ -53,6 +60,12 @@ pub fn check_name(target: &Target) -> Option<String> {
         Kind::Email => target.value.split_once('@').map(|(_, d)| d.to_string()),
         Kind::Ip => None,
     }
+}
+
+/// The name an on-demand Check connects to or asks about. An IP address is a valid subject
+/// here, unlike for the automatic Checks.
+pub fn name_for(section: Section, target: &Target) -> Option<String> {
+    if section.is_on_demand() && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
 }
 
 pub async fn run_propagation(target: String, tx: UnboundedSender<PropEvent>) {
@@ -109,7 +122,32 @@ async fn produce(section: Section, name: &str) -> Result<Outcome, String> {
             .await
             .map(|r| registration_outcome(name, &r))
             .map_err(|e| e.to_string()),
-        other => Err(format!("{} is not wired yet", other.label())),
+        Section::Ports => {
+            let addresses = resolve_target(name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
+            Ok(ports_outcome(name, &probe(&addresses, QUICK, PortTiming::default()).await))
+        }
+        Section::Smtp => {
+            let r = check_smtp(name, 25, &SmtpOptions::for_port(25)).await;
+            let mut expect = vec![];
+            if name.parse::<std::net::IpAddr>().is_err() {
+                expect.push(name.to_string());
+            }
+            let resolvers = system_resolvers();
+            if let (Some(ip), Reach::Answered, false) = (r.peer, r.reach, resolvers.is_empty())
+                && let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
+            {
+                expect.extend(ptrs.into_iter().map(|p| p.name));
+            }
+            Ok(smtp_outcome(&r, &expect))
+        }
+        Section::Blacklist => {
+            let resolvers = system_resolvers();
+            if resolvers.is_empty() {
+                return Err("this machine has no DNS resolver configured".into());
+            }
+            Ok(blacklist_outcome(name, &check_blacklist(&resolvers, name, BlacklistOptions::default()).await))
+        }
+        other => Err(format!("{} has no Check behind it", other.label())),
     }
 }
 
@@ -231,6 +269,121 @@ pub fn registration_outcome(target: &str, r: &Registration) -> Outcome {
     Outcome { findings: registration_findings(target, r), facts, ..Outcome::default() }
 }
 
+pub fn ports_outcome(target: &str, r: &PortsResult) -> Outcome {
+    let addresses = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+    let mut facts = vec![Fact::new("Addresses probed", if addresses.is_empty() { "none" } else { &addresses })];
+    for p in &r.ports {
+        let state = match p.state {
+            PortState::Open => "open",
+            PortState::Closed => "closed (refused)",
+            PortState::Filtered => "no answer",
+            PortState::NoRoute => "no route from this network",
+        };
+        let banner = p.banner.as_deref().map(|b| format!(", banner: {b}")).unwrap_or_default();
+        facts.push(Fact::new(format!("Port {} {}", p.port, p.service), format!("{state} on {}{banner}", p.address)));
+    }
+    Outcome { findings: ports_findings(target, r), facts, ..Outcome::default() }
+}
+
+fn extensions_text(e: &Extensions) -> String {
+    let mut parts = vec![];
+    for (on, name) in [(e.starttls, "STARTTLS"), (e.pipelining, "PIPELINING"), (e.eight_bit_mime, "8BITMIME")] {
+        if on {
+            parts.push(name.to_string());
+        }
+    }
+    if let Some(n) = e.size {
+        parts.push(format!("SIZE {n}"));
+    }
+    if !e.auth.is_empty() {
+        parts.push(format!("AUTH {}", e.auth.join(" ")));
+    }
+    parts.extend(e.other.iter().cloned());
+    if parts.is_empty() { "nothing".into() } else { parts.join(", ") }
+}
+
+pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
+    let peer = r.peer.map(|p| format!(" ({p})")).unwrap_or_default();
+    let mut facts = vec![
+        Fact::new("Server", format!("{}:{}{peer}", r.host, r.port)),
+        Fact::new(
+            "Reached",
+            match r.reach {
+                Reach::Answered => "answered",
+                Reach::NoAnswer => "no answer",
+                Reach::Refused => "refused",
+                Reach::NoRoute => "no route from this network",
+                Reach::Failed => "failed",
+            },
+        ),
+    ];
+    if let Some(b) = &r.banner {
+        facts.push(Fact::new("Banner", format!("{} {}", b.code, b.text)));
+    }
+    if let Some(e) = &r.extensions {
+        facts.push(Fact::new("Offers", extensions_text(e)));
+    }
+    facts.push(Fact::new(
+        "STARTTLS",
+        match &r.starttls {
+            Starttls::NotApplicable => "not used, the port starts TLS at once".to_string(),
+            Starttls::NotAttempted => "not tried".to_string(),
+            Starttls::NotOffered => "not offered".to_string(),
+            Starttls::Refused { code, text } => format!("refused: {code} {text}"),
+            Starttls::HandshakeFailed(why) => format!("handshake failed: {why}"),
+            Starttls::Upgraded => "upgraded to TLS".to_string(),
+        },
+    ));
+    if let Some(t) = &r.tls {
+        facts.push(Fact::new("Protocol", &t.version));
+        facts.push(Fact::new("Cipher", &t.cipher));
+        facts.push(Fact::new("Trust", format!("{:?}", t.trust)));
+        if let Some(leaf) = t.chain.first() {
+            facts.push(Fact::new("Certificate", format!("{}, expires {}", leaf.subject, leaf.not_after)));
+        }
+    }
+    if let Some(f) = &r.failure {
+        facts.push(Fact::new("Stopped", format!("{:?}: {}", f.stage, f.message)));
+    }
+    let details = r.extensions_after_tls.as_ref().map(|e| vec![Fact::new("Offers after STARTTLS", extensions_text(e))]).unwrap_or_default();
+    Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
+}
+
+pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
+    let mut facts = vec![];
+    let mut details = vec![];
+    for (subject, s) in &r.subjects {
+        let kind = if s.kind == SubjectKind::Ip { "address" } else { "domain" };
+        let listed: Vec<_> = s.lists.iter().filter(|(_, v)| v.state == State::Listed).collect();
+        let unsure = s.lists.values().filter(|v| matches!(v.state, State::Refused | State::Unknown)).count();
+        let mut line = if listed.is_empty() { format!("not listed on any of {} lists", s.lists.len() - unsure) } else { format!("listed on {} of {} lists", listed.len(), s.lists.len()) };
+        if unsure > 0 {
+            line += &format!(", {unsure} gave no verdict");
+        }
+        facts.push(Fact::new(format!("{subject} ({kind}, {})", s.source), line));
+        for (name, v) in &listed {
+            let why = if v.reason.is_empty() { v.codes.join(", ") } else { format!("{} ({})", v.reason, v.codes.join(", ")) };
+            facts.push(Fact::new(format!("Listed on {name}"), why));
+        }
+        for (name, v) in &s.lists {
+            let state = match v.state {
+                State::Listed => format!("listed {}", v.codes.join(", ")),
+                State::Clean => "not listed".to_string(),
+                State::Refused => "refused the query".to_string(),
+                State::Unknown => format!("no verdict ({})", v.error),
+            };
+            details.push(Fact::new(format!("{name} for {subject}"), state));
+        }
+    }
+    if let Some(why) = &r.resolve {
+        facts.push(Fact::new("Mail host addresses", why));
+    }
+    if r.ipv6 {
+        facts.push(Fact::new("IPv6", "not checked: the blocklists here list IPv4 addresses"));
+    }
+    Outcome { findings: blacklist_findings(target, r), facts, details_title: "Every list's answer", details }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,4 +446,91 @@ mod tests {
         assert!(lines.contains(&"Server ns1.example.com: unreachable".to_string()));
         assert!(lines.contains(&"Delegated nameserver: ns1.example.com".to_string()));
     }
+    #[test]
+    fn an_on_demand_check_can_be_asked_about_an_ip_but_an_automatic_one_cannot() {
+        let ip = t("192.0.2.1", Kind::Ip);
+        assert_eq!(name_for(Section::Ports, &ip).as_deref(), Some("192.0.2.1"));
+        assert_eq!(name_for(Section::Blacklist, &ip).as_deref(), Some("192.0.2.1"));
+        assert_eq!(name_for(Section::Dnssec, &ip), None);
+        assert_eq!(name_for(Section::Smtp, &t("a@example.com", Kind::Email)).as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn nothing_on_demand_starts_with_a_target_whatever_its_kind() {
+        for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
+            for s in crate::ondemand::on_demand(kind) {
+                assert!(s.is_on_demand() && wired(*s), "{s:?}");
+                assert!(!automatic(kind).contains(s), "{s:?} would start by itself for {kind:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_silent_mail_port_reads_as_no_answer_and_not_as_down() {
+        use zombo_core::ports::PortProbe;
+        let r = PortsResult {
+            addresses: vec!["192.0.2.1".parse().unwrap()],
+            ports: vec![PortProbe { address: "192.0.2.1".parse().unwrap(), port: 25, service: "SMTP", state: PortState::Filtered, banner: None }],
+        };
+        let o = ports_outcome("mail.example.com", &r);
+        assert!(o.records().contains(&"Port 25 SMTP: no answer on 192.0.2.1".to_string()));
+        assert_eq!(o.findings.len(), 1);
+        assert_eq!(o.findings[0].code, "hosting_reachability_mail_filtered");
+        assert_eq!(o.findings[0].severity, zombo_core::Severity::Info);
+    }
+
+    #[test]
+    fn a_banner_and_an_open_port_show_together() {
+        use zombo_core::ports::PortProbe;
+        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
+        let r = PortsResult { addresses: vec![ip], ports: vec![PortProbe { address: ip, port: 22, service: "SSH", state: PortState::Open, banner: Some("SSH-2.0-x".into()) }] };
+        assert!(ports_outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string()));
+    }
+
+    #[test]
+    fn an_smtp_server_that_never_answered_is_reported_as_no_answer_with_the_cores_finding() {
+        let r = SmtpResult {
+            host: "mail.example.com".into(),
+            port: 25,
+            mode: zombo_core::smtp::Mode::Starttls,
+            reach: Reach::NoAnswer,
+            peer: None,
+            banner: None,
+            extensions: None,
+            starttls: Starttls::NotAttempted,
+            tls: None,
+            extensions_after_tls: None,
+            failure: None,
+        };
+        let o = smtp_outcome(&r, &[]);
+        let lines = o.records();
+        assert!(lines.contains(&"Reached: no answer".to_string()));
+        assert!(lines.contains(&"STARTTLS: not tried".to_string()));
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn a_listed_address_is_called_out_and_every_list_is_kept_in_the_details() {
+        use zombo_core::blacklist::{BlacklistResult, Subject, Verdict};
+        let verdict = |state| Verdict { zone: "zen.example", delist: "", state, codes: vec!["127.0.0.2".into()], reason: String::new(), error: String::new() };
+        let mut r = BlacklistResult::default();
+        r.subjects.insert(
+            "127.0.0.2".into(),
+            Subject { kind: SubjectKind::Ip, source: "target".into(), lists: [("Spamhaus ZEN".to_string(), verdict(State::Listed)), ("SpamCop".to_string(), verdict(State::Clean))].into() },
+        );
+        let o = blacklist_outcome("127.0.0.2", &r);
+        let lines = o.records();
+        assert!(lines.contains(&"127.0.0.2 (address, target): listed on 1 of 2 lists".to_string()));
+        assert!(lines.contains(&"Listed on Spamhaus ZEN: 127.0.0.2".to_string()));
+        assert_eq!(o.details.len(), 2);
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn a_domain_with_no_address_says_why_nothing_was_checked() {
+        use zombo_core::blacklist::BlacklistResult;
+        let r = BlacklistResult { resolve: Some("no mail host has an address".into()), ..BlacklistResult::default() };
+        assert!(blacklist_outcome("example.com", &r).records().contains(&"Mail host addresses: no mail host has an address".to_string()));
+    }
+
 }

@@ -372,7 +372,7 @@ impl Tab {
         match section {
             Section::Summary => "No Check has run for this target yet.".into(),
             s if s.is_on_demand() => format!(
-                "The {} Check runs only when you ask for it, because it connects to the target's servers. Asking for it from the app is not built yet, so nothing was checked.",
+                "The {} Check runs only when you ask for it, because it connects to the target's servers or sends many queries. Nothing was checked yet. Press Run, or Ctrl+R in this section.",
                 s.label()
             ),
             s if kind == Kind::Ip => format!("The {} Check needs a domain or host name, so it does not apply to an IP address.", s.label()),

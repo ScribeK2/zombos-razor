@@ -1,9 +1,12 @@
+use crate::section::Section;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     FocusOmnibox,
     Submit,
     Palette,
     Rerun,
+    Run(Section),
     Jump(usize),
     PrevSection,
     NextSection,
@@ -62,6 +65,9 @@ const BINDINGS: &[Binding] = &[
     bind("enter", false, false, false, When::InOmnibox, Action::Submit, "Run the Diagnosis"),
     bind("k", true, false, false, When::Always, Action::Palette, "Command palette"),
     bind("r", true, false, false, When::Always, Action::Rerun, "Re-run this section's Check"),
+    bind("p", true, false, true, When::Always, Action::Run(Section::Ports), "Run port scan"),
+    bind("s", true, false, true, When::Always, Action::Run(Section::Smtp), "Run SMTP banner check"),
+    bind("b", true, false, true, When::Always, Action::Run(Section::Blacklist), "Run blacklist check"),
     bind("1", true, false, false, When::Always, Action::Jump(0), "Go to Summary"),
     bind("2", true, false, false, When::Always, Action::Jump(1), "Go to DNS"),
     bind("3", true, false, false, When::Always, Action::Jump(2), "Go to Delegation"),
@@ -201,6 +207,9 @@ mod tests {
             (ctrl("5"), Jump(4)),
             (ctrl("8"), Jump(7)),
             (ctrl("9"), Jump(8)),
+            (press("p", true, false, true), Run(Section::Ports)),
+            (press("s", true, false, true), Run(Section::Smtp)),
+            (press("b", true, false, true), Run(Section::Blacklist)),
         ];
         for (p, want) in cases {
             assert_eq!(action_for(Mode::Browse, false, p), Some(want), "{p:?}");
@@ -278,6 +287,7 @@ mod tests {
         assert_eq!(shown(Action::Submit).as_deref(), Some("Enter"));
         assert_eq!(shown(Action::Cheatsheet).as_deref(), Some("?"));
         assert_eq!(shown(Action::Jump(8)).as_deref(), Some("Ctrl+9"));
+        assert_eq!(shown(Action::Run(Section::Ports)).as_deref(), Some("Ctrl+Shift+P"));
         assert!(entries.iter().all(|e| !e.shortcut.is_empty() && !e.label.is_empty()));
     }
 }
