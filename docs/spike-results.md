@@ -2,7 +2,7 @@
 
 Spike code: `spike/gpui-hello` (a hello window and a widget demo, built on `gpui-kit` 0.9.1). Container recipes: `spike/Dockerfile.build` (Ubuntu 24.04 build) and `spike/Dockerfile.run` (runtime images). The AppImage is `spike/dist/zombo-spike-x86_64.AppImage`. A teammate runs it with `spike/team-test.sh`.
 
-Verdict: **passed.** Everything tested passes, including a real Ubuntu work laptop with Orca (tester report, 2026-11-09: opened the AppImage, tabbed through the widgets, typed in the input, scrolled the table fast, closed the window, and passed every Orca step). The laptop's Ubuntu version and GPU were not recorded. Intel and NVIDIA are still unconfirmed.
+Verdict: **passed.** Everything tested passes, including a real Ubuntu work laptop with Orca (tester report, 2026-11-09: opened the AppImage, tabbed through the widgets, typed in the input, scrolled the table fast, closed the window, and passed every Orca step). The laptop output is recorded below. NVIDIA is still unconfirmed.
 
 ## Passed
 
@@ -14,6 +14,7 @@ Verdict: **passed.** Everything tested passes, including a real Ubuntu work lapt
 | Ubuntu 24.04 and 26.04 userland, host Wayland socket and GPU | Both open a native Wayland window. |
 | Ubuntu 24.04 and 26.04, no GPU (llvmpipe), Xvfb | Both run 8 s with no crash. The 24.04 screenshot shows correct rendering. |
 | AppImage runs with `fuse3` installed and no `libfuse2` | Mounts and starts the app on 24.04 and 26.04. |
+| Work laptop: Ubuntu 24.04.5 LTS, kernel 7.0.0-42, GNOME Wayland, Intel Alder Lake-P (Xe) integrated graphics, Mesa 25.2.8, `libvulkan1` 1.3.275 | Hello and widgets both open and run. First render 161 ms (hello) and 177 ms (widgets). Tab, typing, fast scrolling and all Orca steps pass. |
 | Widget demo: input, 100,000-row table, Geist Sans and Geist Mono | Renders correctly. The table has no visible cost at this size. |
 | First render, 3 runs each | Hello 113 to 125 ms. Widgets 115 to 121 ms. One cold run took 1.65 s. |
 
@@ -37,7 +38,8 @@ Verdict: **passed.** Everything tested passes, including a real Ubuntu work lapt
 
 ## Still untested (not blocking)
 
-- **Intel and NVIDIA GPUs.** Unconfirmed; the work laptop GPU was not recorded.
+- **NVIDIA GPUs.** Intel is confirmed on the work laptop (Alder Lake-P). NVIDIA is not.
+- **The AppImage without `libfuse2`, on real hardware.** The work laptop has `libfuse2t64` installed, so it does not test this. The container test with `fuse3` only covers it.
 - **Wayland with no GPU.** Headless Weston has no input seat, so that run proved nothing.
 - **Scroll frame rate.** Not measured.
 - **The AppImage on a machine with Ubuntu's AppArmor settings.** Not tested.
