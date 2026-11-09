@@ -4,7 +4,7 @@ What Zombo's Razor contacts. The app has no telemetry, no accounts and no analyt
 
 ## Always the target
 
-Every Check talks to the target the rep typed, or to infrastructure that serves it: its web servers (HTTP, HTTPS), its mail servers (SMTP, when asked), its authoritative nameservers (UDP and TCP 53), and the servers it lists in DNS (MX, NS, CNAME chains). The port test and the SMTP test connect to the target's servers only when the rep starts them.
+Every Check talks to the target the rep typed, or to infrastructure that serves it: its web servers (HTTP, HTTPS), its mail servers (SMTP, when asked), its authoritative nameservers (UDP and TCP 53), and the servers it lists in DNS (MX, NS, CNAME chains). The port test, the SMTP test and the TLS on a port test connect to the target's servers only when the rep starts them.
 
 ## DNS resolvers
 
@@ -12,7 +12,7 @@ Every Check talks to the target the rep typed, or to infrastructure that serves 
 |---|---|
 | The ten public resolvers in `propagation::default_resolvers` (Google, Cloudflare, Quad9, OpenDNS, Level3, DNS.SB, AdGuard, Yandex, 114DNS, CleanBrowsing) | propagation, delegation, email authentication, DNSSEC discovery |
 | Google, Cloudflare, Quad9, OpenDNS | the DNSSEC verdict (validating resolvers only) |
-| The machine's own resolver (`/etc/resolv.conf`, at most 3 servers) | blocklist lookups (public resolvers are refused by some lists), reverse DNS, the web Check's DNS |
+| The machine's own resolver (`/etc/resolv.conf`, at most 3 servers) | blocklist lookups (public resolvers are refused by some lists), reverse DNS (also the automatic Reverse DNS section for an IP target), the web Check's DNS, the TLS on a port Check's name lookup, and the "This machine" row of DNS propagation (first server only; the same questions as the public resolvers, the target's name and nothing else) |
 | The authoritative nameservers and the parent zone's servers, found by discovery | authoritative Vantage, delegation, DNSSEC |
 | Resolvers the rep adds in settings (propagation and discovery only) or with `--resolver` | as configured |
 
@@ -42,4 +42,4 @@ No telemetry, crash reports, usage statistics, fonts or assets from a CDN, adver
 
 ## HTTP clients
 
-The HTTP clients (registration, web) use `ureq` with rustls: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client uses the proxy from settings first, then `HTTP_PROXY` and `HTTPS_PROXY`; the web Check ignores them on purpose (see `docs/progress.md`, decisions waiting).
+The HTTP clients (registration, web) use `ureq` with rustls and send the User-Agent `zombo/<release version>`: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client uses the proxy from settings first, then `HTTP_PROXY` and `HTTPS_PROXY`; the web Check ignores them on purpose (see `docs/progress.md`, decisions waiting).

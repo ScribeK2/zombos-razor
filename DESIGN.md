@@ -16,7 +16,7 @@ Decided in a grilling session on 2026-11-09. Terms are in `CONTEXT.md`. Where a 
 - **Window.** A custom slim title bar that holds the omnibox. Standard minimize, maximize and close buttons, in the system's usual place. Content is always dark. If a compositor mishandles the custom bar, fall back to the system title bar with the omnibox below it.
 - **Tabs.** One tab per target, like a browser. Each tab keeps its Diagnosis in memory. Closing a tab drops its results.
 - **Main layout.** Omnibox on top. A narrow left rail lists the sections with a status mark. The right pane shows the selected section. A status bar at the bottom shows active Watches.
-- **Rail sections.** Summary, DNS, Delegation, DNSSEC, Email, Web, TLS, Registration. Evidence tabs have their own sections (message path, authentication, findings).
+- **Rail sections.** Summary, DNS, Delegation, DNSSEC, Email, Web, TLS, Registration, Reverse DNS. On demand: Port scan, SMTP banner, TLS on a port, Blacklist. Evidence tabs have their own sections (message path, authentication, findings).
 - **Section pane.** Verdict line, then findings, then the raw data. Short data stays open. Long data (DNSSEC key list, SPF tree, full header list) is collapsed.
 - **Summary.** The Agreement verdict, then counts of critical, warning and ok findings across sections.
 
@@ -24,9 +24,9 @@ Decided in a grilling session on 2026-11-09. Terms are in `CONTEXT.md`. Where a 
 
 | Target | Automatic | On demand (palette) |
 |---|---|---|
-| Domain | DNS and propagation, delegation, DNSSEC, registration, email authentication, web, TLS | port scan, SMTP banner and STARTTLS, blacklist |
-| Hostname | DNS and propagation, web, TLS (registration uses the registrable domain) | port scan, SMTP banner and STARTTLS, blacklist (its addresses) |
-| IP address | reverse DNS, blacklist | port scan, SMTP banner and STARTTLS (TLS on a port later) |
+| Domain | DNS and propagation, delegation, DNSSEC, registration, email authentication, web, TLS | port scan, SMTP banner and STARTTLS, TLS on a port, blacklist |
+| Hostname | DNS and propagation, web, TLS (registration uses the registrable domain) | port scan, SMTP banner and STARTTLS, TLS on a port, blacklist (its addresses) |
+| IP address | reverse DNS | port scan, SMTP banner and STARTTLS, TLS on a port, blacklist |
 | Email address | the domain Checks for its domain part | as for a domain |
 
 On-demand Checks show as "not run" in the rail until asked, and are never watched (a Watch would repeat them on a timer). They connect to the target's servers, or send many queries, so they never start on their own.
@@ -38,6 +38,22 @@ Each rail item has one of five states, always with a text label and never color 
 ## Evidence
 
 A palette command opens a paste pane: "Analyse pasted headers" or "Analyse pasted mail log". The tab becomes an Evidence tab. The app sniffs the pasted text and suggests which kind it is. Pasted text stays in memory and is never written to disk.
+
+## Things each section says it cannot see
+
+Every section ends with a collapsed "Not visible from here" block of three or four fixed lines (a table in `blind_spots.rs`): for example that DNS cannot see the registrar account, Web cannot see application logs or the CDN origin unless asked, and Email cannot see recipient-side filtering. The lines are also in the section's Markdown copy.
+
+## The "This machine" row
+
+DNS propagation shows the machine's own resolver (the first server in `/etc/resolv.conf`) as an extra row after the ten public resolvers. It is compared with the answer the verdict chose, but never votes: it cannot change the Agreement, be the truth, or source the record findings. A difference gives `dns_this_machine_differs` (a warning, or info when only A and AAAA differ, which is normal for a CDN).
+
+## TLS on a port
+
+An on-demand Check for mail and other TLS ports: chips for 443, 465, 993, 995 and 8443, plus a typed port from 1 to 65535. Scopes for propagation and email stay `all`; the app offers no scope option.
+
+## Honest limits of the TLS Check
+
+The TLS stack (rustls) speaks only TLS 1.2 and 1.3. A server that offers only TLS 1.0 or 1.1 gives a handshake error, and the app says the server may offer only those old versions. This replaces the old warning about old protocols; it is a hint, not a finding.
 
 ## Copy
 
@@ -65,7 +81,8 @@ The omnibox, focused, with the placeholder "domain, host, IP or email". Below it
 | `Ctrl+R` | Re-run the current section's Check |
 | `Ctrl+1` to `9` | Jump to a rail section (`Ctrl+9` goes to the first on-demand Check) |
 | `[`, `]` | Previous or next record type in the DNS section |
-| `Ctrl+Shift+P`, `S`, `B` | Run port scan, SMTP banner check, blacklist check |
+| `Ctrl+Shift+P`, `S`, `T`, `B` | Run port scan, SMTP banner check, TLS on a port check, blacklist check |
+| `Esc` | Cancel the running Check (it returns to not run, with the note "Cancelled") |
 | `Alt+Up`, `Alt+Down` | Previous or next section |
 | `J`, `K` or arrows | Move through findings and rows |
 | `Ctrl+C` | Copy the focused value |
