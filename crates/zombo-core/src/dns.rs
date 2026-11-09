@@ -25,6 +25,16 @@ pub enum ExchangeError {
     Bad(String),
 }
 
+/// What to ask for besides the question itself.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct QueryFlags {
+    pub recursion_desired: bool,
+    /// The DO bit: also send the DNSSEC records (RRSIG and the like).
+    pub dnssec_ok: bool,
+    /// The CD bit: a validating resolver should answer even if validation fails.
+    pub checking_disabled: bool,
+}
+
 /// Send a query (recursive unless `recursion_desired` is false, as when asking
 /// an authoritative nameserver directly): UDP first, then TCP when the UDP answer is
 /// truncated or unusable. Some public resolvers cut an oversized UDP reply
@@ -37,11 +47,25 @@ pub async fn exchange(
     recursion_desired: bool,
     limit: Duration,
 ) -> Result<Message, ExchangeError> {
+    let flags = QueryFlags { recursion_desired, ..QueryFlags::default() };
+    exchange_with(server, name, rtype, flags, limit).await
+}
+
+/// `exchange` with the DNSSEC flags: see `QueryFlags`.
+pub async fn exchange_with(
+    server: SocketAddr,
+    name: &Name,
+    rtype: RecordType,
+    flags: QueryFlags,
+    limit: Duration,
+) -> Result<Message, ExchangeError> {
     let mut q = Message::query();
-    q.metadata.recursion_desired = recursion_desired;
+    q.metadata.recursion_desired = flags.recursion_desired;
+    q.metadata.checking_disabled = flags.checking_disabled;
     q.add_query(Query::query(name.clone(), rtype));
     let mut edns = Edns::new();
     edns.set_max_payload(EDNS_PAYLOAD);
+    edns.set_dnssec_ok(flags.dnssec_ok);
     q.set_edns(edns);
     let wire = q.to_vec().map_err(|e| ExchangeError::Bad(e.to_string()))?;
     let id = q.metadata.id;

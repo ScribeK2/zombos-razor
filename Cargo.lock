@@ -920,6 +920,7 @@ dependencies = [
 name = "zombo-core"
 version = "0.0.0"
 dependencies = [
+ "data-encoding",
  "hickory-proto",
  "idna",
  "psl",

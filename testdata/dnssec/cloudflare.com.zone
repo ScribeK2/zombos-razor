@@ -1,0 +1,8 @@
+; real DNSKEY and SOA(+RRSIG) of cloudflare.com, and its DS from the parent, fetched 2026-11-09 (RFC 4034 presentation form)
+cloudflare.com. 33 IN DNSKEY 256 3 13 oJMRESz5E4gYzS/q6XDrvU1qMPYIjCWzJaOau8XNEZeqCYKD5ar0IRd8KqXXFJkqmVfRvMGPmM1x8fGAa2XhSA==
+cloudflare.com. 33 IN DNSKEY 257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==
+cloudflare.com. 33 IN RRSIG DNSKEY 13 2 3600 20270106045540 20261106045540 2371 cloudflare.com. YLZri1lt/iM28cGKrBsG0Pzssde+2WVku4L+Sz7XSQxnC3eMFveZo8o9KBsbMNFyzzzqdDyTnIo9t7eUAKGleg==
+cloudflare.com. 86400 IN DS 2371 13 2 32996839a6d808afe3eb4a795a0e6a7a39a76fc52ff228b22b76f6d63826f2b9
+cloudflare.com. 86400 IN RRSIG DS 13 2 86400 20261113010013 20261105235013 65344 com. 45/aGOmbBi3koGpeQq02j9u1LOPIhM1Y/cbVZj7Uy2nqyZVt/5nwaIsLTFe1U5G4iLMEejD8EtrmOjI3Ifi2bQ==
+cloudflare.com. 300 IN SOA ns3.cloudflare.com. dns.cloudflare.com. 2419513043 10000 2400 604800 300
+cloudflare.com. 300 IN RRSIG SOA 13 2 300 20261110143621 20261108123621 34505 cloudflare.com. 4w+CQ4fXXiRA8RMdKgHFpARutycA+on958VRP7hNqlceN6nPJgl0v3Crvmy8ZMQVR/K6SEZsK+NWt/YCE/T1jg==
