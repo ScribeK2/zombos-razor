@@ -61,9 +61,9 @@ impl Shell {
 
     /// The card's first line. With a result it is a disclosure that opens the rest of the card.
     pub(super) fn brief_line(&self, what: String, has_result: bool, open: bool, cx: &mut Context<Self>) -> Stateful<Div> {
-        let line = div().id("brief-line").flex().items_center().gap(px(8.)).text_size(px(t::TEXT_BODY)).line_height(px(20.));
+        let line = div().id("brief-line").w_full().min_w_0().flex().items_center().gap(px(8.)).text_size(px(t::TEXT_BODY)).line_height(px(20.));
         if !has_result {
-            return line.child(what);
+            return line.child(div().flex_1().min_w_0().child(what));
         }
         line.cursor_pointer()
             .hover(|s| s.bg(color(t::GRAY_200)))

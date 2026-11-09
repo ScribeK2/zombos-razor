@@ -242,7 +242,7 @@ impl EvidenceTab {
         if matches!(state, CheckState::Done { problems: 0 }) {
             let v = view(report, section);
             let glyph = if v.glyph == Glyph::Info { Glyph::Info } else { Glyph::Check };
-            return Mark { glyph, label: format!("done \u{b7} {}", v.word.to_lowercase()) };
+            return Mark { glyph, label: v.word.to_lowercase() };
         }
         Mark { glyph: state.glyph(), label: state.label() }
     }
@@ -707,9 +707,9 @@ mod tests {
         let mut tab = EvidenceTab::new(1, Kind::Headers, 0);
         tab.stage = Stage::Done(Box::new(analyse(Kind::Headers, fixture!("gmail.txt")).unwrap()));
         let auth = tab.mark(Section::Authentication);
-        assert_eq!((auth.glyph, auth.label.as_str()), (Glyph::Check, "done \u{b7} passed"));
+        assert_eq!((auth.glyph, auth.label.as_str()), (Glyph::Check, "passed"));
         let path = tab.mark(Section::Path);
-        assert_eq!((path.glyph, path.label.as_str()), (Glyph::Info, "done \u{b7} 2 hops"));
+        assert_eq!((path.glyph, path.label.as_str()), (Glyph::Info, "2 hops"));
     }
 
     #[test]
@@ -724,7 +724,7 @@ mod tests {
     fn a_mail_log_timeline_carries_its_verdict() {
         let mut tab = EvidenceTab::new(1, Kind::MailLog, 0);
         tab.stage = Stage::Done(Box::new(analyse(Kind::MailLog, fixture!("sent.log")).unwrap()));
-        assert_eq!(tab.mark(Section::Timeline).label, "done \u{b7} delivered");
+        assert_eq!(tab.mark(Section::Timeline).label, "delivered");
     }
 
     #[test]
