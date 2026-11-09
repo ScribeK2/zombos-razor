@@ -6,8 +6,14 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 ## Active now
 
-| Work | Owner | Branch | Notes |
-|---|---|---|---|
+| Work | Owner | Notes |
+|---|---|---|
+| Evidence analysis: email headers and mail logs (`evidence/`, `zombo evidence headers|maillog`) | worker D | Pure text. Go: `headers.go`, `maillog.go`, `evidence.go` |
+| TLS certificate and chain level 1, TCP port test (`tls.rs`, `ports.rs`, `zombo tls`, `zombo ports`) | worker E | Go: `ssl.go`, `hosting.go`. Builds a reusable `inspect over a stream` seam for SMTP STARTTLS |
+| Blacklist, reverse DNS and FCrDNS (`blacklist.rs`, `rdns.rs`, `zombo blacklist`, `zombo rdns`) | worker F | Go: `blacklist.go`. Uses the system resolver, not public ones, for blocklists |
+| Web inspection: redirect chain, headers, origin vs CDN, CDN and ASN (`web.rs`, `zombo web`) | worker G | Go: `website.go`, `origin.go`. Reuses the `ureq` client pattern |
+
+Each worker follows `docs/agents/worker-rules.md`. Waiting on worker E: SMTP banner and STARTTLS.
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
