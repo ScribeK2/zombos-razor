@@ -1,10 +1,14 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 use zombo_core::{
     Finding, Severity,
     propagation::{Agreement, PropagationResult, VantageAnswer, VantageKind},
-    target::Target,
+    target::{Kind, Target},
 };
 
 use crate::{
+    outcome::{History, Run},
+    record::RecordKind,
     section::Section,
     status::{CheckState, Glyph},
 };
@@ -86,8 +90,20 @@ impl RowStatus {
     }
 }
 
+/// One Vantage's raw answers, for every record type it was asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
+    pub resolver: String,
+    pub location: String,
+    pub answers: BTreeMap<String, Vec<String>>,
+    pub ttls: BTreeMap<String, u32>,
+    pub error: Option<String>,
+    pub authoritative: bool,
+}
+
+/// What the table shows for one Vantage and one record type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowView {
     pub resolver: String,
     pub location: String,
     pub answer: String,
@@ -98,28 +114,47 @@ pub struct Row {
 
 impl Row {
     pub fn from_answer(a: &VantageAnswer) -> Row {
-        let answer = match &a.error {
-            Some(e) => e.clone(),
-            None => {
-                let parts: Vec<String> = a
-                    .answers
-                    .iter()
-                    .filter(|(_, v)| !v.is_empty())
-                    .map(|(t, v)| format!("{t} {}", v.join(", ")))
-                    .collect();
-                if parts.is_empty() { "empty answer".into() } else { parts.join(" \u{b7} ") }
-            }
-        };
         Row {
             resolver: a.vantage.name.clone(),
             location: a.vantage.location.clone(),
-            answer,
-            ttl: a.ttl.values().copied().min(),
-            status: if a.error.is_some() { RowStatus::NoAnswer } else { RowStatus::Answered },
+            answers: a.answers.clone(),
+            ttls: a.ttl.clone(),
+            error: a.error.clone(),
             authoritative: a.vantage.kind == VantageKind::Authoritative,
         }
     }
 
+    fn view(&self, ty: RecordKind, settled: bool, stale: &[String]) -> RowView {
+        let code = ty.code();
+        let values = self.answers.get(code).filter(|v| !v.is_empty());
+        let (answer, status) = match &self.error {
+            Some(e) => (e.clone(), RowStatus::NoAnswer),
+            None => {
+                let text = values.map(|v| v.join(", ")).unwrap_or_else(|| "no record".into());
+                let status = if !settled {
+                    RowStatus::Answered
+                } else if self.authoritative {
+                    RowStatus::Truth
+                } else if stale.contains(&self.resolver) {
+                    RowStatus::Stale
+                } else {
+                    RowStatus::Match
+                };
+                (text, status)
+            }
+        };
+        RowView {
+            resolver: self.resolver.clone(),
+            location: self.location.clone(),
+            answer,
+            ttl: self.ttls.get(code).copied(),
+            status,
+            authoritative: self.authoritative,
+        }
+    }
+}
+
+impl RowView {
     pub fn label(&self) -> String {
         let ttl = self.ttl.map(|t| format!(", TTL {t}")).unwrap_or_default();
         format!("{}, {}, {}{ttl}, {}", self.resolver, self.location, self.answer, self.status.label())
@@ -137,18 +172,35 @@ pub enum PropEvent {
 pub struct Propagation {
     pub state: CheckState,
     pub rows: Vec<Row>,
+    pub settled: bool,
+    pub stale: BTreeMap<String, Vec<String>>,
     pub agreement: Option<Agreement>,
     pub findings: Vec<Finding>,
+    pub history: History,
+}
+
+/// Every record any Vantage returned, as "TYPE: value" lines, for comparing runs.
+pub fn propagation_records(r: &PropagationResult) -> Vec<String> {
+    let lines: BTreeSet<String> = r
+        .nameservers
+        .iter()
+        .chain(&r.resolvers)
+        .flat_map(|a| a.answers.iter().flat_map(|(t, vs)| vs.iter().map(move |v| format!("{t}: {v}"))))
+        .collect();
+    lines.into_iter().collect()
 }
 
 impl Propagation {
     pub fn new() -> Self {
-        Propagation { state: CheckState::NotRun, rows: vec![], agreement: None, findings: vec![] }
+        Propagation { state: CheckState::NotRun, rows: vec![], settled: false, stale: BTreeMap::new(), agreement: None, findings: vec![], history: History::default() }
     }
 
     pub fn apply(&mut self, target: &str, event: PropEvent) {
         match event {
-            PropEvent::Started => *self = Propagation { state: CheckState::Running, ..Propagation::new() },
+            PropEvent::Started => {
+                let history = std::mem::take(&mut self.history);
+                *self = Propagation { state: CheckState::Running, history, ..Propagation::new() };
+            }
             PropEvent::Answer(a) => {
                 if self.state == CheckState::Running {
                     self.rows.push(Row::from_answer(&a));
@@ -165,7 +217,10 @@ impl Propagation {
                 }
                 match *result {
                     Ok(r) => {
-                        self.rows = settled_rows(&r);
+                        self.rows = r.nameservers.iter().chain(&r.resolvers).map(Row::from_answer).collect();
+                        self.stale = r.stale.clone();
+                        self.settled = true;
+                        self.history.settle(propagation_records(&r));
                         self.findings = ordered(&zombo_core::propagation::propagation_findings(target, &r));
                         self.agreement = Some(r.agreement);
                         self.state = CheckState::Done { problems: problems(&self.findings) };
@@ -183,25 +238,11 @@ impl Default for Propagation {
     }
 }
 
-fn settled_rows(r: &PropagationResult) -> Vec<Row> {
-    let stale: Vec<&str> = r.stale.values().flatten().map(String::as_str).collect();
-    r.nameservers
-        .iter()
-        .chain(&r.resolvers)
-        .map(|a| {
-            let mut row = Row::from_answer(a);
-            if row.status != RowStatus::NoAnswer {
-                row.status = if row.authoritative {
-                    RowStatus::Truth
-                } else if stale.contains(&row.resolver.as_str()) {
-                    RowStatus::Stale
-                } else {
-                    RowStatus::Match
-                };
-            }
-            row
-        })
-        .collect()
+impl Propagation {
+    pub fn view(&self, ty: RecordKind) -> Vec<RowView> {
+        let stale = self.stale.get(ty.code()).map(Vec::as_slice).unwrap_or(&[]);
+        self.rows.iter().map(|r| r.view(ty, self.settled, stale)).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -209,18 +250,47 @@ pub struct Tab {
     pub target: Target,
     pub section: Section,
     pub propagation: Propagation,
+    pub record: RecordKind,
+    pub runs: HashMap<Section, Run>,
 }
 
 impl Tab {
     pub fn new(target: Target) -> Self {
-        Tab { target, section: Section::Dns, propagation: Propagation::new() }
+        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default(), runs: HashMap::new() }
+    }
+
+    pub fn run_mut(&mut self, section: Section) -> &mut Run {
+        self.runs.entry(section).or_default()
     }
 
     pub fn state(&self, section: Section) -> CheckState {
         match section {
             Section::Dns => self.propagation.state.clone(),
             Section::Summary => self.summary_state(),
-            _ => CheckState::NotRun,
+            s => self.runs.get(&s).map(|r| r.state.clone()).unwrap_or(CheckState::NotRun),
+        }
+    }
+
+    /// `None` until the Check has finished. `Some(None)` when it finished without an
+    /// answer (failed or timed out), `Some(Some(records))` when it answered.
+    pub fn settled(&self, section: Section) -> Option<Option<Vec<String>>> {
+        match self.state(section) {
+            CheckState::Done { .. } => Some(self.records(section)),
+            CheckState::Failed { .. } | CheckState::TimedOut => Some(None),
+            CheckState::NotRun | CheckState::Running => None,
+        }
+    }
+
+    /// The records of the last run that finished with an answer.
+    pub fn records(&self, section: Section) -> Option<Vec<String>> {
+        self.history(section).and_then(|h| h.records()).map(<[String]>::to_vec)
+    }
+
+    pub fn history(&self, section: Section) -> Option<&History> {
+        match section {
+            Section::Dns => Some(&self.propagation.history),
+            Section::Summary => None,
+            s => self.runs.get(&s).map(|r| &r.history),
         }
     }
 
@@ -244,8 +314,17 @@ impl Tab {
     pub fn findings(&self, section: Section) -> Vec<Finding> {
         match section {
             Section::Dns => self.propagation.findings.clone(),
-            Section::Summary => ordered(&self.propagation.findings),
-            _ => vec![],
+            Section::Summary => {
+                let mut seen = BTreeSet::new();
+                let all: Vec<Finding> = Section::ALL
+                    .iter()
+                    .filter(|&&s| s != Section::Summary)
+                    .flat_map(|&s| self.findings(s))
+                    .filter(|f| seen.insert((f.code, f.message.clone())))
+                    .collect();
+                ordered(&all)
+            }
+            s => self.runs.get(&s).map(|r| r.outcome.findings.clone()).unwrap_or_default(),
         }
     }
 
@@ -253,16 +332,16 @@ impl Tab {
         let state = self.state(section);
         let v = |w: &str, y: &str| Verdict { word: w.into(), why: y.into() };
         match &state {
-            CheckState::NotRun if section == Section::Dns && crate::checks::propagation_name(&self.target).is_none() => {
-                v("NOT RUN", "Propagation needs a domain or host name, so it does not apply to an IP address.")
-            }
-            CheckState::NotRun => v("NOT RUN", &not_run_reason(section)),
+            CheckState::NotRun => v("NOT RUN", &self.not_run_reason(section)),
             CheckState::Running => v("RUNNING", "Results appear here as each answer arrives."),
             CheckState::Failed { reason } => v("FAILED", reason),
             CheckState::TimedOut => v("TIMED OUT", "The Check did not finish in time. Retry it, or try again from another network."),
             CheckState::Done { problems } => match (section, self.propagation.agreement) {
                 (Section::Dns, Some(a)) => v(a.label(), a.reason()),
-                _ if *problems == 0 => v("NO PROBLEMS", "Every Check that ran found nothing wrong. Checks that have not run are listed as not run."),
+                _ if *problems == 0 && section == Section::Summary => {
+                    v("NO PROBLEMS", "Every Check that ran found nothing wrong. Checks that have not run are listed as not run.")
+                }
+                _ if *problems == 0 => v("NO PROBLEMS", "This Check found nothing wrong. Read the findings below for what it looked at."),
                 _ => v(&format!("{problems} PROBLEM{}", if *problems == 1 { "" } else { "S" }), "Read the findings below, worst first."),
             },
         }
@@ -281,11 +360,21 @@ impl Tab {
     }
 }
 
-fn not_run_reason(section: Section) -> String {
-    match section {
-        Section::Dns => "The propagation Check has not started for this target.".into(),
-        Section::Summary => "No Check has run for this target yet.".into(),
-        s => format!("The {} Check is not part of this build yet, so nothing was checked.", s.label()),
+impl Tab {
+    fn not_run_reason(&self, section: Section) -> String {
+        let kind = self.target.kind;
+        match section {
+            Section::Summary => "No Check has run for this target yet.".into(),
+            s if s.is_on_demand() => format!(
+                "The {} Check runs only when you ask for it, because it connects to the target's servers. Asking for it from the app is not built yet, so nothing was checked.",
+                s.label()
+            ),
+            s if kind == Kind::Ip => format!("The {} Check needs a domain or host name, so it does not apply to an IP address.", s.label()),
+            s if !crate::checks::automatic(kind).contains(&s) => {
+                format!("The {} Check does not start on its own for a host name. Press Ctrl+R to run it.", s.label())
+            }
+            s => format!("The {} Check has not started for this target.", s.label()),
+        }
     }
 }
 
@@ -373,10 +462,32 @@ mod tests {
         p.apply("example.com", PropEvent::Started);
         p.apply("example.com", PropEvent::Answer(Box::new(answer("Google", false, "v"))));
         assert_eq!(p.state, CheckState::Running);
-        assert_eq!(p.rows.len(), 1);
-        assert_eq!(p.rows[0].status, RowStatus::Answered);
-        assert_eq!(p.rows[0].answer, "TXT v");
-        assert_eq!(p.rows[0].ttl, Some(54));
+        let rows = p.view(RecordKind::Txt);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, RowStatus::Answered);
+        assert_eq!(rows[0].answer, "v");
+        assert_eq!(rows[0].ttl, Some(54));
+    }
+
+    #[test]
+    fn the_table_shows_one_record_type_at_a_time() {
+        let mut p = Propagation::new();
+        p.apply("example.com", PropEvent::Started);
+        p.apply("example.com", PropEvent::Answer(Box::new(answer("Google", false, "v"))));
+        let a = p.view(RecordKind::A);
+        assert_eq!(a[0].answer, "no record");
+        assert_eq!(a[0].ttl, None);
+        assert_eq!(p.view(RecordKind::Txt)[0].answer, "v");
+    }
+
+    #[test]
+    fn staleness_is_judged_per_record_type() {
+        let mut p = Propagation::new();
+        p.apply("example.com", PropEvent::Started);
+        p.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        let status = |ty| p.view(ty).iter().map(|r| r.status.clone()).collect::<Vec<_>>();
+        assert_eq!(status(RecordKind::Txt), [RowStatus::Truth, RowStatus::Match, RowStatus::Stale]);
+        assert_eq!(status(RecordKind::A), [RowStatus::Truth, RowStatus::Match, RowStatus::Match]);
     }
 
     #[test]
@@ -394,7 +505,8 @@ mod tests {
         let mut p = Propagation::new();
         p.apply("example.com", PropEvent::Started);
         p.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
-        let status: Vec<_> = p.rows.iter().map(|r| (r.resolver.as_str(), r.status.clone())).collect();
+        let view = p.view(RecordKind::Txt);
+        let status: Vec<_> = view.iter().map(|r| (r.resolver.as_str(), r.status.clone())).collect();
         assert_eq!(status, [("ns1", RowStatus::Truth), ("Google", RowStatus::Match), ("Quad9", RowStatus::Stale)]);
         assert_eq!(p.agreement, Some(Agreement::Cached));
         assert!(matches!(p.state, CheckState::Done { .. }));
@@ -414,19 +526,91 @@ mod tests {
         a.error = Some("timed out".into());
         let mut r = result(&[]);
         r.resolvers.push(a);
-        let rows = settled_rows(&r);
-        assert_eq!(rows.last().map(|r| r.status.clone()), Some(RowStatus::NoAnswer));
+        let mut p = Propagation::new();
+        p.apply("e", PropEvent::Started);
+        p.apply("e", PropEvent::Finished(Box::new(Ok(r))));
+        assert_eq!(p.view(RecordKind::Txt).last().map(|r| r.status.clone()), Some(RowStatus::NoAnswer));
     }
 
     #[test]
-    fn sections_without_a_check_say_not_run_honestly() {
+    fn sections_that_have_not_run_say_not_run_honestly() {
         let t = tab();
         for s in [Section::Delegation, Section::Dnssec, Section::Email, Section::Web, Section::Tls, Section::Registration] {
             assert_eq!(t.state(s), CheckState::NotRun);
             let v = t.verdict(s);
             assert_eq!(v.word, "NOT RUN");
-            assert!(v.why.contains("nothing was checked"));
+            assert!(v.why.contains("has not started"), "{}", v.why);
         }
+        for s in [Section::Ports, Section::Smtp, Section::Blacklist] {
+            assert_eq!(t.state(s), CheckState::NotRun);
+            assert!(t.verdict(s).why.contains("only when you ask"));
+        }
+    }
+
+    #[test]
+    fn an_ip_address_and_a_host_name_explain_why_a_check_does_not_start() {
+        let ip = Tab::new(Target { value: "192.0.2.1".into(), kind: Kind::Ip });
+        assert!(ip.verdict(Section::Dns).why.contains("does not apply to an IP address"));
+        let host = Tab::new(Target { value: "www.example.com".into(), kind: Kind::Hostname });
+        assert!(host.verdict(Section::Dnssec).why.contains("Ctrl+R"));
+        assert!(host.verdict(Section::Web).why.contains("has not started"));
+    }
+
+    #[test]
+    fn a_wired_check_streams_into_its_own_section_and_the_summary() {
+        use crate::outcome::{CheckEvent, Outcome};
+        let mut t = tab();
+        let f = finding(Severity::Warning, "w");
+        t.run_mut(Section::Registration).apply(CheckEvent::Started);
+        assert_eq!(t.state(Section::Summary), CheckState::Running);
+        t.run_mut(Section::Registration).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f], ..Outcome::default() }))));
+        assert_eq!(t.state(Section::Registration), CheckState::Done { problems: 1 });
+        assert_eq!(t.state(Section::Dns), CheckState::NotRun);
+        assert_eq!(t.findings(Section::Summary).len(), 1);
+        assert_eq!(t.verdict(Section::Registration).word, "1 PROBLEM");
+    }
+
+    #[test]
+    fn the_summary_lists_a_finding_that_several_checks_share_once() {
+        use crate::outcome::{CheckEvent, Outcome};
+        let mut t = tab();
+        for s in [Section::Delegation, Section::Dnssec] {
+            t.run_mut(s).apply(CheckEvent::Started);
+            t.run_mut(s).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![finding(Severity::Warning, "dns_network_intercepts")], ..Outcome::default() }))));
+        }
+        assert_eq!(t.findings(Section::Delegation).len(), 1);
+        assert_eq!(t.findings(Section::Summary).len(), 1);
+    }
+
+    #[test]
+    fn a_tab_reports_a_settled_check_for_the_watch_and_nothing_while_it_runs() {
+        use crate::outcome::{CheckEvent, Fact, Outcome};
+        let mut t = tab();
+        assert_eq!(t.settled(Section::Web), None);
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        assert_eq!(t.settled(Section::Web), None);
+        let o = Outcome { facts: vec![Fact::new("Status", "200")], ..Outcome::default() };
+        t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
+        assert_eq!(t.settled(Section::Web), Some(Some(vec!["Status: 200".to_string()])));
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Web).apply(CheckEvent::TimedOut);
+        assert_eq!(t.settled(Section::Web), Some(None));
+    }
+
+    #[test]
+    fn a_propagation_rerun_reports_records_added_and_removed() {
+        let mut p = Propagation::new();
+        p.apply("e", PropEvent::Started);
+        p.apply("e", PropEvent::Finished(Box::new(Ok(result(&[])))));
+        assert_eq!(p.history.changes, None);
+        let mut second = result(&[]);
+        second.resolvers = vec![answer("Google", false, "newer")];
+        second.nameservers = vec![answer("ns1", true, "newer")];
+        p.apply("e", PropEvent::Started);
+        p.apply("e", PropEvent::Finished(Box::new(Ok(second))));
+        let d = p.history.changes.clone().unwrap();
+        assert_eq!(d.added, ["TXT: newer"]);
+        assert_eq!(d.removed, ["TXT: new", "TXT: old"]);
     }
 
     #[test]

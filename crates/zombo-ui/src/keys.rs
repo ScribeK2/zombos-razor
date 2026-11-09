@@ -11,6 +11,9 @@ pub enum Action {
     CloseTab,
     NextTab,
     PrevTab,
+    NextRecord,
+    PrevRecord,
+    ToggleWatch,
     Cheatsheet,
     Dismiss,
     MoveUp,
@@ -67,13 +70,16 @@ const BINDINGS: &[Binding] = &[
     bind("6", true, false, false, When::Always, Action::Jump(5), "Go to Web"),
     bind("7", true, false, false, When::Always, Action::Jump(6), "Go to TLS"),
     bind("8", true, false, false, When::Always, Action::Jump(7), "Go to Registration"),
-    bind("9", true, false, false, When::Always, Action::Jump(8), "Go to the ninth section"),
+    bind("9", true, false, false, When::Always, Action::Jump(8), "Go to the On demand Checks"),
     bind("up", false, true, false, When::Always, Action::PrevSection, "Previous section"),
     bind("down", false, true, false, When::Always, Action::NextSection, "Next section"),
     bind("t", true, false, false, When::Always, Action::NewTab, "New tab"),
     bind("w", true, false, false, When::Always, Action::CloseTab, "Close tab"),
     bind("tab", true, false, false, When::Always, Action::NextTab, "Next tab"),
     bind("tab", true, false, true, When::Always, Action::PrevTab, "Previous tab"),
+    bind("w", false, false, false, When::NotTyping, Action::ToggleWatch, "Watch this result"),
+    bind("]", false, false, false, When::NotTyping, Action::NextRecord, "Next record type"),
+    bind("[", false, false, false, When::NotTyping, Action::PrevRecord, "Previous record type"),
     bind("?", false, false, false, When::NotTyping, Action::Cheatsheet, "Shortcut cheat sheet"),
 ];
 
@@ -86,7 +92,6 @@ pub struct Entry {
 pub fn entries() -> Vec<Entry> {
     BINDINGS
         .iter()
-        .filter(|b| !matches!(b.action, Action::Jump(8)))
         .map(|b| Entry { action: b.action, label: b.label, shortcut: shortcut_text(b) })
         .collect()
 }
@@ -204,6 +209,20 @@ mod tests {
     }
 
     #[test]
+    fn w_toggles_a_watch_unless_typing_and_ctrl_w_still_closes_the_tab() {
+        assert_eq!(action_for(Mode::Browse, false, plain("w")), Some(Action::ToggleWatch));
+        assert_eq!(action_for(Mode::Omnibox, false, plain("w")), None);
+        assert_eq!(action_for(Mode::Browse, false, ctrl("w")), Some(Action::CloseTab));
+    }
+
+    #[test]
+    fn brackets_step_the_record_type_unless_typing() {
+        assert_eq!(action_for(Mode::Browse, false, plain("]")), Some(Action::NextRecord));
+        assert_eq!(action_for(Mode::Browse, false, plain("[")), Some(Action::PrevRecord));
+        assert_eq!(action_for(Mode::Omnibox, false, plain("]")), None);
+    }
+
+    #[test]
     fn escape_leaves_the_omnibox_for_the_pane() {
         assert_eq!(action_for(Mode::Omnibox, false, plain("escape")), Some(Action::Dismiss));
         assert_eq!(action_for(Mode::Browse, false, plain("escape")), None);
@@ -250,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn every_entry_shows_its_shortcut_and_the_ninth_slot_is_hidden() {
+    fn every_entry_shows_its_shortcut_and_ctrl_9_reaches_the_on_demand_group() {
         let entries = entries();
         let shown = |a: Action| entries.iter().find(|e| e.action == a).map(|e| e.shortcut.clone());
         assert_eq!(shown(Action::FocusOmnibox).as_deref(), Some("Ctrl+L"));
@@ -258,7 +277,7 @@ mod tests {
         assert_eq!(shown(Action::NextSection).as_deref(), Some("Alt+Down"));
         assert_eq!(shown(Action::Submit).as_deref(), Some("Enter"));
         assert_eq!(shown(Action::Cheatsheet).as_deref(), Some("?"));
-        assert_eq!(shown(Action::Jump(8)), None);
+        assert_eq!(shown(Action::Jump(8)).as_deref(), Some("Ctrl+9"));
         assert!(entries.iter().all(|e| !e.shortcut.is_empty() && !e.label.is_empty()));
     }
 }

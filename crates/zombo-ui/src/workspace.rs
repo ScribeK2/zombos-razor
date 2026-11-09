@@ -106,6 +106,12 @@ impl Workspace {
         }
     }
 
+    pub fn step_record(&mut self, delta: isize) {
+        if let Some(tab) = self.current_mut() {
+            tab.record = tab.record.step(delta);
+        }
+    }
+
     pub fn move_recent(&mut self, delta: isize) {
         let n = self.recent.len() as isize;
         if n > 0 {
@@ -220,8 +226,11 @@ mod tests {
         let mut ws = ws_with(&["a.example.com", "b.example.com"]);
         ws.jump(4);
         assert_eq!(ws.current().unwrap().section, Section::Email);
-        ws.jump(8);
-        assert_eq!(ws.current().unwrap().section, Section::Email);
+        ws.jump(Section::FIRST_ON_DEMAND);
+        assert_eq!(ws.current().unwrap().section, Section::Ports);
+        ws.jump(11);
+        assert_eq!(ws.current().unwrap().section, Section::Ports);
+        ws.jump(4);
         ws.step_section(1);
         assert_eq!(ws.current().unwrap().section, Section::Web);
         assert_eq!(ws.tabs[0].section, Section::Dns);
