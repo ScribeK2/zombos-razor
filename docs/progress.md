@@ -135,14 +135,14 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 ## Network egress (what the app contacts), to document in `docs/network-egress.md`
 
-- [ ] Write the file: the target's own servers; the resolvers (public list, system resolver, nameservers found by discovery); RDAP bootstrap bases and registry WHOIS servers (port 43); Team Cymru DNS (`*.asn.cymru.com`); the DNSBL zones in the blacklist table; the release endpoint for updates. Nothing else, no telemetry
+- [x] Written: `docs/network-egress.md` (the target's own servers; the resolvers (public list, system resolver, nameservers found by discovery); RDAP bootstrap bases and registry WHOIS servers (port 43); Team Cymru DNS (`*.asn.cymru.com`); the DNSBL zones in the blacklist table; the release endpoint for updates. Nothing else, no telemetry)
 
 ## Next batch (not started)
 
 - [ ] SMTP banner and STARTTLS (worker): connect to MX hosts on port 25 (and 587), read the banner, EHLO, STARTTLS, then `tls::inspect_stream`. Many networks block outbound 25: report 'filtered' honestly. Needs the VPS to verify
 - [ ] TLS extras: CAA, OCSP stapling (worker, small)
-- [ ] `docs/network-egress.md` (lead, small)
-- [ ] Clean up merged worker worktrees and branches (lead)
+- [x] `docs/network-egress.md` written
+- [x] Merged worker worktrees and branches removed (12 GB freed); stray test key directory deleted
 
 ## Still unverified
 
