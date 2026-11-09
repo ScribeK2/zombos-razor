@@ -6,7 +6,11 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 ## Active now
 
-Nothing running. Next batch below under "Next batch".
+Three workers running (started 2026-11-09), each in its own worktree:
+
+- [ ] **SMTP and TLS extras:** SMTP banner and STARTTLS Check, CAA lookup, OCSP stapling detection (`smtp.rs`, `tls_extras.rs`)
+- [ ] **Web follow-ups:** https to http downgrade finding, `--insecure-origin`
+- [ ] **`zombo-ui` slice 1:** window, theme, title bar and omnibox, empty state, tabs, rail with five states, one real Check (propagation) streaming, keyboard, palette
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
@@ -110,11 +114,11 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 - [x] Fixed after a live run from the VPS: probing only mail ports with no answer no longer says CRITICAL "Host unreachable" (outbound SMTP is blocked by many networks); it is now an info finding `hosting_reachability_mail_filtered`
 
-- [ ] **Proxy policy is inconsistent.** `registration` honours `HTTP_PROXY`/`HTTPS_PROXY`; `web` turns the environment proxy off on purpose ("a diagnostic must show what the site does"). Decide one rule, or keep both and say so in the UI
-- [ ] **Web User-Agent** is `zombo/<version>` (Go sent a browser-like string to avoid WAF blocks): expect more 403s. Keep honest, or send a browser-like string
-- [ ] **Web cookies:** no cookie jar (Go kept cookies across hops), so a cookie-dependent redirect reads as a loop. Add a per-Check jar if it matters
-- [ ] **Web follows https to http downgrades** on redirect (same as Go). Decide whether to flag it as a finding or refuse
-- [ ] **`--origin` with a self-signed or Cloudflare Origin CA certificate** reads as "did not answer directly". Add `--insecure-origin`?
+- [x] **Proxy policy (decided 2026-11-09, lead's call): keep both, and say so.** Registration (a lookup of public registry data) honours `HTTP_PROXY`/`HTTPS_PROXY`, so it works on corporate networks. The web Check ignores them, because it must show what the site does from this machine, not what a proxy relays. The settings pane and the web section state the rule. The proxy setting in DESIGN.md applies to registration only
+- [x] **Web User-Agent (decided): keep `zombo/<version>`.** A 403 from a WAF is itself a finding about the site
+- [ ] **Web cookies:** no cookie jar (Go kept cookies across hops), so a cookie-dependent redirect reads as a loop. Not decided: the answer "Yes" was read as applying to the downgrade finding. Ask again if a real site shows the loop
+- [ ] **Web follows https to http downgrades** on redirect. Decided: keep following, flag as a warning (in the web follow-ups worker)
+- [ ] **`--insecure-origin`** decided: add (in the web follow-ups worker)
 - [ ] **`rdns` for a host** lists addresses only, without PTR confirmation per address; add it if the Diagnosis wants it
 
 - [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
