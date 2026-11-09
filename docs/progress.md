@@ -8,7 +8,9 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 | Work | Owner | Branch | Notes |
 |---|---|---|---|
-| WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker | worktree branch off `rewrite` | Port of `internal/app/registration.go`. Does not touch `main.rs` wiring beyond its subcommand, or any docs. |
+| WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker A | worktree branch off `rewrite` (`c5d70ca`) | Port of `internal/app/registration.go`. Chooses the HTTP client. Merge: `Cargo.toml`, `lib.rs`, `main.rs` will conflict mechanically with worker B. |
+| Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
+| CI workflow and `deny.toml` | lead | `rewrite` | Files under `.github/` and the repo root only. |
 
 ## Done
 
