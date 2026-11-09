@@ -1,10 +1,10 @@
-# Stackwell
+# Zombo's Razor
 
 ## Agent skills
 
 ### Issue tracker
 
-GitHub Issues via the `gh` CLI (repo to be created, e.g. ScribeK2/Stackwell). See `docs/agents/issue-tracker.md`.
+GitHub Issues via the `gh` CLI (repo: ScribeK2/zombos-razor). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
