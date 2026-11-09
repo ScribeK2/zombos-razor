@@ -8,7 +8,6 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 | Work | Owner | Branch | Notes |
 |---|---|---|---|
-| WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker A | worktree branch off `rewrite` (`c5d70ca`) | Port of `internal/app/registration.go`. Chooses the HTTP client. Merge: `Cargo.toml`, `lib.rs`, `main.rs` will conflict mechanically with worker B. |
 | Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
 | DNSSEC (`zombo-core::dnssec`, `zombo dnssec`) | worker C | worktree branch off `rewrite` (`92d23d1`) | New design: validating-resolver CD=0 vs CD=1 verdict plus local DS/DNSKEY/RRSIG analysis; no crypto library. Premise verified live on a clean network. Adds `exchange_with` to `dns.rs` additively. |
 
@@ -27,6 +26,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 - [x] SOA serial comparison (behind vs serial not bumped)
 - [x] Agreement verdict
 - [x] Delegation and glue checks (`delegation.rs`, `zombo delegation`)
+- [x] HTTP client chosen: `ureq` 3 with rustls (ring, bundled webpki-roots). Add `CDLA-Permissive-2.0` to `deny.toml`. Reused for the later web and MTA-STS checks
 - [x] DNS-interception Finding (`dns_network_intercepts`) and `Agreement::Intercepted`, for propagation and delegation. Passive: at least two nameservers at different addresses all answering without AA but with RA
 - [x] Shared zone fixtures in `testdata/zones` for Go and Rust tests
 - [x] Verified live from a clean network (VPS) for propagation, stale cache, delegation
@@ -34,7 +34,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 ## To do: DNS and domain registration
 
 - [ ] Interception canary probe for resolver-only runs (`--no-authoritative`): needs a short extra probe to an address that must never answer, so it is opt-in to keep clean runs fast
-- [ ] WHOIS/RDAP: registrar, status, expiry, nameservers, holds, deletion states (in progress)
+- [x] WHOIS/RDAP (`registration.rs`, `zombo registration`): RDAP first with WHOIS fallback, DENIC form, bounded `ureq`+rustls client (merged from worker A). 98 tests pass
 - [ ] DNSSEC (in progress, worker C). Full chain-to-root validation is deliberately out of scope: validating resolvers do that, and the CD trick plus DS/DNSKEY/RRSIG analysis explains failures
 - [ ] More record types in lookup (SRV, PTR, DNSKEY, DS) if needed by the UI
 
@@ -100,9 +100,15 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Unprivileged traceroute
 - [ ] Light theme, aarch64
 
+## Decisions waiting
+
+- [ ] `Finding.recommendation` is `Option<&'static str>`, so the registration Check dropped Go's " (Registrar)" suffix on three recommendations (the registrar is printed above the findings instead). Widening to `Cow<'static, str>` would restore it but touches every `Some("...")` literal. Decide after workers B and C merge, to avoid conflicts.
+- [ ] ureq honours `HTTP_PROXY`/`HTTPS_PROXY`; keep (corporate networks) or turn off
+
 ## Still unverified
 
 - [ ] NVIDIA GPUs
 - [ ] The AppImage without `libfuse2` on real hardware (the work laptop has `libfuse2t64` installed)
 - [ ] Broken-delegation paths against a real broken domain (fakes only so far)
+- [ ] Registration: a real https redirect chain and the proxy path are untested; `.ru`/`.it` referral seen live only via IANA
 - [ ] Scroll frame rate
