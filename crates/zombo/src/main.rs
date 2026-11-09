@@ -11,9 +11,14 @@ use zombo_core::{
     target::{Kind, parse_target},
 };
 use zombo_core::web::{WebOptions, check_web, parse_web_target, web_findings};
+use zombo_core::{
+    blacklist::{Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist},
+    rdns::{RdnsResult, check_rdns, rdns_findings},
+    resolver::system_resolvers,
+};
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     v.parse()
@@ -42,6 +47,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("dnssec") => dnssec(it).await,
         Some("email") => email(it).await,
         Some("web") => web(it).await,
+        Some("blacklist") => blacklist(it).await,
+        Some("rdns") => rdns(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -464,6 +471,108 @@ async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     if let Some(o) = &r.origin {
         let a = &o.answer;
         println!("  origin {}: {}", o.ip, a.status.map_or_else(|| format!("no answer ({})", a.error.as_deref().unwrap_or("unknown")), |s| format!("HTTP {s} in {} ms", a.time_ms)));
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+const BLACKLIST_USAGE: &str = "usage: zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+const RDNS_USAGE: &str = "usage: zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+
+/// What `blacklist` and `rdns` share: a target, the resolvers to ask (the machine's own unless
+/// `--resolver` is given), a per-question timeout and the output form.
+fn dns_args(mut it: std::vec::IntoIter<String>, usage: &str, what: &str) -> Result<(zombo_core::target::Target, Vec<SocketAddr>, Duration, bool), String> {
+    let (mut target, mut json, mut timeout, mut resolvers) = (None, false, Duration::from_secs(3), vec![]);
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{usage}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(usage.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(usage)?)?;
+    if t.kind == Kind::Email {
+        return Err(format!("{what} needs an IP address or a domain or host name, not an email address"));
+    }
+    if resolvers.is_empty() {
+        resolvers = system_resolvers();
+    }
+    if resolvers.is_empty() {
+        return Err("no DNS resolver found in /etc/resolv.conf; pass --resolver ip[:port]".into());
+    }
+    Ok((t, resolvers, timeout, json))
+}
+
+fn join<T: ToString>(items: &[T]) -> String {
+    items.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+}
+
+async fn blacklist(it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (t, resolvers, timeout, json) = dns_args(it, BLACKLIST_USAGE, "blacklist")?;
+    let r = check_blacklist(&resolvers, &t.value, BlacklistOptions { query_timeout: timeout, overall: (timeout * 5).max(BlacklistOptions::default().overall) }).await;
+    let findings = blacklist_findings(&t.value, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{} ({:?}) via {}", t.value, t.kind, join(&resolvers));
+    for (subject, s) in &r.subjects {
+        let kind = if s.kind == SubjectKind::Ip { "address" } else { "domain" };
+        println!("  {subject} ({kind}, {})", s.source);
+        for (name, v) in &s.lists {
+            let state = match v.state {
+                State::Listed => format!("LISTED {}", v.codes.join(", ")),
+                State::Clean => "not listed".to_string(),
+                State::Refused => "refused the query".to_string(),
+                State::Unknown => format!("no verdict ({})", v.error),
+            };
+            println!("    {name:<20} {state}");
+        }
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn rdns(it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (t, resolvers, timeout, json) = dns_args(it, RDNS_USAGE, "rdns")?;
+    let r = check_rdns(&resolvers, &t.value, timeout).await;
+    let findings = rdns_findings(&r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{} ({:?}) via {}", t.value, t.kind, join(&resolvers));
+    match &r {
+        RdnsResult::Ip { ptrs, ptr_error, .. } => {
+            if let Some(e) = ptr_error {
+                println!("  PTR lookup failed: {e}");
+            }
+            for p in ptrs {
+                let back = match (&p.forward_error, p.confirmed) {
+                    (Some(e), _) => format!("not confirmed ({e})"),
+                    (None, true) => "resolves back".to_string(),
+                    (None, false) if p.addresses.is_empty() => "does NOT resolve back (it has no address)".to_string(),
+                    (None, false) => format!("does NOT resolve back (it resolves to {})", join(&p.addresses)),
+                };
+                println!("  PTR {}  {back}", p.name);
+            }
+        }
+        RdnsResult::Host { addresses, errors, .. } => {
+            for a in addresses {
+                println!("  {a}");
+            }
+            for e in errors {
+                println!("  lookup failed: {e}");
+            }
+        }
     }
     println!();
     print_findings(&findings);

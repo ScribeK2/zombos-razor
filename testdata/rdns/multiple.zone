@@ -1,0 +1,4 @@
+7.113.0.203.in-addr.arpa. 300 IN PTR mail.example.com.
+7.113.0.203.in-addr.arpa. 300 IN PTR smtp.example.com.
+mail.example.com. 300 IN A 203.0.113.7
+smtp.example.com. 300 IN A 203.0.113.7
