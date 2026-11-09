@@ -6,6 +6,7 @@ pub mod delegation;
 pub mod dnssec;
 pub mod finding;
 pub mod lookup;
+pub mod ports;
 pub mod propagation;
 pub mod registration;
 pub mod target;
