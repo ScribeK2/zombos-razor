@@ -1,6 +1,6 @@
 use zombo_core::{blacklist::DNSBLS, ports::QUICK, target::Kind};
 
-use crate::section::Section;
+use crate::{section::Section, status::CheckState};
 
 /// What an on-demand Check will do, shown before the rep runs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,11 @@ pub fn on_demand(kind: Kind) -> &'static [Section] {
 
 pub fn runnable(kind: Kind, section: Section) -> bool {
     on_demand(kind).contains(&section)
+}
+
+/// Once a result exists the description card shrinks to one line, unless the rep opened it.
+pub fn collapsed(state: &CheckState, open: bool) -> bool {
+    !open && matches!(state, CheckState::Done { .. } | CheckState::Failed { .. } | CheckState::TimedOut)
 }
 
 pub fn run_label(section: Section) -> Option<&'static str> {
@@ -75,6 +80,18 @@ mod tests {
             assert_eq!(brief(s).is_some(), s.is_on_demand(), "{s:?}");
             assert_eq!(run_label(s).is_some(), s.is_on_demand(), "{s:?}");
             assert_eq!(runnable(Kind::Domain, s), s.is_on_demand(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn the_card_collapses_only_after_a_result_and_only_until_it_is_opened() {
+        let done = CheckState::Done { problems: 0 };
+        for s in [CheckState::NotRun, CheckState::Running] {
+            assert!(!collapsed(&s, false), "{s:?}");
+        }
+        for s in [done.clone(), CheckState::Failed { reason: "x".into() }, CheckState::TimedOut] {
+            assert!(collapsed(&s, false), "{s:?}");
+            assert!(!collapsed(&s, true), "{s:?} opened");
         }
     }
 

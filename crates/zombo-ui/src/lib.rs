@@ -4,6 +4,7 @@ pub mod copy;
 pub mod diagnosis;
 pub mod evidence_model;
 pub mod keys;
+pub mod layout;
 pub mod notice;
 pub mod ondemand;
 pub mod outcome;

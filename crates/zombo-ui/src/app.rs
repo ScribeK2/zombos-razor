@@ -11,6 +11,7 @@ use zombo_ui::{
     diagnosis as dg,
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
+    layout,
     notice, ondemand,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
@@ -332,6 +333,7 @@ impl Shell {
                 }
                 Some(_) => {
                     self.ws.jump(section.index());
+                    self.focus_on_demand(window, cx);
                     self.start_section(section, cx);
                 }
             },
@@ -344,9 +346,14 @@ impl Shell {
                     _ => {}
                 }
             }
-            Action::Jump(n) => self.ws.jump(n),
-            Action::PrevSection => self.ws.step_section(-1),
-            Action::NextSection => self.ws.step_section(1),
+            Action::Jump(n) => {
+                self.ws.jump(n);
+                self.focus_on_demand(window, cx);
+            }
+            Action::PrevSection | Action::NextSection => {
+                self.ws.step_section(if action == Action::NextSection { 1 } else { -1 });
+                self.focus_on_demand(window, cx);
+            }
             Action::NewTab => {
                 self.ws.new_tab();
                 self.error = None;
@@ -701,13 +708,15 @@ impl Shell {
                 .role(Role::Tab)
                 .aria_selected(selected)
                 .aria_label(format!("{}: {}", section.label(), state.label()))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     this.ws.jump(i);
+                    this.focus_on_demand(window, cx);
                     cx.notify();
                 }))
-                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
                     if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
                         this.ws.jump(i);
+                        this.focus_on_demand(window, cx);
                         cx.notify();
                     }
                 }))
@@ -750,6 +759,9 @@ impl Shell {
         let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f));
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
+        let brief_open = self.open.contains("brief");
+        let has_result = matches!(state, zombo_ui::status::CheckState::Done { .. } | zombo_ui::status::CheckState::Failed { .. } | zombo_ui::status::CheckState::TimedOut);
+        let brief_collapsed = ondemand::collapsed(&state, brief_open);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
             .id("pane")
@@ -848,16 +860,18 @@ impl Shell {
                         .rounded(px(t::RADIUS_SMALL))
                         .role(Role::Group)
                         .aria_label("What this Check will do")
-                        .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).child(b.what))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.))
-                                .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
-                                .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
-                        )
-                        .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                        .child(self.brief_line(b.what, has_result, brief_open, cx))
+                        .when(!brief_collapsed, |s| {
+                            s.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
+                                    .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
+                            )
+                            .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                        })
                         .when(can_run, |s| {
                             s.child(
                                 div()
@@ -1013,6 +1027,7 @@ impl Shell {
 
     fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
         let open = self.open.contains(id);
+        let kw = layout::key_column(lines.iter().map(|l| l.0.as_str()));
         let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
             div()
                 .id((id, i))
@@ -1032,7 +1047,7 @@ impl Shell {
                     let v = v.clone();
                     cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
                 })
-                .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(k))
+                .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(k))
                 .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
         });
         div()
@@ -1077,6 +1092,7 @@ impl Shell {
         let o = &run.outcome;
         let rows = |f: &[Fact]| f.iter().map(|f| (f.key.clone(), f.value.clone(), t::GRAY_1000)).collect::<Vec<_>>();
         let open_rows = rows(&o.facts);
+        let kw = layout::key_column(o.facts.iter().map(|f| f.key.as_str()));
         div()
             .w_full()
             .min_w_0()
@@ -1118,7 +1134,7 @@ impl Shell {
                                         let v = v.clone();
                                         cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
                                     })
-                                    .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(shown))
+                                    .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(shown))
                                     .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
                             })),
                     )
