@@ -17,6 +17,10 @@ Replace MXToolbox, DNSChecker, WhatsMyDNS, WHOIS sites and SSL Labs with one fas
 1. **Spike** (ADR-0006): passed.
 2. **`zombo-core`**, in this order, each Check done only when its Go fixtures pass in Rust:
    1. DNS records from authoritative servers and many public resolvers, with TTL and Agreement. Parallel, streaming.
+      - **Done:** the public-resolver half (`zombo-core::{dns,lookup,propagation,target}`, `zombo propagation`), ported from `internal/app/{dns,propagation,target}.go`. Tests share zone files in `testdata/zones` with the Go tests.
+      - **Next:** the authoritative Vantage (resolve the apex's NS, query each nameserver directly with recursion off), then the Agreement verdict across Vantages.
+      - **Divergences from Go, on purpose:** records keep their TTL; `zombo` queries only the scope's record types, where Go always queried all eight; results are reported as each resolver answers; `dnsSuggestions` is dropped (Suggested target was removed).
+      - **Idea:** a Finding for a network that intercepts DNS. A home router here answered a query sent to `192.0.2.1` (a documentation address that never answers), so every "public resolver" agreed because it was one box.
    2. Delegation, glue, lame nameservers, DNSSEC.
    3. WHOIS/RDAP.
    4. Email: MX, SPF (10-lookup count), DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, SMTP banner and STARTTLS, blacklists, rDNS and FCrDNS, header and mail-log analysis.

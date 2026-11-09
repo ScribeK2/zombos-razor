@@ -88,14 +88,7 @@ func TestPropagationTreatsDifferingAddressesAsInfo(t *testing.T) {
 	// CDNs and geo-DNS legitimately answer A/AAAA differently per region.
 	_, fs := runPropagation(t, []app.PublicResolver{
 		{Name: "US", Location: "US", Address: fakeDNS(t, exampleZone, false)},
-		{Name: "EU", Location: "DE", Address: fakeDNS(t, `
-example.com. 300 IN A 198.51.100.9
-example.com. 300 IN AAAA 2606:2800:220:1:248:1893:25c8:1946
-example.com. 300 IN MX 10 mail.example.com.
-example.com. 300 IN NS a.iana-servers.net.
-example.com. 300 IN TXT "v=spf1 -all"
-example.com. 300 IN SOA ns.icann.org. noc.dns.icann.org. 2024 7200 3600 1209600 3600
-example.com. 300 IN CAA 0 issue "letsencrypt.org"`, false)},
+		{Name: "EU", Location: "DE", Address: fakeDNS(t, zoneFile("geo_eu"), false)},
 	})
 	for _, f := range fs {
 		if f.Code == "dns_propagation_mismatch" {
@@ -219,7 +212,7 @@ func TestANameThatExistsNowhereIsNotPropagated(t *testing.T) {
 func TestExistenceDifferingBetweenResolversIsAMismatch(t *testing.T) {
 	res, fs := runPropagation(t, []app.PublicResolver{
 		{Name: "New", Location: "US", Address: fakeDNS(t, exampleZone, false)},
-		{Name: "Old", Location: "DE", Address: fakeDNS(t, `other.test. 300 IN A 192.0.2.1`, false)}, // NXDOMAIN for example.com
+		{Name: "Old", Location: "DE", Address: fakeDNS(t, zoneFile("other"), false)}, // NXDOMAIN for example.com
 	})
 	if !slices.Contains(res.Disagree, "existence") || !slices.Contains(codes(fs), "dns_propagation_mismatch") {
 		t.Fatalf("disagree = %v, findings %v", res.Disagree, codes(fs))

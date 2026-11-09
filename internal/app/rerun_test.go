@@ -12,16 +12,7 @@ import (
 	"github.com/ScribeK2/Stackwell/internal/app"
 )
 
-const movedMX = `
-example.com. 300 IN A 93.184.216.34
-example.com. 300 IN AAAA 2606:2800:220:1:248:1893:25c8:1946
-example.com. 300 IN MX 10 mx1.newhost.net.
-example.com. 300 IN MX 20 mx2.newhost.net.
-example.com. 300 IN NS a.iana-servers.net.
-example.com. 300 IN TXT "v=spf1 -all"
-example.com. 300 IN SOA ns.icann.org. noc.dns.icann.org. 2025 7200 3600 1209600 3600
-example.com. 300 IN CAA 0 issue "letsencrypt.org"
-`
+var movedMX = zoneFile("moved_mx")
 
 func TestRerunAddsAStepAndShowsWhatChanged(t *testing.T) {
 	resolver, setZone := mutableDNS(t, exampleZone, false)

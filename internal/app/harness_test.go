@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -203,16 +204,16 @@ func (h *harness) waitStep(caseID int64) step {
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
-const exampleZone = `
-example.com. 300 IN A 93.184.216.34
-example.com. 300 IN AAAA 2606:2800:220:1:248:1893:25c8:1946
-example.com. 300 IN MX 10 mail.example.com.
-example.com. 300 IN NS a.iana-servers.net.
-example.com. 300 IN TXT "v=spf1 -all"
-example.com. 300 IN SOA ns.icann.org. noc.dns.icann.org. 2024 7200 3600 1209600 3600
-example.com. 300 IN CAA 0 issue "letsencrypt.org"
-www.example.com. 300 IN CNAME example.com.
-`
+// Zones live in testdata/zones, shared with the Rust tests.
+func zoneFile(name string) string {
+	b, err := os.ReadFile("../../testdata/zones/" + name + ".zone")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+var exampleZone = zoneFile("example")
 
 type change struct {
 	Field   string   `json:"field"`
