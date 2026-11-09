@@ -1,9 +1,14 @@
 //! Domain registration: who holds a domain, until when, in what state. Asks the
 //! registry over RDAP and falls back to WHOIS (port 43) when RDAP is unavailable.
 
-use std::fmt;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::finding::{Finding, Severity};
@@ -13,6 +18,229 @@ use crate::finding::{Finding, Severity};
 pub enum Source {
     Rdap,
     Whois,
+}
+
+/// Where to ask. `Endpoints::default()` is the real registries; tests point
+/// these at fake servers.
+#[derive(Debug, Clone)]
+pub struct Endpoints {
+    /// TLD -> RDAP base URL, ahead of the bundled IANA bootstrap.
+    pub rdap: BTreeMap<String, String>,
+    /// TLD -> WHOIS `host:port`, ahead of the built-in table and IANA referrals.
+    pub whois: BTreeMap<String, String>,
+    pub whois_iana: String,
+    /// Port of the server an IANA referral names.
+    pub whois_referral_port: u16,
+}
+
+impl Default for Endpoints {
+    fn default() -> Self {
+        Endpoints { rdap: BTreeMap::new(), whois: BTreeMap::new(), whois_iana: "whois.iana.org:43".into(), whois_referral_port: 43 }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RdapError {
+    #[error("no RDAP service for .{0}")]
+    NoService(String),
+    #[error("{0}")]
+    Request(String),
+    #[error("RDAP server answered {0}")]
+    Status(String),
+    #[error("unreadable RDAP answer: {0}")]
+    Unreadable(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RegistrationError {
+    #[error("{0:?} is not a valid domain name")]
+    BadName(String),
+    #[error("timed out")]
+    TimedOut,
+    #[error("RDAP: {0}")]
+    Rdap(RdapError),
+}
+
+/// A registry's answer is never bigger than this; anything larger is an attack or a bug.
+const MAX_REPLY: u64 = 1 << 20;
+const MAX_REDIRECTS: u32 = 3;
+
+/// Look up who registered `target` (a domain or a name below one), asking RDAP
+/// first. The whole lookup, however many servers it asks, takes at most `limit`.
+pub async fn check_registration(target: &str, endpoints: &Endpoints, limit: Duration) -> Result<Registration, RegistrationError> {
+    let name = registrable_domain(&clean_name(target)?);
+    let deadline = Instant::now() + limit;
+    tokio::time::timeout(limit, async {
+        let tld = name.rsplit('.').next().unwrap_or_default();
+        let base = endpoints.rdap.get(tld).map(String::as_str).or_else(|| rdap_bases().get(tld).map(String::as_str));
+        let rdap = match base {
+            None => RdapError::NoService(tld.into()),
+            Some(base) => match rdap_lookup(base, &name, deadline).await {
+                Ok(r) => return Ok(r),
+                Err(e) => e,
+            },
+        };
+        Err(RegistrationError::Rdap(rdap))
+    })
+    .await
+    .map_err(|_| RegistrationError::TimedOut)?
+}
+
+/// Lowercase, no trailing dot, and only what a DNS name can hold: the name goes
+/// into a URL and a WHOIS query line, so nothing else may pass.
+fn clean_name(target: &str) -> Result<String, RegistrationError> {
+    let name = target.trim_end_matches('.').to_ascii_lowercase();
+    let ok = name.contains('.')
+        && name.len() <= 253
+        && name.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_')));
+    if ok { Ok(name) } else { Err(RegistrationError::BadName(target.into())) }
+}
+
+// RDAP
+
+/// IANA's RDAP bootstrap for domains (https://data.iana.org/rdap/dns.json).
+const BOOTSTRAP: &str = include_str!("../data/rdap_bootstrap.json");
+
+#[derive(Deserialize)]
+struct Bootstrap {
+    services: Vec<(Vec<String>, Vec<String>)>,
+}
+
+/// TLD -> RDAP base URL, always https: a registry that lists http (rdap.cctld.kg
+/// does) is asked over https, and if it does not serve it the lookup falls back to
+/// WHOIS rather than sending a rep's query in the clear.
+fn rdap_bases() -> &'static HashMap<String, String> {
+    static BASES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    BASES.get_or_init(|| {
+        let b: Bootstrap = serde_json::from_str(BOOTSTRAP).unwrap_or(Bootstrap { services: vec![] });
+        let mut m = HashMap::new();
+        for (tlds, urls) in b.services {
+            let Some(first) = urls.first() else { continue };
+            let url = urls.iter().find(|u| u.starts_with("https://")).cloned().unwrap_or_else(|| first.replacen("http://", "https://", 1));
+            for tld in tlds {
+                m.insert(tld.to_ascii_lowercase(), url.clone());
+            }
+        }
+        m
+    })
+}
+
+/// A JSON `null` where the schema promises a list reads as an empty list.
+fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de> + Default>(d: D) -> Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
+#[derive(Deserialize, Default)]
+struct RdapDomain {
+    #[serde(default, deserialize_with = "nullable")]
+    status: Vec<String>,
+    #[serde(default, deserialize_with = "nullable")]
+    events: Vec<RdapEvent>,
+    #[serde(default, deserialize_with = "nullable")]
+    nameservers: Vec<RdapNameserver>,
+    #[serde(default, rename = "secureDNS")]
+    secure_dns: Option<RdapSecureDns>,
+    #[serde(default, deserialize_with = "nullable")]
+    entities: Vec<RdapEntity>,
+}
+
+#[derive(Deserialize)]
+struct RdapEvent {
+    #[serde(default, rename = "eventAction")]
+    action: String,
+    #[serde(default, rename = "eventDate")]
+    date: String,
+}
+
+#[derive(Deserialize)]
+struct RdapNameserver {
+    #[serde(default, rename = "ldhName")]
+    ldh_name: String,
+}
+
+#[derive(Deserialize)]
+struct RdapSecureDns {
+    #[serde(default, rename = "delegationSigned")]
+    delegation_signed: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct RdapEntity {
+    #[serde(default, deserialize_with = "nullable")]
+    roles: Vec<String>,
+    #[serde(default, rename = "vcardArray", deserialize_with = "nullable")]
+    vcard: Vec<serde_json::Value>,
+}
+
+impl RdapEntity {
+    /// The "fn" (formatted name) row of a registrar entity's jCard.
+    fn registrar_name(&self) -> Option<String> {
+        if !self.roles.iter().any(|r| r == "registrar") {
+            return None;
+        }
+        let rows = self.vcard.get(1)?.as_array()?;
+        rows.iter()
+            .filter_map(|row| row.as_array())
+            .filter(|row| row.len() >= 4 && row[0] == "fn")
+            .filter_map(|row| row[3].as_str())
+            .next_back()
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    }
+}
+
+async fn rdap_lookup(base: &str, name: &str, deadline: Instant) -> Result<Registration, RdapError> {
+    let url = format!("{}/domain/{name}", base.trim_end_matches('/'));
+    // Plain http is accepted only when the caller named such a base itself (a test server).
+    let https_only = !base.starts_with("http://");
+    let left = deadline.saturating_duration_since(Instant::now());
+    let (status, body) = tokio::task::spawn_blocking(move || rdap_get(&url, https_only, left))
+        .await
+        .map_err(|e| RdapError::Request(e.to_string()))??;
+    let mut r = Registration::empty(name, Source::Rdap, base);
+    if status == 404 {
+        return Ok(r); // the registry has no such domain
+    }
+    if status != 200 {
+        return Err(RdapError::Status(status.to_string()));
+    }
+    let d: RdapDomain = serde_json::from_slice(&body).map_err(|e| RdapError::Unreadable(e.to_string()))?;
+    r.registered = true;
+    r.registrar = d.entities.iter().filter_map(RdapEntity::registrar_name).next_back();
+    r.statuses = d.status.iter().map(|s| epp_status(s)).collect();
+    for e in &d.events {
+        match e.action.to_lowercase().as_str() {
+            "registration" => r.created = Some(normalize_date(&e.date)),
+            "expiration" => r.expires = Some(normalize_date(&e.date)),
+            "last changed" => r.updated = Some(normalize_date(&e.date)),
+            _ => {}
+        }
+    }
+    r.nameservers = d.nameservers.iter().map(|n| n.ldh_name.trim_end_matches('.').to_lowercase()).collect();
+    r.dnssec = d.secure_dns.and_then(|s| s.delegation_signed);
+    r.statuses.sort();
+    r.nameservers.sort();
+    Ok(r)
+}
+
+/// One bounded GET: (status, body). The body is read only for a 200, and an
+/// oversized one is an error, not a truncation.
+fn rdap_get(url: &str, https_only: bool, limit: Duration) -> Result<(ureq::http::StatusCode, Vec<u8>), RdapError> {
+    let fail = |e: ureq::Error| RdapError::Request(e.to_string());
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(limit))
+        .max_redirects(MAX_REDIRECTS)
+        .https_only(https_only)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent.get(url).header("Accept", "application/rdap+json, application/json").call().map_err(fail)?;
+    let status = resp.status();
+    if status != 200 {
+        return Ok((status, vec![]));
+    }
+    let body = resp.body_mut().with_config().limit(MAX_REPLY).read_to_vec().map_err(fail)?;
+    Ok((status, body))
 }
 
 /// A date as a registry gave it: normalised to UTC when it is in a format we
@@ -251,6 +479,16 @@ fn parse_date(s: &str) -> Option<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bundled_bootstrap_maps_tlds_to_https_bases() {
+        let b = rdap_bases();
+        assert!(b.len() > 500, "{} TLDs", b.len());
+        assert_eq!(b["com"], "https://rdap.verisign.com/com/v1/");
+        assert_eq!(b["kg"], "https://rdap.cctld.kg/", "an http-only entry is upgraded");
+        assert!(b.values().all(|u| u.starts_with("https://")));
+        assert!(!b.contains_key("test"));
+    }
 
     #[test]
     fn registrable_names() {
