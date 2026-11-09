@@ -10,6 +10,7 @@ use zombo_core::{
     registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
+use zombo_core::evidence::{headers, maillog};
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 
 const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
@@ -40,6 +41,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("registration") => registration(it).await,
         Some("dnssec") => dnssec(it).await,
         Some("email") => email(it).await,
+        Some("evidence") => evidence(it),
         _ => Err(USAGE.into()),
     }
 }
@@ -409,4 +411,126 @@ async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> 
     println!();
     print_findings(&findings);
     Ok(())
+}
+
+const EVIDENCE_USAGE: &str = "usage: zombo evidence headers|maillog [FILE|-] [--json]   (reads stdin when FILE is - or absent)";
+
+fn evidence(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let kind = it.next().ok_or(EVIDENCE_USAGE)?;
+    let (mut file, mut json) = (None, false);
+    for a in it {
+        match a.as_str() {
+            "--json" => json = true,
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{EVIDENCE_USAGE}")),
+            _ if file.is_none() => file = Some(a),
+            _ => return Err(EVIDENCE_USAGE.into()),
+        }
+    }
+    if !matches!(kind.as_str(), "headers" | "maillog") {
+        return Err(EVIDENCE_USAGE.into());
+    }
+    let text = match file.as_deref() {
+        None | Some("-") => zombo_core::evidence::read_limited(std::io::stdin().lock()),
+        Some(path) => zombo_core::evidence::read_limited(std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?),
+    }
+    .map_err(|e| e.to_string())?;
+    if kind == "headers" {
+        let a = headers::analyse_headers(&text).map_err(|e| e.to_string())?;
+        let findings = headers::header_findings(&a);
+        if json {
+            return print_json(&serde_json::json!({ "result": a, "findings": findings }));
+        }
+        print_headers(&a);
+        print_findings(&findings);
+    } else {
+        let a = maillog::analyse_maillog(&text).map_err(|e| e.to_string())?;
+        let findings = maillog::maillog_findings(&a);
+        if json {
+            return print_json(&serde_json::json!({ "result": a, "findings": findings }));
+        }
+        print_maillog(&a);
+        print_findings(&findings);
+    }
+    Ok(())
+}
+
+fn print_json(v: &serde_json::Value) -> Result<(), String> {
+    println!("{}", serde_json::to_string_pretty(v).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// A table cell: long hostile names are cut so a row stays one line.
+fn cell(s: &str, width: usize) -> String {
+    match s.char_indices().nth(width) {
+        Some((i, _)) => format!("{}...", &s[..i]),
+        None => s.to_string(),
+    }
+}
+
+fn delay_text(seconds: Option<i64>) -> String {
+    match seconds {
+        None => "-".into(),
+        Some(s) if s < 0 => format!("{s}s (clock skew)"),
+        Some(s) if s < 60 => format!("{s}s"),
+        Some(s) if s < 3600 => format!("{}m {}s", s / 60, s % 60),
+        Some(s) => format!("{:.1}h", s as f64 / 3600.0),
+    }
+}
+
+fn print_headers(a: &headers::HeaderAnalysis) {
+    println!("From: {}   Subject: {}", cell(&a.headers.from, 80), cell(&a.headers.subject, 80));
+    println!("{:<4} {:<44} {:<32} delay", "hop", "from", "by");
+    for (i, h) in a.hops.iter().enumerate() {
+        let who = match h.from_ip {
+            Some(ip) => format!("{} [{ip}]", cell(&h.from_host, 30)),
+            None => cell(&h.from_host, 44),
+        };
+        println!("{:<4} {:<44} {:<32} {}", i + 1, who, cell(&h.by_host, 32), delay_text(h.delay_s));
+    }
+    if a.hops.is_empty() {
+        println!("(no Received headers)");
+    }
+    if let Some(total) = a.total_transit_s {
+        println!("total transit {}", delay_text(Some(total)));
+    }
+    println!();
+    let verdict = |v: &Option<headers::Verdict>| v.as_ref().map_or("-".to_string(), ToString::to_string);
+    println!("  {:<12} {}", "SPF", verdict(&a.auth.spf));
+    let dkim = match a.auth.dkim_domain.as_str() {
+        "" => verdict(&a.auth.dkim),
+        d => format!("{} ({})", verdict(&a.auth.dkim), cell(d, 60)),
+    };
+    println!("  {:<12} {dkim}", "DKIM");
+    println!("  {:<12} {}", "DMARC", verdict(&a.auth.dmarc));
+    if let Some(ip) = a.delivering_ip {
+        println!("  {:<12} {ip}", "Delivered by");
+    }
+    if let Some(ip) = a.origin_ip.filter(|ip| Some(*ip) != a.delivering_ip) {
+        println!("  {:<12} {ip} (from the sender's own Received line; can be forged)", "Origin");
+    }
+    println!();
+}
+
+fn print_maillog(a: &maillog::MailLogAnalysis) {
+    const SHOWN: usize = 200;
+    for m in a.messages.iter().take(SHOWN) {
+        let to: Vec<String> = m.recipients.iter().map(|r| cell(&r.to, 60)).collect();
+        let to = if to.is_empty() { "(no delivery line)".to_string() } else { to.join(", ") };
+        let verdict = format!("{:?}", m.verdict).to_lowercase();
+        let from = if m.from.is_empty() { "?" } else { &m.from };
+        println!("{:<20} {verdict:<10} {} -> {to}", cell(&m.queue_id, 20), cell(from, 60));
+        for r in m.recipients.iter().filter(|r| r.status != Some(maillog::Status::Sent)) {
+            if let Some(reason) = r.reason {
+                println!("{:<31} {}: {}", "", cell(&r.to, 60), reason.text());
+            }
+        }
+    }
+    if a.messages.len() > SHOWN {
+        println!("... and {} more messages (use --json for all)", a.messages.len() - SHOWN);
+    }
+    if !a.rejections.is_empty() {
+        println!("{} mail(s) refused at our server before queueing", a.rejections.len());
+    }
+    println!("{} message(s), {} line(s) that are not Postfix or Dovecot", a.messages.len(), a.unparsed);
+    println!();
 }
