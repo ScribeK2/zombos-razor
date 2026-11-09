@@ -13,8 +13,10 @@ pub mod propagation;
 pub mod rdns;
 pub mod registration;
 pub mod resolver;
+pub mod smtp;
 pub mod target;
 pub mod web;
 pub mod tls;
+pub mod tls_extras;
 
 pub use finding::{Finding, Severity};
