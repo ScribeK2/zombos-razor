@@ -3,6 +3,7 @@ name = "zombo-core"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 hickory-proto = "0.26.3"

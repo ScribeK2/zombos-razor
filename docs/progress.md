@@ -10,7 +10,6 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 |---|---|---|---|
 | WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker A | worktree branch off `rewrite` (`c5d70ca`) | Port of `internal/app/registration.go`. Chooses the HTTP client. Merge: `Cargo.toml`, `lib.rs`, `main.rs` will conflict mechanically with worker B. |
 | Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
-| CI workflow and `deny.toml` | lead | `rewrite` | Files under `.github/` and the repo root only. |
 
 ## Done
 
@@ -74,7 +73,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 ## To do: security, quality, release
 
-- [ ] CI: `cargo test`, `clippy`, `cargo-deny`, `cargo-audit`
+- [x] CI workflow `.github/workflows/rust.yml` (test, clippy `-D warnings`, `cargo deny`, `cargo audit`) and `deny.toml`; `cargo deny check` and `cargo audit` pass locally. Not yet run on GitHub (no remote yet)
+- [ ] After the workers merge: `#![forbid(unsafe_code)]` via `[workspace.lints]`, then `cargo fmt` and a rustfmt CI check
 - [ ] Fuzz tests for every parser of untrusted input (DNS messages, RDAP/WHOIS, headers, mail logs, certificates)
 - [ ] Performance gates in CI: parser speed, AppImage size under 40 MB, llvmpipe render in a headless compositor
 - [ ] Measure cold start, scroll frame rate, idle memory on a real laptop and record them
