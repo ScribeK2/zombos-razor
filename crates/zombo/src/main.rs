@@ -3,12 +3,13 @@
 use std::{net::SocketAddr, process::ExitCode, time::Duration};
 
 use zombo_core::{
-    Severity,
+    Finding, Severity,
+    delegation::{Ports, ServerState, check_delegation, delegation_findings},
     propagation::{Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings, propagation_with},
     target::{Kind, parse_target},
 };
 
-const USAGE: &str = "usage: zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     v.parse()
@@ -30,9 +31,77 @@ async fn main() -> ExitCode {
 
 async fn run(args: Vec<String>) -> Result<(), String> {
     let mut it = args.into_iter();
-    if it.next().as_deref() != Some("propagation") {
-        return Err(USAGE.into());
+    match it.next().as_deref() {
+        Some("propagation") => propagation(it).await,
+        Some("delegation") => delegation(it).await,
+        _ => Err(USAGE.into()),
     }
+}
+
+fn print_findings(findings: &[Finding]) {
+    for f in findings {
+        let tag = match f.severity {
+            Severity::Ok => "ok",
+            Severity::Info => "info",
+            Severity::Warning => "WARNING",
+            Severity::Critical => "CRITICAL",
+        };
+        println!("[{tag}] {}: {}", f.title, f.message);
+        if let Some(r) = f.recommendation {
+            println!("        {r}");
+        }
+    }
+}
+
+async fn delegation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout) = (None, false, Duration::from_secs(4));
+    let mut bootstrap: Vec<SocketAddr> = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            "--resolver" => bootstrap.push(addr(&value("--resolver")?)?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname) {
+        return Err(format!("delegation needs a domain or host name, not {:?}", t.kind));
+    }
+    if bootstrap.is_empty() {
+        bootstrap = default_resolvers().iter().map(|r| r.address).collect();
+    }
+    let r = check_delegation(&bootstrap, &t.value, Ports::default(), timeout).await.map_err(|e| e.to_string())?;
+    let findings = delegation_findings(&r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{} is delegated from {}", r.apex, r.parent);
+    for s in &r.servers {
+        let glue = r.glue.get(&s.name).map(|g| match g.len() {
+            1..=2 => g.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+            n => format!("{n} addresses"),
+        });
+        let state = match &s.state {
+            ServerState::Ok { serial } => format!("authoritative, serial {serial}"),
+            ServerState::Unreachable => "no answer".to_string(),
+            ServerState::Lame { why } => format!("LAME: {why}"),
+        };
+        println!("  {:<32} glue: {:<24} {state}", s.name, glue.unwrap_or_else(|| "-".into()));
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn propagation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (mut target, mut scope, mut json, mut timeout) = (None, Scope::All, false, Duration::from_secs(4));
     let (mut resolvers, mut nameservers, mut no_auth) = (vec![], vec![], false);
     while let Some(a) = it.next() {
@@ -120,17 +189,6 @@ async fn run(args: Vec<String>) -> Result<(), String> {
     println!();
     println!("Agreement: {} - {}", res.agreement.label(), res.agreement.reason());
     println!();
-    for f in &findings {
-        let tag = match f.severity {
-            Severity::Ok => "ok",
-            Severity::Info => "info",
-            Severity::Warning => "WARNING",
-            Severity::Critical => "CRITICAL",
-        };
-        println!("[{tag}] {}: {}", f.title, f.message);
-        if let Some(r) = f.recommendation {
-            println!("        {r}");
-        }
-    }
+    print_findings(&findings);
     Ok(())
 }

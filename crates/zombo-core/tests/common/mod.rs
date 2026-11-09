@@ -29,6 +29,7 @@ struct State {
     silent: bool,
     refuse: Vec<RecordType>,
     authoritative: bool,
+    referral: bool,
 }
 
 pub struct FakeDns {
@@ -115,6 +116,14 @@ impl FakeDns {
         self
     }
 
+    /// Behave like a parent zone: answer NS queries with a referral (the NS
+    /// records in the authority section, their addresses as glue in the
+    /// additional section) instead of an answer.
+    pub fn referral(self) -> Self {
+        self.state.lock().unwrap().referral = true;
+        self
+    }
+
     /// Answer REFUSED to queries of this type.
     pub fn refuse(self, t: RecordType) -> Self {
         self.state.lock().unwrap().refuse.push(t);
@@ -137,6 +146,18 @@ fn answer(state: &Mutex<State>, query: &[u8], udp: bool) -> Option<Vec<u8>> {
     m.add_query(q.clone());
     if st.refuse.contains(&q.query_type()) || (st.authoritative && req.metadata.recursion_desired) {
         m.metadata.response_code = ResponseCode::Refused;
+        return m.to_vec().ok();
+    }
+    if st.referral && q.query_type() == RecordType::NS {
+        let same = |a: &Name, b: &Name| a.to_string().eq_ignore_ascii_case(&b.to_string());
+        for r in st.records.iter().filter(|r| r.record_type() == RecordType::NS && same(&r.name, q.name())) {
+            m.add_authority(r.clone());
+            if let hickory_proto::rr::RData::NS(ns) = &r.data {
+                for g in st.records.iter().filter(|g| matches!(g.record_type(), RecordType::A | RecordType::AAAA) && same(&g.name, &ns.0)) {
+                    m.add_additional(g.clone());
+                }
+            }
+        }
         return m.to_vec().ok();
     }
     let mut known = false;

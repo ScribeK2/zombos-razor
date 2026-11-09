@@ -8,7 +8,10 @@ use std::{
     time::Duration,
 };
 
-use hickory_proto::rr::{Name, RData, RecordType};
+use hickory_proto::{
+    op::Message,
+    rr::{Name, RData, RecordType},
+};
 use serde::Serialize;
 use tokio::task::JoinSet;
 
@@ -105,7 +108,7 @@ pub struct Soa {
 
 impl Soa {
     /// From zone-file form: `mname rname serial refresh retry expire minimum`.
-    fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let mut f = text.split_whitespace().skip(2);
         Some(Soa { serial: f.next()?.parse().ok()?, refresh: f.next()?.parse().ok()? })
     }
@@ -356,31 +359,29 @@ pub enum DiscoverError {
     NoNameservers(String),
 }
 
-/// Find the authoritative nameservers of the zone `target` is in, as Vantages.
-///
-/// Walks up from the target (never above its registrable domain) until a name
-/// has NS records, then resolves each nameserver's addresses. `bootstrap`
-/// resolvers are tried in order. `port` is 53 outside tests.
-pub async fn discover_nameservers(
+/// Ask the bootstrap resolvers in order; the first one that answers wins.
+pub(crate) async fn ask_any(bootstrap: &[SocketAddr], name: &Name, t: RecordType, limit: Duration) -> Option<Message> {
+    for &s in bootstrap {
+        if let Ok(m) = exchange(s, name, t, true, limit).await {
+            return Some(m);
+        }
+    }
+    None
+}
+
+/// Find the zone `target` is in: walks up from the target (never above its
+/// registrable domain) until a name has NS records. Returns that apex and its
+/// nameserver names, as a recursive resolver sees them.
+pub(crate) async fn find_apex(
     bootstrap: &[SocketAddr],
     target: &str,
-    port: u16,
     limit: Duration,
-) -> Result<Vec<Vantage>, DiscoverError> {
-    // First bootstrap resolver that answers wins.
-    let ask_any = |name: Name, t: RecordType| async move {
-        for &s in bootstrap {
-            if let Ok(m) = exchange(s, &name, t, true, limit).await {
-                return Some(m);
-            }
-        }
-        None
-    };
+) -> Result<(String, Vec<String>), DiscoverError> {
     let floor = psl::domain_str(target).unwrap_or(target).to_string();
     let mut zone = target.to_string();
-    let ns_names: Vec<String> = loop {
+    loop {
         let name = Name::from_ascii(&zone).map_err(|_| DiscoverError::NoNameservers(target.into()))?;
-        let m = ask_any(name, RecordType::NS).await.ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
+        let m = ask_any(bootstrap, &name, RecordType::NS, limit).await.ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
         let names: Vec<String> = m
             .answers
             .iter()
@@ -390,19 +391,31 @@ pub async fn discover_nameservers(
             })
             .collect();
         if !names.is_empty() {
-            break names;
+            return Ok((zone, names));
         }
         match zone.split_once('.') {
             Some((_, parent)) if zone != floor => zone = parent.to_string(),
             _ => return Err(DiscoverError::NoNameservers(target.into())),
         }
-    };
+    }
+}
+
+/// Find the authoritative nameservers of the zone `target` is in, as Vantages.
+///
+/// `bootstrap` resolvers are tried in order. `port` is 53 outside tests.
+pub async fn discover_nameservers(
+    bootstrap: &[SocketAddr],
+    target: &str,
+    port: u16,
+    limit: Duration,
+) -> Result<Vec<Vantage>, DiscoverError> {
+    let (_, ns_names) = find_apex(bootstrap, target, limit).await?;
     let mut out = vec![];
     for ns in ns_names.iter().take(8) {
         let Ok(name) = Name::from_ascii(ns) else { continue };
         let mut ips = vec![];
         for t in [RecordType::A, RecordType::AAAA] {
-            if let Some(m) = ask_any(name.clone(), t).await {
+            if let Some(m) = ask_any(bootstrap, &name, t, limit).await {
                 ips.extend(m.answers.iter().filter_map(|r| match &r.data {
                     RData::A(a) => Some(IpAddr::V4(a.0)),
                     RData::AAAA(a) => Some(IpAddr::V6(a.0)),
@@ -430,7 +443,7 @@ pub async fn discover_nameservers(
 
 /// Whether this machine has an IPv6 route. Connecting a UDP socket sends nothing;
 /// it only fails when there is no route.
-fn ipv6_available() -> bool {
+pub(crate) fn ipv6_available() -> bool {
     std::net::UdpSocket::bind("[::]:0").and_then(|s| s.connect("[2001:4860:4860::8888]:53")).is_ok()
 }
 
