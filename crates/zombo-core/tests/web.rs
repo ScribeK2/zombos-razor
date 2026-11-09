@@ -13,7 +13,7 @@ use common::{FakeDns, zone};
 use site::{FakeSite, Req, Resp, closed_port, fixture};
 use zombo_core::{
     Finding, Severity,
-    web::{Ports, WebOptions, WebResult, check_web, detect_hosting, web_findings},
+    web::{HeaderState, Ports, WebOptions, WebResult, check_web, detect_hosting, web_findings},
 };
 
 const LOCAL: &str = "127.0.0.1";
@@ -389,7 +389,7 @@ async fn provider_findings_name_each_provider_and_the_asn() {
     assert!(get(&fs, "website_cdn_detected").message.contains("header x-amz-cf-id") && get(&fs, "website_cdn_detected").message.contains("CNAME d111.cloudfront.net"));
     assert_eq!(get(&fs, "website_host_detected").title, "Hosted on Amazon Web Services");
     let asn = get(&fs, "website_asn");
-    assert!(asn.message.contains("192.0.2.10 is in AS16509 AMAZON-02, US, US in 192.0.2.0/24"), "{}", asn.message);
+    assert!(asn.message == "www.example.com is announced by AS16509 AMAZON-02, US (192.0.2.10).", "{}", asn.message);
 }
 
 #[tokio::test]
@@ -418,4 +418,35 @@ async fn a_cname_loop_is_an_error_not_a_hang() {
     let dns = FakeDns::start("a.example.com. 60 IN CNAME b.example.com.\nb.example.com. 60 IN CNAME a.example.com.\n").await;
     let h = detect_hosting("a.example.com", &[], dns.addr, Duration::from_secs(2)).await;
     assert!(h.dns_error.as_deref().is_some_and(|e| e.contains("CNAME loop")), "{:?}", h.dns_error);
+}
+
+// Findings over a hand-built HTTPS result: the fake servers cannot speak TLS, so these
+// two Go scenarios (HSTS only counts over HTTPS; HTTP that never reaches HTTPS) are pure.
+
+fn https_result(missing: &[&str]) -> WebResult {
+    let mut r = WebResult { url: "https://example.com/".into(), final_url: Some("https://example.com/".into()), status: Some(200), time_ms: 40, ..WebResult::default() };
+    for name in zombo_core::web::SECURITY_HEADERS {
+        let present = !missing.contains(&name);
+        r.headers.insert(name, HeaderState { present, value: if present { "x".into() } else { String::new() }, via: None });
+    }
+    r
+}
+
+#[test]
+fn https_site_without_hsts_is_warned_and_one_with_every_header_is_only_healthy() {
+    let fs = web_findings("example.com", &https_result(&["Strict-Transport-Security"]));
+    assert_eq!(codes(&fs), ["website_inspection_healthy", "website_inspection_missing_hsts"]);
+    assert_eq!(sev(&fs, "website_inspection_missing_hsts"), Some(Severity::Warning));
+    assert_eq!(codes(&web_findings("example.com", &https_result(&[]))), ["website_inspection_healthy"]);
+}
+
+#[test]
+fn plain_http_that_never_reaches_https_is_flagged() {
+    let mut r = https_result(&[]);
+    r.http_to_https = Some(false);
+    let fs = web_findings("example.com", &r);
+    assert_eq!(sev(&fs, "website_inspection_https_not_enforced"), Some(Severity::Warning));
+    assert_eq!(get(&fs, "website_inspection_https_not_enforced").message, "http://example.com/ does not redirect to HTTPS.");
+    r.http_to_https = Some(true);
+    assert!(!codes(&web_findings("example.com", &r)).contains(&"website_inspection_https_not_enforced"));
 }

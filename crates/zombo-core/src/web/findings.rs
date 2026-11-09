@@ -164,17 +164,16 @@ fn provider_findings(r: &WebResult) -> Vec<Finding> {
         out.push(finding(code, Severity::Info, title, format!("{} points to {} ({}).", h.host, d.provider, d.evidence.join("; ")), None));
     }
     if !h.asns.is_empty() {
-        let list: Vec<String> = h
-            .asns
-            .iter()
-            .map(|a| {
-                let name = a.name.as_deref().map_or(String::new(), |n| format!(" {n}"));
-                let country = a.country.as_deref().map_or(String::new(), |c| format!(", {c}"));
-                let prefix = a.prefix.as_deref().map_or(String::new(), |p| format!(" in {p}"));
-                format!("{} is in AS{}{name}{country}{prefix}", a.ip, a.asn)
-            })
-            .collect();
-        out.push(finding("website_asn", Severity::Info, "Network that serves the site", format!("{}.", list.join("; ")), None));
+        // One entry per AS, with the addresses in it; prefix and country stay in the JSON.
+        let mut list: Vec<(u32, Option<&str>, Vec<String>)> = vec![];
+        for a in &h.asns {
+            match list.iter_mut().find(|e| e.0 == a.asn) {
+                Some(e) => e.2.push(a.ip.to_string()),
+                None => list.push((a.asn, a.name.as_deref(), vec![a.ip.to_string()])),
+            }
+        }
+        let text: Vec<String> = list.iter().map(|(asn, name, ips)| format!("AS{asn}{} ({})", name.map_or(String::new(), |n| format!(" {n}")), ips.join(", "))).collect();
+        out.push(finding("website_asn", Severity::Info, "Network that serves the site", format!("{} is announced by {}.", h.host, text.join("; ")), None));
     }
     if let Some(e) = &h.dns_error {
         out.push(finding(
