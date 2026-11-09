@@ -157,3 +157,10 @@ async fn reports_each_resolver_as_it_answers() {
 }
 
 use zombo_core::propagation::propagation_with;
+
+#[test]
+fn every_built_in_resolver_address_parses() {
+    // The tables drop an entry that fails to parse, so a typo would silently remove a vantage.
+    assert_eq!(zombo_core::propagation::default_resolvers().len(), 10);
+    assert_eq!(zombo_core::dnssec::validating_resolvers().len(), 4);
+}
