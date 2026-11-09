@@ -38,19 +38,28 @@ jobs:
             UBUNTU=$u SMOKE_FUSE=0 packaging/smoke.sh build/dist/Zombos-Razor-*-x86_64.AppImage
           done
 
-      # PLACEHOLDER: another worker fills in the minisign step. Until then a release job with no key fails on purpose,
-      # so an unsigned release is never published. Signs SHA256SUMS into SHA256SUMS.minisig.
+      # Signs SHA256SUMS with the release key. The trusted comment must be exactly "zombo-razor <version>":
+      # the app refuses a signature whose comment names another version (downgrade replay).
       - name: Sign SHA256SUMS (minisign)
         if: github.event_name == 'push'
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ -z "$MINISIGN_SECRET_KEY" ]; then
-            echo "::error::MINISIGN_SECRET_KEY is not set, refusing to publish an unsigned release"
+          if [ -z "$MINISIGN_SECRET_KEY" ] || [ -z "$MINISIGN_PASSWORD" ]; then
+            echo "::error::MINISIGN_SECRET_KEY or MINISIGN_PASSWORD is not set, refusing to publish an unsigned release"
             exit 1
           fi
-          echo "TODO(minisign worker): sign build/dist/SHA256SUMS with MINISIGN_SECRET_KEY and write build/dist/SHA256SUMS.minisig"
-          exit 1
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -t "zombo-razor $VERSION" \
+            -m build/dist/SHA256SUMS -x build/dist/SHA256SUMS.minisig
+          # The signature must verify with the public key that is embedded in the app.
+          minisign -V -p crates/zombo-core/update_key.pub -m build/dist/SHA256SUMS -x build/dist/SHA256SUMS.minisig
+          grep -q "trusted comment: zombo-razor $VERSION\$" build/dist/SHA256SUMS.minisig
 
       - uses: actions/upload-artifact@v7
         with:

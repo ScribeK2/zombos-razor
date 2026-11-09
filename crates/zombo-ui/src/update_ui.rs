@@ -51,7 +51,7 @@ impl UpdateCard {
                     update_model::background_check(
                         check_updates,
                         target.as_ref(),
-                        !cfg!(debug_assertions),
+                        update_model::availability(target.as_ref(), !cfg!(debug_assertions)),
                         &p,
                         config::unix_now(),
                         || update::check(&ep, &v),

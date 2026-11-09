@@ -52,9 +52,14 @@ pub enum Availability {
 }
 
 pub fn availability(target: Option<&Target>, release_build: bool) -> Availability {
+    availability_for(target, release_build && update::is_test_key(update::PUBLIC_KEY))
+}
+
+/// `no_key` is true when this build may not update at all (a release build holding the test key).
+pub fn availability_for(target: Option<&Target>, no_key: bool) -> Availability {
     match target {
         None => Availability::NotAnAppImage,
-        Some(_) if !update::available_in(release_build) => Availability::NoSigningKey,
+        Some(_) if no_key => Availability::NoSigningKey,
         Some(_) => Availability::Ready,
     }
 }
@@ -89,12 +94,12 @@ impl Stage {
 pub fn background_check(
     setting: bool,
     target: Option<&Target>,
-    release_build: bool,
+    availability: Availability,
     state_path: &Path,
     now: i64,
     check: impl FnOnce() -> Result<Option<Available>, UpdateError>,
 ) -> Option<Offer> {
-    let target = target.filter(|_| setting && availability(target, release_build) == Availability::Ready)?;
+    let target = target.filter(|_| setting && availability == Availability::Ready)?;
     let mut state = UpdateState::load(state_path);
     if !state.due(now) {
         return None;
@@ -170,7 +175,7 @@ mod tests {
         let path = dir.join("update.toml");
         let asked = Cell::new(0);
         let ask = |setting, t: Option<&Target>, now| {
-            background_check(setting, t, false, &path, now, || {
+            background_check(setting, t, Availability::Ready, &path, now, || {
                 asked.set(asked.get() + 1);
                 Ok(Some(release("v1.4.0")))
             })
@@ -191,7 +196,8 @@ mod tests {
     fn a_failed_check_still_counts_as_the_days_attempt_and_shows_nothing() {
         let dir = tmp("fail");
         let path = dir.join("update.toml");
-        let r = background_check(true, Some(&target(true)), false, &path, 7, || Err(UpdateError::TimedOut));
+        let r =
+            background_check(true, Some(&target(true)), Availability::Ready, &path, 7, || Err(UpdateError::TimedOut));
         assert!(r.is_none());
         assert_eq!(UpdateState::load(&path).checked_at, Some(7));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -202,8 +208,9 @@ mod tests {
         let dir = tmp("skip");
         let path = dir.join("update.toml");
         skip(&path, &Version::parse("1.4.0").unwrap()).unwrap();
-        let ask =
-            |now, tag: &str| background_check(true, Some(&target(true)), false, &path, now, || Ok(Some(release(tag))));
+        let ask = |now, tag: &str| {
+            background_check(true, Some(&target(true)), Availability::Ready, &path, now, || Ok(Some(release(tag))))
+        };
         assert!(ask(0, "v1.4.0").is_none());
         assert!(ask(INTERVAL_SECS, "v1.5.0").is_some());
         assert_eq!(UpdateState::load(&path).skipped.as_deref(), Some("1.4.0"));
@@ -211,11 +218,11 @@ mod tests {
     }
 
     #[test]
-    fn a_release_build_with_the_test_key_never_asks_and_leaves_no_trace() {
+    fn a_build_without_a_signing_key_never_asks_and_leaves_no_trace() {
         let dir = tmp("nokey");
         let path = dir.join("update.toml");
         let asked = Cell::new(0);
-        let r = background_check(true, Some(&target(true)), true, &path, 1, || {
+        let r = background_check(true, Some(&target(true)), Availability::NoSigningKey, &path, 1, || {
             asked.set(1);
             Ok(Some(release("v1.4.0")))
         });
@@ -227,8 +234,8 @@ mod tests {
     #[test]
     fn availability_says_why_updates_are_off() {
         let t = target(true);
-        assert_eq!(availability(None, false), Availability::NotAnAppImage);
-        assert_eq!(availability(Some(&t), true), Availability::NoSigningKey, "the test key is embedded");
-        assert_eq!(availability(Some(&t), false), Availability::Ready);
+        assert_eq!(availability_for(None, false), Availability::NotAnAppImage);
+        assert_eq!(availability_for(Some(&t), true), Availability::NoSigningKey, "the test key is embedded");
+        assert_eq!(availability_for(Some(&t), false), Availability::Ready);
     }
 }

@@ -215,7 +215,7 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] Local builds take their version from `git describe`, which finds the old Go tag `v1.0.0`; tag the Rust release or set VERSION
 - [x] Metainfo homepage URL now ScribeK2/zombos-razor (repo renamed 2026-11-09)
 - [x] Signed self-update merged (727 tests): minisign-verify, trusted comment bound to the version (no downgrade replay), SHA256SUMS then AppImage hash, bounded https, atomic replace, prompt card, `update.toml`. Fails closed on the test key in release builds, with four guards (background_check, check_in, install_in, UpdateCard::install). Live-checked in a debug build only
-- [ ] Owner: create the real key and secret, fill the release.yml signing line, set RELEASE_REPO (steps in docs/release.md). Delete the two tests that pin the test key
+- [x] Real signing key created by the owner (id AFC930F8DF5D3289); public key embedded, secrets `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` set, release.yml signing step filled, the two pinning tests replaced by one that requires the real key. 765 tests pass. `background_check` now takes an `Availability` computed by the caller, so its tests no longer depend on the embedded key
 - [ ] Not verified: a real GitHub endpoint, a real `minisign` binary reading our signatures, the update card's refusal in a release binary seen live
 - [x] Hardening merged (746 tests): `unsafe_code = "forbid"` and deny of `unwrap`, `expect`, indexing and `panic` in production code of both crates (the update code was brought under the lints in the merge), 12 fuzz targets in `fuzz/` (about 280 s each, no crash or hang found), `tests/hostile.rs` and `tests/fuzz_regressions.rs` always run, weekly `fuzz.yml`. Found and fixed: control characters from WHOIS and RDAP reaching findings, a debug-only key tag overflow
 - [x] Test that all 10 propagation and 4 DNSSEC resolver addresses parse (the tables now drop a bad literal instead of panicking)
@@ -230,3 +230,4 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 
 - [x] No last Go release. `cmd/`, `internal/`, `web/`, `go.mod`, `go.sum` and the Go CI workflow deleted from `rewrite`; the Go source stays in git history at `main` (tip `b8fc3d5`) and the tag `v1.0.0`. 766 tests still pass. `testdata/` stays (the Rust tests read it)
 - [ ] Parity audit running (`docs/parity.md`); its scripts read Go from `main`
+- [ ] Not verified: a signature made by the real `minisign` binary accepted by our verifier (owner to sign a test file and send it); the signing step has never run in GitHub Actions

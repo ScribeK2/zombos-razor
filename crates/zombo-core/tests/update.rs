@@ -334,17 +334,6 @@ async fn an_unwritable_directory_fails_cleanly_and_leaves_the_old_file() {
     assert_eq!(std::fs::read(&inst.path).unwrap(), OLD);
 }
 
-#[test]
-fn the_embedded_key_is_the_one_the_tests_sign_with_until_the_real_key_replaces_it() {
-    let want = TestKey::embedded().public_file();
-    assert_eq!(
-        update::PUBLIC_KEY.lines().nth(1),
-        want.lines().nth(1),
-        "update_key.pub must hold the TEST key; second line should be {:?}",
-        want.lines().nth(1)
-    );
-}
-
 #[tokio::test]
 async fn a_release_configuration_refuses_the_embedded_test_key_before_any_request() {
     let test_key = TestKey::embedded();
@@ -377,10 +366,9 @@ async fn a_release_configuration_accepts_any_other_key() {
 }
 
 #[test]
-fn updates_are_unavailable_in_a_release_build_that_embeds_the_test_key() {
-    assert!(update::is_test_key(update::PUBLIC_KEY), "update_key.pub holds the test key until the owner replaces it");
-    assert!(!update::available_in(true));
-    assert!(update::available_in(false));
+fn the_real_signing_key_is_embedded_and_updates_are_available_in_a_release_build() {
+    assert!(!update::is_test_key(update::PUBLIC_KEY), "update_key.pub must hold the real key, not the test key");
+    assert!(update::available_in(true));
 }
 
 /// Not a test: serves a signed 1.4.0 for a manual run of the app.

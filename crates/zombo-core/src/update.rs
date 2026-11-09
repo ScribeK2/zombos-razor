@@ -27,9 +27,9 @@ const API_BASE: &str = "https://api.github.com";
 
 /// The minisign public key every release must be signed with: the two lines of `update_key.pub`.
 ///
-/// The file holds a TEST key now. To replace it, run `minisign -G -p update_key.pub -s <secret key
-/// file>`, keep the secret key out of the repository, and commit the new `update_key.pub`. The
-/// release build refuses every update, with `UpdateError::TestKeyEmbedded`, while the test key is here.
+/// It is the public half of the project's release key. The secret half lives only in the owner's
+/// backup and in the CI secrets `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD`. A build that embeds
+/// the TEST key (`TEST_KEY_BASE64`) refuses every update, with `UpdateError::TestKeyEmbedded`.
 pub const PUBLIC_KEY: &str = include_str!("../update_key.pub");
 
 /// The public half of the key the tests sign with (its seed is public on purpose). A release
