@@ -19,7 +19,7 @@ inside() {
     ID=io.github.scribek2.zombos-razor
     export CARGO_TARGET_DIR=/src/build/target
     export RUSTFLAGS="--remap-path-prefix=/src=. --remap-path-prefix=/opt/cargo=/cargo"
-    cargo build --release --locked -p zombo-ui -p zombo
+    ZOMBO_VERSION="$VERSION" cargo build --release --locked -p zombo-ui -p zombo
 
     rm -rf "$APPDIR" "$DIST"
     mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/licenses/zombo-razor" \

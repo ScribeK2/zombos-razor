@@ -59,6 +59,10 @@ fn launch(started: Instant) {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("zombo-razor {}", zombo_core::VERSION);
+        return ExitCode::SUCCESS;
+    }
     if !zombo_ui::session::has_display_in_env() {
         eprintln!("{}", zombo_ui::session::NO_DISPLAY);
         return ExitCode::FAILURE;

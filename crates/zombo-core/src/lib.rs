@@ -8,6 +8,7 @@ pub mod email_auth;
 pub mod evidence;
 pub mod finding;
 pub mod lookup;
+pub mod lookup_findings;
 pub mod ports;
 pub mod propagation;
 pub mod rdns;
@@ -23,3 +24,10 @@ pub mod update;
 pub mod web;
 
 pub use finding::{Finding, Severity};
+
+/// The release version. `packaging/build-appimage.sh` stamps it through `ZOMBO_VERSION`
+/// (the Go build did the same with `-ldflags -X main.version`); without it, the crate version.
+pub const VERSION: &str = match option_env!("ZOMBO_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};

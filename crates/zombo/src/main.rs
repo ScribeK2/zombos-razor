@@ -56,6 +56,10 @@ async fn main() -> ExitCode {
 async fn run(args: Vec<String>) -> Result<(), String> {
     let mut it = args.into_iter();
     match it.next().as_deref() {
+        Some("--version") => {
+            println!("zombo {}", zombo_core::VERSION);
+            Ok(())
+        }
         Some("propagation") => propagation(it).await,
         Some("delegation") => delegation(it).await,
         Some("registration") => registration(it).await,
