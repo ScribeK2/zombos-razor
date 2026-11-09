@@ -244,7 +244,7 @@ impl Shell {
     fn toggle_watch(&mut self) {
         let Some(tab) = self.ws.current() else { return };
         let (target, section) = (tab.target.value.clone(), tab.section);
-        if section == Section::Summary || !checks::wired(section) {
+        if !checks::watchable(section) {
             return;
         }
         if self.watches.is_watching(&target, section) {
@@ -663,7 +663,7 @@ impl Shell {
         let findings = tab.findings(section);
         let counts = dg::counts(&findings);
         let show_chips = !findings.is_empty();
-        let watchable = section != Section::Summary && checks::wired(section) && state != zombo_ui::status::CheckState::NotRun;
+        let watchable = checks::watchable(section) && state != zombo_ui::status::CheckState::NotRun;
         let watching = self.watches.is_watching(&tab.target.value, section);
         let finding_views = findings.iter().enumerate().map(|(i, f)| {
             let c = severity_color(f.severity);

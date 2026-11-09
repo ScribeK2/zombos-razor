@@ -25,11 +25,11 @@ Decided in a grilling session on 2026-11-09. Terms are in `CONTEXT.md`. Where a 
 | Target | Automatic | On demand (palette) |
 |---|---|---|
 | Domain | DNS and propagation, delegation, DNSSEC, registration, email authentication, web, TLS | port scan, SMTP banner and STARTTLS, blacklist |
-| Hostname | DNS and propagation, web, TLS (registration uses the registrable domain) | port scan, SMTP banner and STARTTLS |
-| IP address | reverse DNS, blacklist | port scan, TLS on a port |
+| Hostname | DNS and propagation, web, TLS (registration uses the registrable domain) | port scan, SMTP banner and STARTTLS, blacklist (its addresses) |
+| IP address | reverse DNS, blacklist | port scan, SMTP banner and STARTTLS (TLS on a port later) |
 | Email address | the domain Checks for its domain part | as for a domain |
 
-On-demand Checks show as "not run" in the rail until asked. They connect to the target's servers, or send many queries, so they never start on their own.
+On-demand Checks show as "not run" in the rail until asked, and are never watched (a Watch would repeat them on a timer). They connect to the target's servers, or send many queries, so they never start on their own.
 
 ## Check states
 
@@ -63,7 +63,9 @@ The omnibox, focused, with the placeholder "domain, host, IP or email". Below it
 | `Enter` | Run the Diagnosis |
 | `Ctrl+K` | Command palette |
 | `Ctrl+R` | Re-run the current section's Check |
-| `Ctrl+1` to `9` | Jump to a rail section |
+| `Ctrl+1` to `9` | Jump to a rail section (`Ctrl+9` goes to the first on-demand Check) |
+| `[`, `]` | Previous or next record type in the DNS section |
+| `Ctrl+Shift+P`, `S`, `B` | Run port scan, SMTP banner check, blacklist check |
 | `Alt+Up`, `Alt+Down` | Previous or next section |
 | `J`, `K` or arrows | Move through findings and rows |
 | `Ctrl+C` | Copy the focused value |

@@ -42,6 +42,12 @@ pub fn wired(section: Section) -> bool {
     section != Section::Summary
 }
 
+/// A Watch re-runs its Check on a timer, so it is offered only where that is harmless.
+/// An on-demand Check connects to the target's servers, so it is never watched.
+pub fn watchable(section: Section) -> bool {
+    wired(section) && !section.is_on_demand()
+}
+
 fn limit(section: Section) -> Duration {
     match section {
         Section::Registration => Duration::from_secs(15),
@@ -407,6 +413,13 @@ mod tests {
         assert_eq!(automatic(Kind::Hostname), [Section::Dns, Section::Web, Section::Tls, Section::Registration]);
         assert!(automatic(Kind::Ip).is_empty());
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
+    }
+
+    #[test]
+    fn an_on_demand_check_is_never_watched() {
+        assert!(Section::ALL.iter().filter(|s| s.is_on_demand()).all(|s| !watchable(*s)));
+        assert!(watchable(Section::Dns) && watchable(Section::Web));
+        assert!(!watchable(Section::Summary));
     }
 
     #[test]

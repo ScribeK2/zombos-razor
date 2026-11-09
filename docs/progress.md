@@ -176,8 +176,15 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 ## UI slice 2 (merged 2026-11-09)
 
 - [x] Record-type switcher (`[` and `]`), verdict row wraps, static Geist weights, all Checks wired with five states and Retry, On demand rail group (not runnable from the app yet), Watch (`W`, 60 s interval, 8 s toast, no desktop notification until settings exist), "Changed since the previous run", Summary dedupes shared findings. 538 tests pass
-- [ ] Verify live: the Summary screenshot at 1600 px (taken before the dedupe commit) shows the DNS-intercepted warning three times; confirm the tip shows it once
-- [ ] Make the On demand Checks runnable from the app (port scan, SMTP, blacklist)
+- [x] Summary repeat: was 2 copies after slice 2 (dedupe compared exact text); fixed by code for network-wide findings. Not yet re-seen live
+- [x] On demand Checks runnable from the app (port scan, SMTP, blacklist; merged). Never watched. 550 tests pass. Seen live: port scan, SMTP via palette, blacklist. Not seen: Enter on a focused pane, a real silent port 25
 - [ ] Not built: rail count lines ("done, 1 note"), per-finding action buttons, nameserver answers and All records collapsed rows, window shadow and resize handle, CAA in the TLS section, SOA and CAA record types in the switcher (core never asks them across resolvers)
 - [ ] Docs to update: Ctrl+9 goes to On demand; keys `W`, `[`, `]`; rail width 248 px
 - [ ] Unverified: X11, GNOME, screen reader, Retry after a real failure, a real record change stopping a Watch
+
+## Open from the on-demand slice
+
+- [ ] SMTP on a domain dials the name on port 25 with no MX lookup; `Resolver::mx_hosts` is in a private module. Expose it and resolve MX first. Add a port field
+- [ ] Collapse the description card above the results once a result exists
+- [ ] The blacklist facts key column (200 px) wraps long names
+- [ ] TLS on a port for an IP target (DESIGN.md says later)
