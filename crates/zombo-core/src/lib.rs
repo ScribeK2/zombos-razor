@@ -5,6 +5,7 @@ pub mod delegation;
 pub mod finding;
 pub mod lookup;
 pub mod propagation;
+pub mod registration;
 pub mod target;
 
 pub use finding::{Finding, Severity};
