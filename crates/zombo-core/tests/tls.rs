@@ -10,7 +10,7 @@ use pki::{Ca, NOW, days};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use zombo_core::{
     Finding, Severity,
-    tls::{TlsError, TlsResult, Trust, assess, check_tls_via, inspect_stream, tls_findings},
+    tls::{TlsError, TlsResult, Trust, assess, check_tls_via, inspect_stream, tls_findings_at},
 };
 
 const HOST: &str = "example.test";
@@ -48,7 +48,7 @@ async fn a_valid_chain_is_shown_and_trusted() {
     assert_eq!((r.chain[1].subject.as_str(), r.chain[1].issuer.as_str()), ("Test Intermediate", "Test Root CA"));
     assert!(r.chain[1].is_ca);
 
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_valid"]);
     assert_eq!(fs[0].severity, Severity::Ok);
     assert!(fs[0].message.contains("Test Intermediate"), "{}", fs[0].message);
@@ -63,7 +63,7 @@ async fn an_expired_certificate_is_only_expired() {
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
     assert!(!r.verified && r.verify_error.is_some());
     assert_eq!(r.trust, Trust::Ok, "an expired leaf must not also read as untrusted");
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_expired"]);
     assert_eq!(fs[0].severity, Severity::Critical);
     assert!(fs[0].message.contains("(1 day ago)"), "{}", fs[0].message);
@@ -79,7 +79,7 @@ async fn a_certificate_not_yet_valid_gets_its_own_finding() {
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
     assert!(!r.verified);
     assert_eq!(r.trust, Trust::Ok);
-    assert_eq!(codes(&tls_findings(HOST, 443, &r, NOW)), ["ssl_inspection_not_yet_valid"]);
+    assert_eq!(codes(&tls_findings_at(HOST, 443, &r, NOW)), ["ssl_inspection_not_yet_valid"]);
 }
 
 #[tokio::test]
@@ -91,7 +91,7 @@ async fn expiry_warnings_follow_the_go_thresholds() {
     let addr = pki::serve(vec![leaf.der], leaf.key).await;
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
 
-    let at = |left: D| codes(&tls_findings(HOST, 443, &r, not_after - left));
+    let at = |left: D| codes(&tls_findings_at(HOST, 443, &r, not_after - left));
     assert_eq!(at(D::days(31)), ["ssl_inspection_valid"]);
     assert_eq!(at(D::days(30)), ["ssl_inspection_expiring_soon", "ssl_inspection_valid"]);
     assert_eq!(at(D::days(15)), ["ssl_inspection_expiring_soon", "ssl_inspection_valid"]);
@@ -99,14 +99,14 @@ async fn expiry_warnings_follow_the_go_thresholds() {
     assert_eq!(at(D::days(14)), ["ssl_inspection_expiring", "ssl_inspection_valid"]);
     assert_eq!(at(D::hours(1)), ["ssl_inspection_expiring", "ssl_inspection_valid"]);
 
-    let fs = tls_findings(HOST, 443, &r, not_after - D::days(10));
+    let fs = tls_findings_at(HOST, 443, &r, not_after - D::days(10));
     assert_eq!(find(&fs, "ssl_inspection_expiring").severity, Severity::Warning);
     assert!(find(&fs, "ssl_inspection_expiring").message.contains("(in 10 days)"));
-    let fs = tls_findings(HOST, 443, &r, not_after - D::days(1));
+    let fs = tls_findings_at(HOST, 443, &r, not_after - D::days(1));
     assert!(find(&fs, "ssl_inspection_expiring").message.contains("(in 1 day)"));
-    let fs = tls_findings(HOST, 443, &r, not_after - D::days(20));
+    let fs = tls_findings_at(HOST, 443, &r, not_after - D::days(20));
     assert_eq!(find(&fs, "ssl_inspection_expiring_soon").severity, Severity::Info);
-    let fs = tls_findings(HOST, 443, &r, not_after + D::hours(1));
+    let fs = tls_findings_at(HOST, 443, &r, not_after + D::hours(1));
     assert!(find(&fs, "ssl_inspection_expired").message.contains("(1 day ago)"));
     assert_eq!(find(&fs, "ssl_inspection_expired").severity, Severity::Critical);
 }
@@ -119,7 +119,7 @@ async fn the_soonest_expiry_in_the_chain_is_reported_by_name() {
     let addr = pki::serve(vec![leaf.der, inter.der()], leaf.key).await;
 
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     let f = find(&fs, "ssl_inspection_expiring");
     assert!(f.message.starts_with("The chain certificate Test Intermediate on example.test:443 expires on "), "{}", f.message);
 }
@@ -134,7 +134,7 @@ async fn a_wrong_host_is_critical_and_not_valid() {
     assert!(!r.hostname_match && !r.verified);
     assert_eq!(r.trust, Trust::Ok);
     assert!(r.verify_error.as_deref().unwrap_or("").contains("other.test"), "{:?}", r.verify_error);
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_hostname_mismatch"]);
     assert_eq!(fs[0].severity, Severity::Critical);
     assert_eq!(fs[0].message, "The certificate on example.test:443 is for other.test, not example.test.");
@@ -147,7 +147,7 @@ async fn a_self_signed_certificate_is_not_also_untrusted() {
 
     let r = inspect(addr, &Ca::root("Some Other Root").roots(), NOW).await.unwrap();
     assert!(r.chain[0].self_signed && r.trust == Trust::SelfSigned && !r.verified, "{r:?}");
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_self_signed"]);
     assert_eq!(fs[0].severity, Severity::Critical);
 }
@@ -162,7 +162,7 @@ async fn a_missing_intermediate_is_an_incomplete_chain() {
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
     assert_eq!((r.chain.len(), r.trust, r.verified), (1, Trust::MissingIntermediate, false), "{r:?}");
     assert!(r.verify_error.is_some());
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_incomplete_chain"]);
     assert_eq!(fs[0].severity, Severity::Critical);
     assert!(fs[0].message.contains("the server isn't sending its intermediate certificate"));
@@ -178,7 +178,7 @@ async fn a_complete_chain_under_an_unknown_root_is_untrusted() {
 
     let r = inspect(addr, &Ca::root("A Different Root").roots(), NOW).await.unwrap();
     assert_eq!(r.trust, Trust::UnknownAuthority);
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert_eq!(codes(&fs), ["ssl_inspection_untrusted"]);
     assert!(fs[0].message.contains("Test Root CA"), "{}", fs[0].message);
     assert_eq!(fs[0].title, "Certificate not trusted");
@@ -194,7 +194,7 @@ async fn a_chain_that_fails_verification_otherwise_is_invalid() {
 
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
     assert_eq!(r.trust, Trust::Invalid);
-    let fs = tls_findings(HOST, 443, &r, NOW);
+    let fs = tls_findings_at(HOST, 443, &r, NOW);
     assert!(codes(&fs).contains(&"ssl_inspection_untrusted"));
     assert_eq!(find(&fs, "ssl_inspection_untrusted").title, "Certificate chain doesn't verify");
 }
@@ -296,7 +296,7 @@ async fn a_weak_key_and_a_sha1_signature_each_get_a_finding() {
     let unrelated = pki::self_signed(&["unrelated.test"]);
     let addr = pki::serve(vec![weak_fixture()], unrelated.key).await;
     let r = check_tls_via(addr, "weak.test", &rustls::RootCertStore::empty(), NOW, WAIT).await.unwrap();
-    let fs = tls_findings("weak.test", 443, &r, NOW);
+    let fs = tls_findings_at("weak.test", 443, &r, NOW);
     assert_eq!(find(&fs, "ssl_inspection_weak_key").severity, Severity::Warning);
     assert!(find(&fs, "ssl_inspection_weak_key").message.contains("RSA 1024-bit"));
     assert!(find(&fs, "ssl_inspection_weak_signature").message.contains("SHA1-RSA"));

@@ -227,9 +227,9 @@ pub async fn check_tls_via(addr: impl tokio::net::ToSocketAddrs, server_name: &s
     .map_err(|_| TlsError::TimedOut)?
 }
 
-/// Inspect `host:port` against the bundled public roots.
-pub async fn check_tls(host: &str, port: u16, now: OffsetDateTime, timeout: Duration) -> Result<TlsResult, TlsError> {
-    check_tls_via((host, port), host, &public_roots(), now, timeout).await
+/// Inspect `host:port` against the bundled public roots, as of now.
+pub async fn check_tls(host: &str, port: u16, timeout: Duration) -> Result<TlsResult, TlsError> {
+    check_tls_via((host, port), host, &public_roots(), OffsetDateTime::now_utc(), timeout).await
 }
 
 fn handshake_error(e: io::Error) -> TlsError {
@@ -422,7 +422,11 @@ fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static,
 /// `ssl_inspection_not_yet_valid`, `ssl_inspection_weak_key` and
 /// `ssl_inspection_weak_signature`. Days left are worked out from `now`, not
 /// stored, so re-runs do not differ by date alone.
-pub fn tls_findings(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime) -> Vec<Finding> {
+pub fn tls_findings(host: &str, port: u16, r: &TlsResult) -> Vec<Finding> {
+    tls_findings_at(host, port, r, OffsetDateTime::now_utc())
+}
+
+pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime) -> Vec<Finding> {
     let Some(leaf) = r.chain.first() else { return vec![] };
     let place = format!("{host}:{port}");
     let mut out = vec![];
