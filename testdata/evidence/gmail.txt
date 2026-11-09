@@ -1,0 +1,9 @@
+Delivery-date: Wed, 14 Jun 2026 10:02:05 -0700
+Received: from mail-sor-f41.google.com (mail-sor-f41.google.com [209.85.220.41]) by mx.dest.com with ESMTPS id Z2 for <u@dest.com>; Wed, 14 Jun 2026 10:02:00 -0700
+Received: from sender.example.com (sender.example.com [203.0.113.5]) by mail-sor-f41.google.com with ESMTP id Z1; Wed, 14 Jun 2026 10:00:00 -0700
+Authentication-Results: mx.dest.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com; dmarc=pass header.from=example.com
+Return-Path: <bounce@example.com>
+From: Sender <sender@example.com>
+Message-ID: <CA+abc123@example.com>
+Date: Wed, 14 Jun 2026 09:59:58 -0700
+Subject: Hello

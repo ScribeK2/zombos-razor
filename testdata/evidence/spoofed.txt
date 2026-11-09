@@ -1,0 +1,8 @@
+Received: from sketchy.host (sketchy.host [198.51.100.66]) by mx.dest.com with ESMTP id S1 for <u@dest.com>; Wed, 14 Jun 2026 03:00:00 +0000
+Authentication-Results: mx.dest.com; spf=fail smtp.mailfrom=evil.test; dkim=none; dmarc=fail (p=reject) header.from=yourbank.test
+Return-Path: <attacker@evil.test>
+From: Your Bank <security@yourbank.test>
+Reply-To: collect@evil.test
+Message-ID: <999@evil.test>
+Date: Wed, 14 Jun 2026 03:00:00 +0000
+Subject: Verify your account
