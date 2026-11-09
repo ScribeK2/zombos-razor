@@ -315,7 +315,13 @@ impl Tab {
         match section {
             Section::Dns => self.propagation.findings.clone(),
             Section::Summary => {
-                let all: Vec<Finding> = Section::ALL.iter().filter(|&&s| s != Section::Summary).flat_map(|&s| self.findings(s)).collect();
+                let mut seen = BTreeSet::new();
+                let all: Vec<Finding> = Section::ALL
+                    .iter()
+                    .filter(|&&s| s != Section::Summary)
+                    .flat_map(|&s| self.findings(s))
+                    .filter(|f| seen.insert((f.code, f.message.clone())))
+                    .collect();
                 ordered(&all)
             }
             s => self.runs.get(&s).map(|r| r.outcome.findings.clone()).unwrap_or_default(),
@@ -562,6 +568,18 @@ mod tests {
         assert_eq!(t.state(Section::Dns), CheckState::NotRun);
         assert_eq!(t.findings(Section::Summary).len(), 1);
         assert_eq!(t.verdict(Section::Registration).word, "1 PROBLEM");
+    }
+
+    #[test]
+    fn the_summary_lists_a_finding_that_several_checks_share_once() {
+        use crate::outcome::{CheckEvent, Outcome};
+        let mut t = tab();
+        for s in [Section::Delegation, Section::Dnssec] {
+            t.run_mut(s).apply(CheckEvent::Started);
+            t.run_mut(s).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![finding(Severity::Warning, "dns_network_intercepts")], ..Outcome::default() }))));
+        }
+        assert_eq!(t.findings(Section::Delegation).len(), 1);
+        assert_eq!(t.findings(Section::Summary).len(), 1);
     }
 
     #[test]
