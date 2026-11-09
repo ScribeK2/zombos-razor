@@ -77,7 +77,7 @@ pub struct Workspace {
     pub active: Option<usize>,
     pub recent: Vec<Recent>,
     pub recent_selected: usize,
-    next_evidence: u64,
+    pub next_evidence: u64,
 }
 
 impl Workspace {

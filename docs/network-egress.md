@@ -14,7 +14,7 @@ Every Check talks to the target the rep typed, or to infrastructure that serves 
 | Google, Cloudflare, Quad9, OpenDNS | the DNSSEC verdict (validating resolvers only) |
 | The machine's own resolver (`/etc/resolv.conf`, at most 3 servers) | blocklist lookups (public resolvers are refused by some lists), reverse DNS, the web Check's DNS |
 | The authoritative nameservers and the parent zone's servers, found by discovery | authoritative Vantage, delegation, DNSSEC |
-| Resolvers the rep adds in settings or with `--resolver` | as configured |
+| Resolvers the rep adds in settings (propagation and discovery only) or with `--resolver` | as configured |
 
 The queries contain the target's name, nothing else.
 
@@ -42,4 +42,4 @@ No telemetry, crash reports, usage statistics, fonts or assets from a CDN, adver
 
 ## HTTP clients
 
-The HTTP clients (registration, web) use `ureq` with rustls: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client honours `HTTP_PROXY` and `HTTPS_PROXY`; the web Check ignores them on purpose (see `docs/progress.md`, decisions waiting).
+The HTTP clients (registration, web) use `ureq` with rustls: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client uses the proxy from settings first, then `HTTP_PROXY` and `HTTPS_PROXY`; the web Check ignores them on purpose (see `docs/progress.md`, decisions waiting).

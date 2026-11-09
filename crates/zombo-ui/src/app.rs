@@ -3,11 +3,14 @@ use std::{collections::{HashMap, HashSet}, time::{Duration, Instant}};
 use gpui_kit::component::input::{Input, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use crate::settings::{PaneEvent, SettingsPane};
 use zombo_ui::{
-    checks, diagnosis as dg,
+    checks,
+    config::{self, Config, Dirs},
+    diagnosis as dg,
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
-    ondemand,
+    notice, ondemand,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
     runtime,
@@ -38,6 +41,8 @@ pub struct Shell {
     toast: Option<(String, Instant)>,
     sheet: bool,
     error: Option<String>,
+    config: Config,
+    settings: Option<Entity<SettingsPane>>,
     started: Instant,
     rendered: bool,
 }
@@ -113,8 +118,15 @@ impl Shell {
             }
         })
         .detach();
+        let config = Config::load(Dirs::from_env());
+        let ws = Workspace { recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()), ..Workspace::default() };
+        let toast = [("config.toml", &config.settings_problem), ("recent.toml", &config.recent_problem)]
+            .into_iter()
+            .filter_map(|(file, p)| p.as_ref().map(|p| format!("{file} has an error: {p}. The app runs without it and leaves the file as it is.")))
+            .next()
+            .map(|text| (text, Instant::now()));
         Shell {
-            ws: Workspace::default(),
+            ws,
             input,
             root_focus: cx.focus_handle(),
             pane_focus: cx.focus_handle(),
@@ -124,16 +136,20 @@ impl Shell {
             open: HashSet::new(),
             watches: Watches::default(),
             pastes: HashMap::new(),
-            toast: None,
+            toast,
             sheet: false,
             error: None,
+            config,
+            settings: None,
             started,
             rendered: false,
         }
     }
 
     fn mode(&self, window: &Window, cx: &gpui_kit::App) -> Mode {
-        if self.palette.is_some() {
+        if self.settings.is_some() {
+            Mode::Settings
+        } else if self.palette.is_some() {
             Mode::Palette
         } else if self.sheet {
             Mode::Sheet
@@ -180,7 +196,8 @@ impl Shell {
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
         if section == Section::Dns {
-            let mut rx = runtime::stream(move |tx| checks::run_propagation(name, tx));
+            let settings = self.config.settings.clone();
+            let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
             cx.spawn(async move |this, cx| {
                 while let Some(event) = rx.recv().await {
                     let key = key.clone();
@@ -204,7 +221,8 @@ impl Shell {
         if let Some(tab) = self.ws.diagnosis_mut_for(&key) {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, tx));
+        let settings = self.config.settings.clone();
+        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, tx));
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -229,7 +247,11 @@ impl Shell {
         let Some(settled) = self.ws.tabs.iter().filter_map(Slot::diagnosis).find(|t| t.target.value == key).and_then(|t| t.settled(section)) else { return };
         let now = Instant::now();
         if let Some(stopped) = self.watches.finished(key, section, settled.as_deref(), now) {
-            self.toast = Some((stopped.message(), now));
+            let message = stopped.message();
+            if let Some((summary, body)) = notice::watch_notice(&self.config.settings, &message) {
+                notice::send(summary, body);
+            }
+            self.toast = Some((message, now));
         }
     }
 
@@ -282,6 +304,7 @@ impl Shell {
                     match self.ws.submit(&typed, Instant::now()) {
                         Ok(_) => {
                             self.error = None;
+                            self.remember_recent();
                             self.sync_omnibox(window, cx);
                             self.start_automatic(cx);
                             window.focus(&self.root_focus, cx);
@@ -340,8 +363,11 @@ impl Shell {
             Action::CopySection => self.copy_evidence(false, cx),
             Action::CopyAll => self.copy_evidence(true, cx),
             Action::Cheatsheet => self.sheet = !self.sheet,
+            Action::Settings => self.toggle_settings(window, cx),
             Action::Dismiss => {
-                if self.palette.is_some() || self.sheet {
+                if self.settings.is_some() {
+                    self.close_settings(window, cx);
+                } else if self.palette.is_some() || self.sheet {
                     self.palette = None;
                     self.sheet = false;
                 } else {
@@ -359,6 +385,42 @@ impl Shell {
                 }
             }
         }
+        cx.notify();
+    }
+
+    fn remember_recent(&mut self) {
+        let entries = config::from_recent(&self.ws.recent, config::unix_now(), Instant::now());
+        if let Err(e) = self.config.save_recent(entries) {
+            self.toast = Some((e, Instant::now()));
+        }
+    }
+
+    fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.is_some() {
+            return self.close_settings(window, cx);
+        }
+        self.palette = None;
+        self.sheet = false;
+        let (current, problem, path) = (self.config.settings.clone(), self.config.settings_problem.clone(), self.config.settings_path());
+        let pane = cx.new(|cx| SettingsPane::new(&current, problem, path, window, cx));
+        cx.subscribe_in(&pane, window, |this, pane, event: &PaneEvent, window, cx| match event {
+            PaneEvent::Close => this.close_settings(window, cx),
+            PaneEvent::Save(settings) => match this.config.save_settings(settings.clone()) {
+                Ok(()) => {
+                    this.close_settings(window, cx);
+                    this.toast = Some(("Settings saved. They apply to the next run of each Check.".into(), Instant::now()));
+                    cx.notify();
+                }
+                Err(e) => pane.update(cx, |p, cx| p.set_save_error(e, cx)),
+            },
+        })
+        .detach();
+        self.settings = Some(pane);
+    }
+
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings = None;
+        window.focus(&self.root_focus, cx);
         cx.notify();
     }
 
@@ -1336,5 +1398,6 @@ impl Render for Shell {
             })
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
+            .when_some(self.settings.clone(), |s, pane| s.child(pane))
     }
 }

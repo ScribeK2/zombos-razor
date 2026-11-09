@@ -20,6 +20,15 @@ const RESOLV_CONF_MAX_BYTES: u64 = 64 * 1024;
 /// glibc's own limit.
 const MAX_SERVERS: usize = 3;
 
+/// An address a person typed for a resolver: `ip`, `ip:port` or `[v6]:port`, port 53 when absent.
+/// The CLI's `--resolver` and the settings file both use this one parser.
+pub fn parse_addr(v: &str) -> Result<SocketAddr, String> {
+    v.parse()
+        .or_else(|_| format!("{v}:53").parse())
+        .or_else(|_| format!("[{v}]:53").parse())
+        .map_err(|_| format!("{v:?} is not an IP address"))
+}
+
 /// The `nameserver` lines of a resolv.conf, in order, on port 53. Anything else is ignored.
 pub fn parse_resolv_conf(text: &str) -> Vec<SocketAddr> {
     let mut out: Vec<SocketAddr> = vec![];

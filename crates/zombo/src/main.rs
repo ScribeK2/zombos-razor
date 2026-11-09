@@ -24,10 +24,7 @@ use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email
 const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
-    v.parse()
-        .or_else(|_| format!("{v}:53").parse())
-        .or_else(|_| format!("[{v}]:53").parse())
-        .map_err(|_| format!("{v:?} is not an IP address"))
+    zombo_core::resolver::parse_addr(v)
 }
 
 #[tokio::main]
