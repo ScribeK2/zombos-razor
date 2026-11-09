@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use super::tags;
+use super::{has_version, query::Dns, tags};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +42,29 @@ pub struct DmarcRecord {
     pub ruf: Vec<String>,
     pub adkim: Alignment,
     pub aspf: Alignment,
+}
+
+/// What an audit of one domain's DMARC found.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct DmarcAudit {
+    /// Every `v=DMARC1` record at `_dmarc.<domain>`.
+    pub records: Vec<String>,
+    /// The single record; with two, receivers ignore DMARC.
+    pub parsed: Option<DmarcRecord>,
+    /// The TXT lookup got no answer.
+    pub lookup_error: Option<String>,
+}
+
+pub(crate) async fn dmarc_audit(dns: Dns, domain: &str) -> DmarcAudit {
+    let mut audit = DmarcAudit::default();
+    match dns.txt(&format!("_dmarc.{domain}")).await {
+        Ok(t) => audit.records = t.records.into_iter().filter(|r| has_version(r, "DMARC1")).collect(),
+        Err(e) => audit.lookup_error = Some(e),
+    }
+    if let [only] = audit.records.as_slice() {
+        audit.parsed = Some(parse_dmarc(only));
+    }
+    audit
 }
 
 pub fn parse_dmarc(record: &str) -> DmarcRecord {

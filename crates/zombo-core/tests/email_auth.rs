@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use common::{FakeDns, zone};
 use hickory_proto::rr::RecordType;
-use zombo_core::email_auth::{EffectiveAll, EmailAuthResult, Mechanism, NodeError, Qualifier, SpfAudit, SpfNode, email_auth};
+use zombo_core::email_auth::{
+    Alignment, DKIM_COMMON_SELECTORS, DkimKeyError, EffectiveAll, EmailAuthResult, KeyType, Mechanism, NodeError, Policy, Qualifier, SpfAudit, SpfNode, email_auth,
+};
 
 const T: Duration = Duration::from_millis(500);
 
@@ -212,4 +214,99 @@ async fn a_silent_resolver_fails_the_lookup() {
     let s = FakeDns::silent().await;
     let a = email_auth(s.addr, "example.com", &[], Duration::from_millis(200)).await.spf;
     assert!(a.lookup_error.is_some() && a.tree.is_none());
+}
+
+fn sel(names: &[&str]) -> Vec<String> {
+    names.iter().map(ToString::to_string).collect()
+}
+
+#[tokio::test]
+async fn a_healthy_domain_has_one_dkim_key_behind_a_cname() {
+    let r = run(&zone("email_healthy")).await;
+    let k = &r.dkim.keys;
+    assert_eq!(k.len(), 1, "{k:?}");
+    assert_eq!((k[0].selector.as_str(), k[0].bits, k[0].key_type.clone()), ("selector1", Some(2048), KeyType::Rsa));
+    assert_eq!(k[0].cname.as_deref(), Some("selector1-example._domainkey.provider.test"));
+    assert!(r.dkim.failed.is_empty());
+    let d = r.dmarc.parsed.expect("a DMARC record");
+    assert_eq!((d.policy, d.subdomain_policy, d.pct, d.adkim, d.aspf), (Some(Policy::Reject), Some(Policy::Quarantine), 100, Alignment::Strict, Alignment::Relaxed));
+    assert_eq!(d.rua, ["mailto:dmarc@example.com"]);
+}
+
+#[tokio::test]
+async fn a_domain_with_no_mail_records_has_none_of_them() {
+    let r = run(&zone("email_missing")).await;
+    assert!(r.spf.records.is_empty() && r.dkim.keys.is_empty() && r.dmarc.records.is_empty() && r.dmarc.parsed.is_none());
+    assert!(r.dkim.checked.contains(&"google".to_string()));
+    assert_eq!(r.dkim.checked.len(), DKIM_COMMON_SELECTORS.len());
+    assert!(r.answered());
+}
+
+#[tokio::test]
+async fn dkim_key_sizes_revoked_and_broken_keys_are_told_apart() {
+    let r = run(&zone("email_dkim_strength")).await;
+    let by = |s: &str| r.dkim.keys.iter().find(|k| k.selector == s).unwrap_or_else(|| panic!("no key for {s}"));
+    assert_eq!(r.dkim.keys.len(), 6, "s2 is not a DKIM record: {:?}", r.dkim.keys);
+    assert_eq!((by("google").bits, by("k1").bits, by("dkim").bits), (Some(512), Some(1024), None));
+    assert!(by("s1").revoked && !by("google").revoked);
+    assert_eq!(by("dkim").error, Some(DkimKeyError::NotBase64));
+}
+
+#[tokio::test]
+async fn custom_selectors_are_checked_only_when_asked() {
+    let z = zone("email_dkim_custom");
+    let s = FakeDns::start(&z).await;
+    let plain = email_auth(s.addr, "example.com", &[], T).await.dkim;
+    assert!(plain.keys.is_empty() && !plain.checked.contains(&"acme2024".to_string()));
+
+    let asked = email_auth(s.addr, "example.com", &sel(&["Acme2024", "other", "google", "other"]), T).await.dkim;
+    assert_eq!(asked.custom, ["acme2024", "other", "google"]);
+    assert!(asked.checked.contains(&"acme2024".into()) && asked.checked.contains(&"other".into()));
+    assert_eq!(asked.checked.iter().filter(|c| *c == "google").count(), 1);
+    assert_eq!(asked.keys.len(), 1);
+    assert_eq!(asked.keys[0].selector, "acme2024");
+}
+
+#[tokio::test]
+async fn an_unusable_selector_is_a_failed_lookup_not_a_crash() {
+    let long = "x".repeat(200);
+    let r = email_auth(FakeDns::start("").await.addr, "example.com", &sel(&["bad..name", &long]), T).await;
+    assert_eq!(r.dkim.failed, ["bad..name", long.as_str()]);
+}
+
+#[tokio::test]
+async fn at_most_twenty_custom_selectors_are_queried() {
+    let many: Vec<String> = (0..50).map(|i| format!("c{i}")).collect();
+    let r = email_auth(FakeDns::start("").await.addr, "example.com", &many, T).await;
+    assert_eq!(r.dkim.custom.len(), 20);
+    assert_eq!(r.dkim.checked.len(), DKIM_COMMON_SELECTORS.len() + 20);
+}
+
+#[tokio::test]
+async fn dmarc_monitoring_record_is_read() {
+    let d = run(&zone("email_dmarc_monitoring")).await.dmarc.parsed.unwrap();
+    assert_eq!((d.policy, d.pct, d.aspf), (Some(Policy::None), 50, Alignment::Strict));
+    assert!(d.rua.is_empty());
+}
+
+#[tokio::test]
+async fn two_dmarc_records_are_listed_but_not_read() {
+    let r = run("_dmarc.example.com. 60 IN TXT \"v=DMARC1; p=none\"\n_dmarc.example.com. 60 IN TXT \"v=DMARC1; p=reject\"\n_dmarc.example.com. 60 IN TXT \"other\"\n").await;
+    assert_eq!(r.dmarc.records.len(), 2);
+    assert!(r.dmarc.parsed.is_none());
+}
+
+#[tokio::test]
+async fn a_silent_resolver_leaves_nothing_answered() {
+    let s = FakeDns::silent().await;
+    let r = email_auth(s.addr, "example.com", &[], Duration::from_millis(200)).await;
+    assert!(!r.answered());
+    assert!(r.spf.lookup_error.is_some() && r.dmarc.lookup_error.is_some());
+    assert_eq!(r.dkim.failed, r.dkim.checked);
+}
+
+#[tokio::test]
+async fn a_refused_mx_query_does_not_fail_the_audit() {
+    let s = FakeDns::start("_dmarc.example.com. 60 IN TXT \"v=DMARC1; p=none\"\n").await.refuse(RecordType::MX);
+    assert!(email_auth(s.addr, "example.com", &[], T).await.answered());
 }

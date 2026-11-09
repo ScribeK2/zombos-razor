@@ -4,7 +4,10 @@ use std::fmt;
 
 use serde::Serialize;
 
-use super::tags;
+use super::{
+    query::{Dns, concurrently},
+    tags,
+};
 
 /// Selectors the common mail providers use.
 pub const DKIM_COMMON_SELECTORS: [&str; 37] = [
@@ -60,6 +63,72 @@ pub struct DkimKey {
     /// An empty `p=`: the key was withdrawn.
     pub revoked: bool,
     pub error: Option<DkimKeyError>,
+}
+
+/// What an audit of one domain's DKIM selectors found.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct DkimAudit {
+    /// Every selector queried: the common ones, then the caller's.
+    pub checked: Vec<String>,
+    pub custom: Vec<String>,
+    pub keys: Vec<DkimKey>,
+    /// Selectors whose lookup got no answer.
+    pub failed: Vec<String>,
+}
+
+/// The most custom selectors one audit queries.
+pub const MAX_CUSTOM_SELECTORS: usize = 20;
+
+/// Turn what a person typed (selectors split by commas, semicolons or
+/// whitespace) into valid, lowercase, distinct selectors.
+pub fn parse_selectors(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = vec![];
+    for s in raw.iter().flat_map(|r| r.split([',', ';', ' ', '\t', '\n'])).filter(|s| !s.is_empty()) {
+        let s = s.to_ascii_lowercase();
+        let label = |l: &str| {
+            !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-') && !l.starts_with('-') && !l.ends_with('-')
+        };
+        if !s.split('.').all(label) {
+            return Err(format!("{s:?} is not a valid DKIM selector"));
+        }
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    if out.len() > MAX_CUSTOM_SELECTORS {
+        return Err(format!("at most {MAX_CUSTOM_SELECTORS} custom DKIM selectors"));
+    }
+    Ok(out)
+}
+
+/// Ask for `<selector>._domainkey.<domain>` for every common selector and the
+/// caller's (at most `MAX_CUSTOM_SELECTORS`), all at the same time.
+pub(crate) async fn dkim_audit(dns: Dns, domain: &str, custom: &[String]) -> DkimAudit {
+    let mut audit = DkimAudit { checked: DKIM_COMMON_SELECTORS.iter().map(ToString::to_string).collect(), ..Default::default() };
+    for s in custom.iter().map(|s| s.to_ascii_lowercase()) {
+        if audit.custom.len() == MAX_CUSTOM_SELECTORS {
+            break;
+        }
+        if audit.custom.contains(&s) {
+            continue;
+        }
+        if !audit.checked.contains(&s) {
+            audit.checked.push(s.clone());
+        }
+        audit.custom.push(s);
+    }
+    let asked = audit.checked.iter().map(|sel| {
+        let name = format!("{sel}._domainkey.{domain}");
+        async move { dns.txt(&name).await }
+    });
+    let answers = concurrently(asked.collect()).await;
+    for (sel, answer) in audit.checked.iter().zip(answers) {
+        match answer {
+            Some(Ok(txt)) => audit.keys.extend(txt.records.iter().filter_map(|r| parse_dkim_key(sel, txt.cname.as_deref(), r))),
+            _ => audit.failed.push(sel.clone()),
+        }
+    }
+    audit
 }
 
 /// Read a TXT record at a selector as a DKIM key. Records that are not
@@ -216,6 +285,36 @@ mod tests {
     }
     fn key(rec: &str) -> DkimKey {
         parse_dkim_key("s", None, rec).expect("a DKIM record")
+    }
+
+    fn raw(v: &[&str]) -> Vec<String> {
+        v.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn selectors_are_split_lowercased_and_made_distinct() {
+        assert_eq!(parse_selectors(&raw(&["Acme2024, other  google", "OTHER;a.b\tc_d-e\nx"])).unwrap(), ["acme2024", "other", "google", "a.b", "c_d-e", "x"]);
+        assert!(parse_selectors(&[]).unwrap().is_empty());
+        assert!(parse_selectors(&raw(&[" , ;"])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_selector_must_be_a_dns_label_or_dotted_labels() {
+        for bad in ["bad..name", "-x", "x-", ".x", "x.", "a/b", "a b!", "é", "a@b", "a.-b"] {
+            let e = parse_selectors(&raw(&[bad])).expect_err(bad);
+            assert!(e.contains("is not a valid DKIM selector"), "{bad}: {e}");
+        }
+        assert_eq!(parse_selectors(&raw(&["bad..name"])).unwrap_err(), r#""bad..name" is not a valid DKIM selector"#);
+    }
+
+    #[test]
+    fn more_than_twenty_selectors_is_an_error() {
+        let ok: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+        assert_eq!(parse_selectors(&ok).unwrap().len(), 20);
+        let many: Vec<String> = (0..21).map(|i| format!("s{i}")).collect();
+        assert_eq!(parse_selectors(&many).unwrap_err(), "at most 20 custom DKIM selectors");
+        // Repeats do not count twice.
+        assert_eq!(parse_selectors(&raw(&["a a a a"; 30])).unwrap(), ["a"]);
     }
 
     #[test]

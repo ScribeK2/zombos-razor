@@ -8,8 +8,8 @@ mod query;
 mod records;
 mod spf;
 
-pub use dkim::{DKIM_COMMON_SELECTORS, DkimFlags, DkimKey, DkimKeyError, KeyType, parse_dkim_key};
-pub use dmarc::{Alignment, DmarcRecord, Policy, parse_dmarc};
+pub use dkim::{DKIM_COMMON_SELECTORS, DkimAudit, DkimFlags, DkimKey, DkimKeyError, KeyType, parse_dkim_key, parse_selectors};
+pub use dmarc::{Alignment, DmarcAudit, DmarcRecord, Policy, parse_dmarc};
 pub use records::{Bimi, MtaSts, TlsRpt, parse_bimi, parse_mta_sts, parse_tls_rpt};
 pub use spf::{
     EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfAudit, SpfError, SpfNode, SpfTerm, effective_all, parse_spf,
@@ -26,18 +26,32 @@ use query::Dns;
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct EmailAuthResult {
     pub spf: SpfAudit,
+    pub dkim: DkimAudit,
+    pub dmarc: DmarcAudit,
     /// The domain's MX hosts, most preferred first: a mail provider shows in them.
     pub mx_hosts: Vec<String>,
+}
+
+impl EmailAuthResult {
+    /// False when the resolver gave no answer to the SPF, DMARC or any DKIM
+    /// question: the other fields then say nothing about the domain.
+    pub fn answered(&self) -> bool {
+        self.spf.lookup_error.is_none() || self.dmarc.lookup_error.is_none() || self.dkim.failed.len() < self.dkim.checked.len()
+    }
 }
 
 /// Audit one domain's email authentication through one resolver. `limit`
 /// bounds each DNS question, not the whole audit.
 pub async fn email_auth(resolver: SocketAddr, domain: &str, dkim_selectors: &[String], limit: Duration) -> EmailAuthResult {
-    let _ = dkim_selectors;
     let dns = Dns { server: resolver, limit };
     let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-    let (spf, mx_hosts) = tokio::join!(spf::spf_audit(dns, &domain), dns.mx_hosts(&domain));
-    EmailAuthResult { spf, mx_hosts: mx_hosts.unwrap_or_default() }
+    let (spf, dkim, dmarc, mx_hosts) = tokio::join!(
+        spf::spf_audit(dns, &domain),
+        dkim::dkim_audit(dns, &domain, dkim_selectors),
+        dmarc::dmarc_audit(dns, &domain),
+        dns.mx_hosts(&domain)
+    );
+    EmailAuthResult { spf, dkim, dmarc, mx_hosts: mx_hosts.unwrap_or_default() }
 }
 
 /// DKIM and DMARC records are `tag=value; tag=value` lists. Tag names are
