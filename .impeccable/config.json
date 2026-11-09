@@ -1,0 +1,23 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-11-09T15:13:25.675Z",
+        "reason": "user confirmed: Geist Sans and Geist Mono chosen in the design foundation (grilling Q22, agreed)"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/sketches/main-screen.html"
+        ],
+        "createdAt": "2026-11-09T15:13:36.320Z",
+        "reason": "dense fixed-height rows per DESIGN.md (28 to 32 px); the dense direction was agreed, the pixel values are the lead's"
+      }
+    ]
+  }
+}
