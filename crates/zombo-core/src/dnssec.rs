@@ -49,9 +49,12 @@ fn key_tag(rdata: &[u8], algorithm: Algorithm) -> KeyTag {
             _ => 0,
         });
     }
-    let mut sum: u32 = rdata.iter().enumerate().map(|(i, &b)| u32::from(b) << if i % 2 == 0 { 8 } else { 0 }).sum();
-    sum += sum >> 16;
-    KeyTag((sum & 0xffff) as u16)
+    // RFC 4034 sums in 32 bits; a key longer than RDATA can be wraps instead of overflowing.
+    let sum = rdata
+        .iter()
+        .enumerate()
+        .fold(0u32, |sum, (i, &b)| sum.wrapping_add(u32::from(b) << if i % 2 == 0 { 8 } else { 0 }));
+    KeyTag((sum.wrapping_add(sum >> 16) & 0xffff) as u16)
 }
 
 /// DNSSEC algorithm numbers (IANA registry), with the ones Zombo knows named.

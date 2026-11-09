@@ -13,7 +13,10 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use std::borrow::Cow;
 
-use crate::finding::{Finding, Severity};
+use crate::{
+    email_auth::printable,
+    finding::{Finding, Severity},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -327,16 +330,21 @@ async fn rdap_lookup(
     let (status, body) = tokio::task::spawn_blocking(move || rdap_get(&url, https_only, left, proxy.as_deref()))
         .await
         .map_err(|e| RdapError::Request(e.to_string()))??;
-    let mut r = Registration::empty(name, Source::Rdap, base);
+    let r = Registration::empty(name, Source::Rdap, base);
     if status == 404 {
         return Ok(r); // the registry has no such domain
     }
     if status != 200 {
         return Err(RdapError::Status(status.to_string()));
     }
-    let d: RdapDomain = serde_json::from_slice(&body).map_err(|e| RdapError::Unreadable(e.to_string()))?;
+    read_rdap(r, &body)
+}
+
+/// Fill `r` from the body of an RDAP domain answer.
+pub(crate) fn read_rdap(mut r: Registration, body: &[u8]) -> Result<Registration, RdapError> {
+    let d: RdapDomain = serde_json::from_slice(body).map_err(|e| RdapError::Unreadable(e.to_string()))?;
     r.registered = true;
-    r.registrar = d.entities.iter().filter_map(RdapEntity::registrar_name).next_back();
+    r.registrar = d.entities.iter().filter_map(RdapEntity::registrar_name).next_back().map(|n| printable(&n));
     r.statuses = d.status.iter().map(|s| epp_status(s)).collect();
     for e in &d.events {
         match e.action.to_lowercase().as_str() {
@@ -346,7 +354,7 @@ async fn rdap_lookup(
             _ => {}
         }
     }
-    r.nameservers = d.nameservers.iter().map(|n| n.ldh_name.trim_end_matches('.').to_lowercase()).collect();
+    r.nameservers = d.nameservers.iter().map(|n| printable(&n.ldh_name.trim_end_matches('.').to_lowercase())).collect();
     r.dnssec = d.secure_dns.and_then(|s| s.delegation_signed);
     r.statuses.sort();
     r.nameservers.sort();
@@ -438,17 +446,18 @@ const STATUS: &[&str] = &["Domain Status", "Status"];
 const DNSSEC: &[&str] = &["DNSSEC"];
 const REFER: &[&str] = &["refer", "whois"];
 
-/// The non-empty values of every "Key: value" line whose key is one of `keys`, in order.
-fn field_values<'a>(text: &'a str, keys: &'static [&'static str]) -> impl Iterator<Item = &'a str> {
+/// The non-empty values of every "Key: value" line whose key is one of `keys`, in order,
+/// with control characters replaced: a registry is not trusted with the terminal.
+fn field_values(text: &str, keys: &'static [&'static str]) -> impl Iterator<Item = String> {
     text.lines().filter_map(move |line| {
         let (key, value) = line.trim_start().split_once(':')?;
         let value = value.trim();
-        (!value.is_empty() && keys.iter().any(|k| key.eq_ignore_ascii_case(k))).then_some(value)
+        (!value.is_empty() && keys.iter().any(|k| key.eq_ignore_ascii_case(k))).then(|| printable(value))
     })
 }
 
 /// EURid and others put the registrar in an indented block under "Registrar:".
-fn registrar_block(text: &str) -> Option<&str> {
+fn registrar_block(text: &str) -> Option<String> {
     let mut lines = text.lines().peekable();
     while let Some(line) = lines.next() {
         let Some((key, rest)) = line.trim_start().split_once(':') else { continue };
@@ -467,20 +476,20 @@ fn registrar_block(text: &str) -> Option<&str> {
             && ["name", "organisation", "organization"].iter().any(|n| k.eq_ignore_ascii_case(n))
             && !v.trim().is_empty()
         {
-            return Some(v.trim());
+            return Some(printable(v.trim()));
         }
     }
     None
 }
 
 /// Best-effort parse of a registry's free-text reply.
-fn parse_whois(name: &str, server: &str, text: &str) -> Registration {
+pub(crate) fn parse_whois(name: &str, server: &str, text: &str) -> Registration {
     let mut r = Registration::empty(name, Source::Whois, server);
     let first = |keys: &'static [&'static str]| field_values(text, keys).next();
-    r.registrar = first(REGISTRAR).or_else(|| registrar_block(text)).map(String::from);
-    r.expires = first(EXPIRES).map(normalize_date);
-    r.created = first(CREATED).map(normalize_date);
-    r.updated = first(UPDATED).map(normalize_date);
+    r.registrar = first(REGISTRAR).or_else(|| registrar_block(text));
+    r.expires = first(EXPIRES).map(|d| normalize_date(&d));
+    r.created = first(CREATED).map(|d| normalize_date(&d));
+    r.updated = first(UPDATED).map(|d| normalize_date(&d));
     for v in field_values(text, NAMESERVERS) {
         let Some(host) = v.split_whitespace().next() else { continue };
         let ns = host.strip_suffix('.').unwrap_or(host).to_lowercase();
@@ -489,7 +498,7 @@ fn parse_whois(name: &str, server: &str, text: &str) -> Registration {
         }
     }
     for v in field_values(text, STATUS) {
-        let s = epp_status(v);
+        let s = epp_status(&v);
         if !s.is_empty() && !r.statuses.contains(&s) {
             r.statuses.push(s);
         }
@@ -530,6 +539,7 @@ async fn whois_lookup(
         None => {
             let text = whois_query(&ep.whois_iana, name, deadline).await?;
             let value = field_values(&text, REFER).next().ok_or(WhoisError::NoReferral)?;
+            let value = value.as_str();
             // The referral is untrusted text from the network: take a bare host name or nothing.
             if !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
                 return Err(WhoisError::BadReferral(value.into()));
@@ -704,7 +714,7 @@ fn epp_status(s: &str) -> String {
     }
     let Some((first, rest)) = words.split_first() else { return String::new() };
     if rest.is_empty() && *first == first.to_uppercase() {
-        return first.to_lowercase(); // some ccTLDs shout: ACTIVE
+        return printable(&first.to_lowercase()); // some ccTLDs shout: ACTIVE
     }
     let with_first = |w: &str, f: fn(char) -> String| {
         let mut c = w.chars();
@@ -714,13 +724,13 @@ fn epp_status(s: &str) -> String {
     for w in rest {
         out += &with_first(w, |h| h.to_uppercase().to_string());
     }
-    out
+    printable(&out)
 }
 
 /// RFC 3339 UTC when `s` is a date format registries are known to use, else `s` as written.
 fn normalize_date(s: &str) -> RegDate {
     let s = s.trim();
-    parse_date(s).map_or_else(|| RegDate::Raw(s.into()), RegDate::At)
+    parse_date(s).map_or_else(|| RegDate::Raw(printable(s)), RegDate::At)
 }
 
 fn parse_date(s: &str) -> Option<OffsetDateTime> {

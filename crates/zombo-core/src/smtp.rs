@@ -6,7 +6,7 @@
 //! bounded (see `reply`). The network is injectable through `check_smtp_via`.
 
 mod findings;
-mod reply;
+pub(crate) mod reply;
 
 use std::{io, net::IpAddr, time::Duration};
 

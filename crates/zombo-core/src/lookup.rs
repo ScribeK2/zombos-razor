@@ -114,7 +114,7 @@ pub async fn dns_lookup(
 
 /// Record data in zone-file presentation form, as the Go engine printed it.
 /// hickory's `Display` leaves TXT strings unquoted, so TXT is done by hand.
-fn presentation(d: &RData) -> String {
+pub(crate) fn presentation(d: &RData) -> String {
     let RData::TXT(t) = d else { return d.to_string() };
     t.txt_data
         .iter()

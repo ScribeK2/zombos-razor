@@ -67,7 +67,7 @@ pub fn reverse_name(ip: IpAddr) -> String {
     }
 }
 
-fn addresses_of(m: &hickory_proto::op::Message, want: RecordType) -> Vec<IpAddr> {
+pub(crate) fn addresses_of(m: &hickory_proto::op::Message, want: RecordType) -> Vec<IpAddr> {
     let mut out: Vec<IpAddr> = vec![];
     for a in &m.answers {
         let ip = match (&a.data, want) {

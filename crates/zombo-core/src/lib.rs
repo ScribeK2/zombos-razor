@@ -17,6 +17,7 @@ pub mod smtp;
 pub mod target;
 pub mod tls;
 pub mod tls_extras;
+pub mod untrusted;
 pub mod web;
 
 pub use finding::{Finding, Severity};

@@ -4,10 +4,10 @@
 //! origin server directly to tell a CDN problem from an origin problem. Ported from
 //! the Go `website_inspection` Check, plus the provider and origin parts.
 
-mod fetch;
+pub(crate) mod fetch;
 mod findings;
 mod origin;
-mod providers;
+pub(crate) mod providers;
 
 use std::{
     collections::BTreeMap,
@@ -301,7 +301,7 @@ fn failed(url: &str, error: String) -> WebResult {
 
 /// HTTPS first, HTTP when HTTPS cannot connect; when HTTPS works, also probe whether
 /// plain HTTP redirects to it. The fetches are the only I/O, so tests feed canned ones.
-fn inspect_with(https_url: &str, http_url: &str, fetch: &dyn Fn(&str) -> Fetch) -> WebResult {
+pub(crate) fn inspect_with(https_url: &str, http_url: &str, fetch: &dyn Fn(&str) -> Fetch) -> WebResult {
     let mut res = WebResult { url: https_url.to_string(), ..WebResult::default() };
     let mut f = fetch(https_url);
     if let (Some(e), true) = (&f.error, f.chain.is_empty()) {

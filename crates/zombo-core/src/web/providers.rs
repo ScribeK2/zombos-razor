@@ -242,7 +242,7 @@ pub fn parse_cymru_name(txt: &str) -> Option<String> {
     txt.splitn(5, '|').nth(4).and_then(clean_field)
 }
 
-fn txt_strings(m: &hickory_proto::op::Message) -> Vec<String> {
+pub(crate) fn txt_strings(m: &hickory_proto::op::Message) -> Vec<String> {
     m.answers
         .iter()
         .filter_map(|a| match &a.data {

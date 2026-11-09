@@ -176,7 +176,7 @@ fn classify(e: &io::Error) -> PortState {
 }
 
 /// The first line of a greeting, printable characters only: it comes from the network.
-fn clean_banner(raw: &[u8]) -> Option<String> {
+pub(crate) fn clean_banner(raw: &[u8]) -> Option<String> {
     let line: String = String::from_utf8_lossy(raw)
         .split('\n')
         .next()
