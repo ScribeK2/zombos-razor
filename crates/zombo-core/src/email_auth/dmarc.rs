@@ -12,6 +12,16 @@ pub enum Policy {
     Reject,
 }
 
+impl std::fmt::Display for Policy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Policy::None => "none",
+            Policy::Quarantine => "quarantine",
+            Policy::Reject => "reject",
+        })
+    }
+}
+
 impl Policy {
     fn parse(s: &str) -> Option<Policy> {
         match s.to_ascii_lowercase().as_str() {

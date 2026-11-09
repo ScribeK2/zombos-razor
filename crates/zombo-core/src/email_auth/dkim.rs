@@ -24,6 +24,16 @@ pub enum KeyType {
     Other(String),
 }
 
+impl fmt::Display for KeyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            KeyType::Rsa => "rsa",
+            KeyType::Ed25519 => "ed25519",
+            KeyType::Other(k) => k,
+        })
+    }
+}
+
 /// The `t=` tag: `y` means the domain is testing DKIM, `s` forbids signing from subdomains.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct DkimFlags {
