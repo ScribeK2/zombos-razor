@@ -73,7 +73,9 @@ use Algorithm::*;
 
 /// (algorithm, number, name, deprecated). Deprecated means weak or no longer
 /// accepted by modern resolvers.
-const ALGORITHMS: [(Algorithm, u8, &str, bool); 12] = [
+type AlgorithmRow = (Algorithm, u8, &'static str, bool);
+
+const ALGORITHMS: [AlgorithmRow; 12] = [
     (RsaMd5, 1, "RSAMD5", true),
     (Dsa, 3, "DSA", true),
     (RsaSha1, 5, "RSASHA1", true),
@@ -93,7 +95,7 @@ impl Algorithm {
         ALGORITHMS.iter().find(|a| a.1 == n).map_or(Unknown(n), |a| a.0)
     }
 
-    fn row(self) -> Option<&'static (Algorithm, u8, &'static str, bool)> {
+    fn row(self) -> Option<&'static AlgorithmRow> {
         ALGORITHMS.iter().find(|a| a.0 == self)
     }
 
@@ -143,7 +145,9 @@ fn sha384(data: &[u8]) -> Vec<u8> {
     Sha384::digest(data).to_vec()
 }
 
-const DIGESTS: [(DigestType, u8, &str, fn(&[u8]) -> Vec<u8>); 3] = [
+type DigestRow = (DigestType, u8, &'static str, fn(&[u8]) -> Vec<u8>);
+
+const DIGESTS: [DigestRow; 3] = [
     (DigestType::Sha1, 1, "SHA-1", sha1),
     (DigestType::Sha256, 2, "SHA-256", sha256),
     (DigestType::Sha384, 4, "SHA-384", sha384),
@@ -293,6 +297,16 @@ pub enum SigWindow {
     Expired { ago: u32 },
 }
 
+impl SigWindow {
+    pub fn describe(self) -> String {
+        match self {
+            SigWindow::NotYetValid { starts_in } => format!("NOT VALID YET, starts in {}", span(starts_in)),
+            SigWindow::Valid { expires_in } => format!("valid, expires in {}", span(expires_in)),
+            SigWindow::Expired { ago } => format!("EXPIRED {} ago", span(ago)),
+        }
+    }
+}
+
 impl Rrsig {
     /// From the record's wire RDATA: type covered, algorithm, labels, original
     /// TTL, expiration, inception, key tag, signer name, signature.
@@ -361,6 +375,18 @@ pub enum ResolverStatus {
     /// plain DNS failure and says nothing about DNSSEC.
     Failed,
     NoAnswer,
+}
+
+impl ResolverStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            ResolverStatus::Secure => "SECURE",
+            ResolverStatus::Insecure => "INSECURE (not signed)",
+            ResolverStatus::Bogus => "BOGUS (rejected for DNSSEC)",
+            ResolverStatus::Failed => "FAILED (plain DNS failure)",
+            ResolverStatus::NoAnswer => "no answer",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

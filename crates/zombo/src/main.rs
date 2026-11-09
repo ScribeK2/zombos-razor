@@ -1,10 +1,11 @@
 //! `zombo`: the command-line front end to zombo-core.
 
-use std::{net::SocketAddr, process::ExitCode, time::Duration};
+use std::{net::SocketAddr, process::ExitCode, time::{Duration, SystemTime}};
 
 use zombo_core::{
     Finding, Severity,
     delegation::{Ports, ServerState, check_delegation, delegation_findings},
+    dnssec::{check_dnssec, dnssec_findings, validating_resolvers},
     propagation::{Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings, propagation_with},
     target::{Kind, parse_target},
 };
@@ -34,6 +35,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
     match it.next().as_deref() {
         Some("propagation") => propagation(it).await,
         Some("delegation") => delegation(it).await,
+        Some("dnssec") => dnssec(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -95,6 +97,73 @@ async fn delegation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             ServerState::Lame { why, .. } => format!("LAME: {why}"),
         };
         println!("  {:<32} glue: {:<24} {state}", s.name, glue.unwrap_or_else(|| "-".into()));
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn dnssec(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    const USAGE: &str = "usage: zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+    let (mut target, mut json, mut timeout) = (None, false, Duration::from_secs(4));
+    let mut resolvers = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            "--resolver" => {
+                let v = value("--resolver")?;
+                resolvers.push(Vantage::resolver(&v, "custom", addr(&v)?));
+            }
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname) {
+        return Err(format!("dnssec needs a domain or host name, not {:?}", t.kind));
+    }
+    // Custom resolvers are both asked for the verdict and used to find the zone; the
+    // defaults find the zone through the wide public list and judge by the validating four.
+    let bootstrap: Vec<SocketAddr> = if resolvers.is_empty() { default_resolvers() } else { resolvers.clone() }.iter().map(|r| r.address).collect();
+    if resolvers.is_empty() {
+        resolvers = validating_resolvers();
+    }
+    let r = check_dnssec(&bootstrap, &resolvers, &t.value, 53, SystemTime::now(), timeout).await.map_err(|e| e.to_string())?;
+    let findings = dnssec_findings(&r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("DNSSEC for {}", r.apex);
+    println!("\nValidating resolvers:");
+    for v in &r.resolvers {
+        println!("  {:<14} {}", v.resolver, v.status.label());
+    }
+    println!("\nDS records at the parent:");
+    for d in &r.ds {
+        println!("  key tag {:<6} {:<24} {:<8} matches a served key: {}", d.ds.key_tag.to_string(), d.ds.algorithm.to_string(), d.ds.digest_type.to_string(), if d.matched { "yes" } else { "NO" });
+    }
+    if r.ds.is_empty() {
+        println!("  none");
+    }
+    println!("\nNameservers:");
+    for n in &r.nameservers {
+        if let Some(e) = &n.error {
+            println!("  {:<32} no answer ({e})", n.name);
+            continue;
+        }
+        let keys: Vec<String> = n.dnskeys.iter().map(|k| format!("{} {} {}", k.key_tag, if k.is_ksk() { "KSK" } else { "ZSK" }, k.algorithm)).collect();
+        println!("  {:<32} DNSKEY: {}", n.name, if keys.is_empty() { "none".to_string() } else { keys.join(", ") });
+        if let Some(s) = &n.soa_rrsig {
+            let when = SystemTime::UNIX_EPOCH + Duration::from_secs(r.checked_at);
+            println!("  {:<32} SOA signature by key {}: {}", "", s.key_tag, s.window(when).describe());
+        }
     }
     println!();
     print_findings(&findings);
