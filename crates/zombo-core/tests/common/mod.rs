@@ -122,6 +122,18 @@ fn epoch(s: &str) -> u32 {
     (days * 86400 + n(8..10) * 3600 + n(10..12) * 60 + n(12..14)) as u32
 }
 
+/// The wire RDATA of every record of this type in some zone text.
+pub fn rdatas(zone_text: &str, t: RecordType) -> Vec<Vec<u8>> {
+    parse_zone(zone_text)
+        .into_iter()
+        .filter(|r| r.record_type() == t)
+        .filter_map(|r| match r.data {
+            RData::Unknown { rdata, .. } => Some(rdata.anything),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn dnssec_zone(name: &str) -> String {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../testdata/dnssec/{name}.zone"));
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
