@@ -55,6 +55,12 @@ pub fn counts(findings: &[Finding]) -> [(Severity, usize); 4] {
         .map(|s| (s, findings.iter().filter(|f| f.severity == s).count()))
 }
 
+/// Findings about the rep's own network, not about the target: every Check that sees one
+/// reports the same fact in different words, so the Summary shows it once.
+fn is_network_wide(code: &str) -> bool {
+    code == "dns_network_intercepts"
+}
+
 pub fn finding_label(f: &Finding) -> String {
     let mut text = format!("{}: {}. {}", severity_word(f.severity), f.title, f.message);
     if let Some(r) = &f.recommendation {
@@ -304,7 +310,7 @@ impl Tab {
             return CheckState::NotRun;
         }
         let failed = run.iter().filter(|s| s.can_retry()).count();
-        let problems = run.iter().map(|s| if let CheckState::Done { problems } = s { *problems } else { 0 }).sum::<usize>();
+        let problems = problems(&self.findings(Section::Summary));
         if problems == 0 && failed > 0 {
             return CheckState::Failed { reason: if failed == 1 { "1 Check did not finish".into() } else { format!("{failed} Checks did not finish") } };
         }
@@ -320,7 +326,7 @@ impl Tab {
                     .iter()
                     .filter(|&&s| s != Section::Summary)
                     .flat_map(|&s| self.findings(s))
-                    .filter(|f| seen.insert((f.code, f.message.clone())))
+                    .filter(|f| seen.insert((f.code, if is_network_wide(f.code) { String::new() } else { f.message.clone() })))
                     .collect();
                 ordered(&all)
             }
@@ -580,6 +586,21 @@ mod tests {
         }
         assert_eq!(t.findings(Section::Delegation).len(), 1);
         assert_eq!(t.findings(Section::Summary).len(), 1);
+    }
+
+    #[test]
+    fn a_network_wide_finding_with_different_wording_is_listed_once_and_counted_once() {
+        use crate::outcome::{CheckEvent, Outcome};
+        let mut t = tab();
+        for (s, text) in [(Section::Delegation, "ns2 and ns1 answered"), (Section::Dnssec, "ns1 and ns2 answered")] {
+            let mut f = finding(Severity::Warning, "This network appears to intercept DNS");
+            f.code = "dns_network_intercepts";
+            f.message = text.to_string();
+            t.run_mut(s).apply(CheckEvent::Started);
+            t.run_mut(s).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f], ..Outcome::default() }))));
+        }
+        assert_eq!(t.findings(Section::Summary).len(), 1);
+        assert_eq!(t.state(Section::Summary), CheckState::Done { problems: 1 });
     }
 
     #[test]
