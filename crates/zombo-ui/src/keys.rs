@@ -27,6 +27,11 @@ pub enum Action {
     Dismiss,
     MoveUp,
     MoveDown,
+    /// Stop the Check that is running in this section.
+    Cancel,
+    /// `j` and the Down arrow: the next finding or row.
+    FocusNext,
+    FocusPrev,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +114,9 @@ const BINDINGS: &[Binding] = &[
     bind("tab", true, false, false, When::Always, Action::NextTab, "Next tab"),
     bind("tab", true, false, true, When::Always, Action::PrevTab, "Previous tab"),
     bind("w", false, false, false, When::NotTyping, Action::ToggleWatch, "Watch this result"),
+    bind("escape", false, false, false, When::NotTyping, Action::Cancel, "Cancel this Check"),
+    bind("j", false, false, false, When::NotTyping, Action::FocusNext, "Next finding or row"),
+    bind("k", false, false, false, When::NotTyping, Action::FocusPrev, "Previous finding or row"),
     bind("]", false, false, false, When::NotTyping, Action::NextRecord, "Next record type"),
     bind("[", false, false, false, When::NotTyping, Action::PrevRecord, "Previous record type"),
     bind("?", false, false, false, When::NotTyping, Action::Cheatsheet, "Shortcut cheat sheet"),
@@ -131,6 +139,7 @@ fn shortcut_text(b: &Binding) -> String {
         "down" => "Down".to_string(),
         "tab" => "Tab".to_string(),
         "enter" => "Enter".to_string(),
+        "escape" => "Esc".to_string(),
         k => k.to_uppercase(),
     };
     let mut parts = vec![];
@@ -190,6 +199,13 @@ pub fn action_for(mode: Mode, empty_state: bool, p: Press) -> Option<Action> {
             _ => {}
         }
     }
+    if mode == Mode::Browse && plain && !p.shift {
+        match key {
+            "down" => return Some(Action::FocusNext),
+            "up" => return Some(Action::FocusPrev),
+            _ => {}
+        }
+    }
     BINDINGS
         .iter()
         .find(|b| {
@@ -246,6 +262,30 @@ mod tests {
             assert_eq!(action_for(Mode::Browse, false, p), Some(want), "{p:?}");
             assert_eq!(action_for(Mode::Omnibox, false, p), Some(want), "{p:?} in the omnibox");
         }
+    }
+
+    #[test]
+    fn escape_cancels_and_j_k_and_the_arrows_walk_the_results_but_only_when_not_typing() {
+        assert_eq!(action_for(Mode::Browse, false, plain("escape")), Some(Action::Cancel));
+        assert_eq!(action_for(Mode::Browse, false, plain("j")), Some(Action::FocusNext));
+        assert_eq!(action_for(Mode::Browse, false, plain("k")), Some(Action::FocusPrev));
+        assert_eq!(action_for(Mode::Browse, false, plain("down")), Some(Action::FocusNext));
+        assert_eq!(action_for(Mode::Browse, false, plain("up")), Some(Action::FocusPrev));
+        for mode in [Mode::Omnibox, Mode::Paste] {
+            for k in ["j", "k"] {
+                assert_eq!(action_for(mode, false, plain(k)), None, "{k} must reach the text field in {mode:?}");
+            }
+        }
+        assert_eq!(action_for(Mode::Palette, false, plain("j")), None);
+        assert_eq!(action_for(Mode::Palette, false, plain("escape")), Some(Action::Dismiss));
+        assert_eq!(action_for(Mode::Browse, false, ctrl("k")), Some(Action::Palette), "Ctrl+K is still the palette");
+        assert_eq!(action_for(Mode::Browse, false, press("up", false, true, false)), Some(Action::PrevSection));
+    }
+
+    #[test]
+    fn the_palette_lists_cancel_with_its_key() {
+        let e = entries().into_iter().find(|e| e.action == Action::Cancel).unwrap();
+        assert_eq!((e.label, e.shortcut.as_str()), ("Cancel this Check", "Esc"));
     }
 
     #[test]
@@ -310,7 +350,11 @@ mod tests {
     #[test]
     fn escape_leaves_the_omnibox_for_the_pane() {
         assert_eq!(action_for(Mode::Omnibox, false, plain("escape")), Some(Action::Dismiss));
-        assert_eq!(action_for(Mode::Browse, false, plain("escape")), None);
+        assert_eq!(
+            action_for(Mode::Browse, false, plain("escape")),
+            Some(Action::Cancel),
+            "in the pane it stops a running Check"
+        );
     }
 
     #[test]
@@ -331,7 +375,7 @@ mod tests {
     fn modifier_must_match_exactly() {
         assert_eq!(action_for(Mode::Browse, false, plain("l")), None);
         assert_eq!(action_for(Mode::Browse, false, press("l", true, true, false)), None);
-        assert_eq!(action_for(Mode::Browse, false, press("up", false, false, false)), None);
+        assert_eq!(action_for(Mode::Browse, false, press("up", false, false, true)), None, "Shift+Up is not Up");
         assert_eq!(action_for(Mode::Browse, false, press("tab", true, false, false)), Some(Action::NextTab));
     }
 

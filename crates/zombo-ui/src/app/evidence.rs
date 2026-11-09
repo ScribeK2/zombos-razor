@@ -109,7 +109,7 @@ impl Shell {
             tab.stage = Stage::Analysing;
             tab.notice = None;
         }
-        let mut rx = runtime::stream(move |tx| async move {
+        let (mut rx, _cancel) = runtime::stream(move |tx| async move {
             let job = tokio::task::spawn_blocking(move || ev::analyse(kind, &text));
             let result = match tokio::time::timeout(ANALYSIS_DEADLINE, job).await {
                 Ok(Ok(r)) => r,

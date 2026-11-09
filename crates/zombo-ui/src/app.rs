@@ -51,6 +51,9 @@ pub struct Shell {
     open: HashSet<&'static str>,
     tab_open: OpenState,
     row_focus: Vec<FocusHandle>,
+    nav_rows: Vec<FocusHandle>,
+    nav: Option<zombo_ui::focus_nav::Stop>,
+    jobs: HashMap<(String, Section), runtime::Cancel>,
     motion: Motion,
     fx: Feedback<(&'static str, usize)>,
     fade: Fade<(String, Section, &'static str)>,
@@ -193,6 +196,9 @@ impl Shell {
             toast_leave: None,
             tab_open: OpenState::default(),
             row_focus: DISCLOSURES.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            nav_rows: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            nav: None,
+            jobs: HashMap::new(),
             watches: Watches::default(),
             pastes: HashMap::new(),
             toast,
@@ -266,7 +272,8 @@ impl Shell {
         let options = tab.options();
         if section == Section::Dns {
             let settings = self.config.settings.clone();
-            let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
+            let (mut rx, cancel) = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
+            self.jobs.insert((key.clone(), Section::Dns), cancel);
             cx.spawn(async move |this, cx| {
                 while let Some(event) = rx.recv().await {
                     let key = key.clone();
@@ -299,7 +306,8 @@ impl Shell {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, options, tx));
+        let (mut rx, cancel) = runtime::stream(move |tx| checks::run_section(section, name, settings, options, tx));
+        self.jobs.insert((key.clone(), section), cancel);
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -346,6 +354,13 @@ impl Shell {
         let alive: Vec<String> =
             self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
+        self.jobs.retain(|(target, _), job| {
+            let keep = alive.iter().any(|a| a == target);
+            if !keep {
+                job.abort();
+            }
+            keep
+        });
         self.tab_open.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
@@ -387,8 +402,55 @@ impl Shell {
         }
     }
 
+    /// Stop what is running in the section on screen, and abort the tasks behind it.
+    fn cancel_running(&mut self) {
+        let Some(tab) = self.ws.current_mut() else { return };
+        let (key, section) = (tab.target.value.clone(), tab.section);
+        let stopped = tab.cancel(section);
+        for &s in &stopped {
+            if let Some(job) = self.jobs.remove(&(key.clone(), s)) {
+                job.abort();
+            }
+        }
+        let message = match stopped.as_slice() {
+            [] => return,
+            [one] => format!("Cancelled the {} Check.", one.label()),
+            many => format!("Cancelled {} Checks.", many.len()),
+        };
+        self.toast = Some((message, Instant::now()));
+    }
+
+    /// `j`, `k` and the arrows: focus the next or previous finding, then row, of this section.
+    fn walk(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        use zombo_ui::focus_nav::{Stop, step};
+        let Some(tab) = self.ws.current() else { return };
+        let section = tab.section;
+        let rows = match section {
+            Section::Dns => tab.propagation.view(tab.record).len(),
+            Section::Summary => 0,
+            s => tab.runs.get(&s).map_or(0, |r| r.outcome.facts.len()),
+        };
+        let findings = tab.findings(section).len();
+        self.nav = step(findings, rows, self.nav, delta);
+        let last = FINDING_HANDLES - 1;
+        let handle = match self.nav {
+            Some(Stop::Finding(i)) => self.finding_focus.get(i.min(last)),
+            Some(Stop::Row(i)) => self.nav_rows.get(i.min(last)),
+            None => None,
+        };
+        if let Some(h) = handle {
+            window.focus(h, cx);
+        }
+    }
+
     fn perform(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(action, Action::FocusNext | Action::FocusPrev) {
+            self.nav = None;
+        }
         match action {
+            Action::Cancel => self.cancel_running(),
+            Action::FocusNext => self.walk(1, window, cx),
+            Action::FocusPrev => self.walk(-1, window, cx),
             Action::FocusOmnibox => self.focus_omnibox(window, cx),
             Action::Submit => {
                 if let Some(selected) = self.palette.take() {
@@ -1429,6 +1491,8 @@ impl Shell {
                                 .gap(px(12.))
                                 .when(i > 0, |s| s.border_t_1().border_color(color(t::GRAY_400)))
                                 .text_size(px(t::TEXT_LABEL))
+                                .when_some(self.nav_rows.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
+                                .focus_visible(focus_ring)
                                 .role(Role::Row)
                                 .aria_label(format!("{k}: {v}"))
                                 .cursor_pointer()
@@ -1508,6 +1572,8 @@ impl Shell {
                     .font_family(t::FONT_MONO)
                     .text_size(px(t::TEXT_LABEL))
                     .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
+                    .when_some(self.nav_rows.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
+                    .focus_visible(focus_ring)
                     .role(Role::Row)
                     .aria_label(r.label())
                     .cursor_pointer()

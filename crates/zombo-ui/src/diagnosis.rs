@@ -178,6 +178,7 @@ pub enum PropEvent {
     Answer(Box<VantageAnswer>),
     /// This machine's own resolver. Shown with the others, never part of the verdict.
     Local(Box<VantageAnswer>),
+    Cancelled,
     Finished(Box<Result<PropagationResult, String>>),
     TimedOut,
 }
@@ -194,6 +195,7 @@ pub struct Propagation {
     local: Option<VantageAnswer>,
     local_differs: Vec<String>,
     truth_known: bool,
+    pub cancelled: bool,
 }
 
 /// Every record any Vantage returned, as "TYPE: value" lines, for comparing runs.
@@ -220,6 +222,7 @@ impl Propagation {
             local: None,
             local_differs: vec![],
             truth_known: false,
+            cancelled: false,
         }
     }
 
@@ -242,6 +245,12 @@ impl Propagation {
             PropEvent::TimedOut => {
                 if self.state == CheckState::Running {
                     self.state = CheckState::TimedOut;
+                }
+            }
+            PropEvent::Cancelled => {
+                if self.state == CheckState::Running {
+                    let history = std::mem::take(&mut self.history);
+                    *self = Propagation { history, cancelled: true, ..Propagation::new() };
                 }
             }
             PropEvent::Finished(result) => {
@@ -345,6 +354,34 @@ impl Tab {
     /// error here, so the Check never runs on a port the rep did not ask for.
     pub fn options(&self) -> Result<crate::checks::Options, &'static str> {
         Ok(crate::checks::Options { smtp: self.smtp_request(), tls_port: self.tls_port.to_run()? })
+    }
+
+    pub fn cancelled(&self, section: Section) -> bool {
+        match section {
+            Section::Dns => self.propagation.cancelled,
+            Section::Summary => false,
+            s => self.runs.get(&s).is_some_and(|r| r.cancelled),
+        }
+    }
+
+    /// Stop what is running in `section`; on the Summary, everything that is running. Returns the
+    /// sections stopped, so the caller can abort their tasks.
+    pub fn cancel(&mut self, section: Section) -> Vec<Section> {
+        let targets: Vec<Section> = match section {
+            Section::Summary => Section::ALL.iter().copied().filter(|&s| s != Section::Summary).collect(),
+            s => vec![s],
+        };
+        let running: Vec<Section> = targets.into_iter().filter(|&s| self.state(s) == CheckState::Running).collect();
+        for &s in &running {
+            match s {
+                Section::Dns => {
+                    let target = self.target.clone();
+                    self.propagation.apply(&target, PropEvent::Cancelled);
+                }
+                s => self.run_mut(s).apply(crate::outcome::CheckEvent::Cancelled),
+            }
+        }
+        running
     }
 
     pub fn run_mut(&mut self, section: Section) -> &mut Run {
@@ -470,6 +507,10 @@ impl Tab {
         let kind = self.target.kind;
         match section {
             Section::Summary => "No Check has run for this target yet.".into(),
+            s if self.cancelled(s) => format!(
+                "Cancelled. You stopped the {} Check before it finished, so nothing was checked. Press Ctrl+R to run it again.",
+                s.label()
+            ),
             s if s.is_on_demand() => format!(
                 "The {} Check runs only when you ask for it, because it connects to the target's servers or sends many queries. Nothing was checked yet. Press Run, or Ctrl+R in this section.",
                 s.label()
@@ -487,6 +528,7 @@ impl Tab {
 
 #[cfg(test)]
 mod tests {
+    use crate::outcome::CheckEvent;
     use std::collections::BTreeMap;
 
     use zombo_core::{
@@ -689,6 +731,48 @@ mod tests {
         assert_eq!(last.status, RowStatus::NoAnswer);
         assert!(last.answer.contains("resolv.conf"), "{}", last.answer);
         assert!(p.findings.iter().all(|f| f.code != crate::this_machine::CODE));
+    }
+
+    #[test]
+    fn cancelling_a_running_check_returns_it_to_not_run_with_the_note_and_leaves_the_others() {
+        let mut t = tab();
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Tls).apply(CheckEvent::Started);
+        t.propagation.apply(&tgt("example.com"), PropEvent::Started);
+        assert_eq!(t.cancel(Section::Web), [Section::Web]);
+        assert_eq!(t.state(Section::Web), CheckState::NotRun);
+        assert!(t.verdict(Section::Web).why.starts_with("Cancelled."), "{}", t.verdict(Section::Web).why);
+        assert_eq!(t.verdict(Section::Web).word, "NOT RUN");
+        assert_eq!(t.state(Section::Tls), CheckState::Running);
+        assert_eq!(t.cancel(Section::Web), Vec::<Section>::new(), "nothing left to stop in Web");
+        assert_eq!(t.cancel(Section::Dns), [Section::Dns]);
+        assert!(t.propagation.cancelled && t.propagation.rows.is_empty());
+        assert!(t.cancelled(Section::Dns));
+    }
+
+    #[test]
+    fn cancelling_on_the_summary_stops_every_running_check() {
+        let mut t = tab();
+        for s in [Section::Web, Section::Registration] {
+            t.run_mut(s).apply(CheckEvent::Started);
+        }
+        t.run_mut(Section::Tls).apply(CheckEvent::Started);
+        t.run_mut(Section::Tls).apply(CheckEvent::Finished(Box::new(Err("no".into()))));
+        let mut stopped = t.cancel(Section::Summary);
+        stopped.sort_by_key(|s| s.index());
+        assert_eq!(stopped, [Section::Web, Section::Registration]);
+        assert!(matches!(t.state(Section::Tls), CheckState::Failed { .. }), "a finished Check is left alone");
+    }
+
+    #[test]
+    fn a_dns_answer_that_arrives_after_the_cancel_is_dropped() {
+        let mut t = tab();
+        let target = tgt("example.com");
+        t.propagation.apply(&target, PropEvent::Started);
+        t.cancel(Section::Dns);
+        t.propagation.apply(&target, PropEvent::Answer(Box::new(answer("Google", false, "v"))));
+        assert!(t.propagation.rows.is_empty());
+        assert_eq!(t.state(Section::Dns), CheckState::NotRun);
     }
 
     #[test]

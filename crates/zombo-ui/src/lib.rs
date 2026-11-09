@@ -8,6 +8,7 @@ pub mod diagnosis;
 pub mod dns_data;
 pub mod evidence_model;
 pub mod finding_owner;
+pub mod focus_nav;
 pub mod keys;
 pub mod layout;
 pub mod motion;
