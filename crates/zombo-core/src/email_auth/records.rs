@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use super::{has_version, tags};
+use super::{has_version, query::Dns, tags};
 
 /// `_smtp._tls.<domain>`: where senders send reports of failed TLS delivery.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -38,6 +38,27 @@ pub struct MtaSts {
 
 fn matching(txts: &[String], version: &str) -> Vec<String> {
     txts.iter().filter(|t| has_version(t, version)).cloned().collect()
+}
+
+pub(crate) async fn tls_rpt_audit(dns: Dns, domain: &str) -> TlsRpt {
+    match dns.txt(&format!("_smtp._tls.{domain}")).await {
+        Ok(t) => parse_tls_rpt(&t.records),
+        Err(e) => TlsRpt { lookup_error: Some(e), ..Default::default() },
+    }
+}
+
+pub(crate) async fn bimi_audit(dns: Dns, domain: &str) -> Bimi {
+    match dns.txt(&format!("default._bimi.{domain}")).await {
+        Ok(t) => parse_bimi(&t.records),
+        Err(e) => Bimi { lookup_error: Some(e), ..Default::default() },
+    }
+}
+
+pub(crate) async fn mta_sts_audit(dns: Dns, domain: &str) -> MtaSts {
+    match dns.txt(&format!("_mta-sts.{domain}")).await {
+        Ok(t) => parse_mta_sts(&t.records),
+        Err(e) => MtaSts { lookup_error: Some(e), ..Default::default() },
+    }
 }
 
 /// The value of a tag, only when exactly one record is published: with two,
