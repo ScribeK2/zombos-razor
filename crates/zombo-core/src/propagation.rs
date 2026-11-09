@@ -95,6 +95,22 @@ impl FromStr for Scope {
     }
 }
 
+/// The SOA fields that matter for telling a lagging nameserver from a broken one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Soa {
+    pub serial: u32,
+    /// Seconds between a secondary's checks for a newer zone.
+    pub refresh: u32,
+}
+
+impl Soa {
+    /// From zone-file form: `mname rname serial refresh retry expire minimum`.
+    fn parse(text: &str) -> Option<Self> {
+        let mut f = text.split_whitespace().skip(2);
+        Some(Soa { serial: f.next()?.parse().ok()?, refresh: f.next()?.parse().ok()? })
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VantageAnswer {
     #[serde(flatten)]
@@ -108,7 +124,9 @@ pub struct VantageAnswer {
     pub ttl: BTreeMap<String, u32>,
     /// Types this resolver couldn't answer.
     pub failed: Vec<String>,
-    /// Set when the resolver answered nothing at all.
+    /// The zone's SOA, asked of nameservers only.
+    pub soa: Option<Soa>,
+    /// Set when the Vantage answered nothing at all.
     pub error: Option<String>,
 }
 
@@ -157,7 +175,11 @@ pub async fn propagation_with(
     let all: Vec<Vantage> = resolvers.iter().chain(nameservers).cloned().collect();
     let mut set = JoinSet::new();
     for (i, v) in all.iter().cloned().enumerate() {
-        let (target, types) = (target.to_string(), types.clone());
+        let target = target.to_string();
+        let mut types = types.clone();
+        if v.kind == VantageKind::Authoritative {
+            types.push(RecordType::SOA); // to tell a lagging nameserver from a broken one
+        }
         set.spawn(async move { (i, ask(v, &target, &types, limit).await) });
     }
     let mut slots: Vec<Option<VantageAnswer>> = vec![None; all.len()];
@@ -241,6 +263,7 @@ async fn ask(v: Vantage, target: &str, types: &[RecordType], limit: Duration) ->
         answers: BTreeMap::new(),
         ttl: BTreeMap::new(),
         failed: vec![],
+        soa: None,
         error: None,
     };
     // A nameserver is asked directly, so it must not be asked to recurse.
@@ -251,6 +274,7 @@ async fn ask(v: Vantage, target: &str, types: &[RecordType], limit: Duration) ->
         Ok(l) => {
             a.rcode = Some(l.rcode);
             a.authoritative = Some(l.authoritative);
+            a.soa = l.records.get("SOA").and_then(|v| v.first()).and_then(|v| Soa::parse(&v.text));
             for t in types {
                 let t = t.to_string();
                 if l.errors.contains_key(&t) {
@@ -353,6 +377,42 @@ pub async fn discover_nameservers(
 /// it only fails when there is no route.
 fn ipv6_available() -> bool {
     std::net::UdpSocket::bind("[::]:0").and_then(|s| s.connect("[2001:4860:4860::8888]:53")).is_ok()
+}
+
+/// The nameservers give different answers. If their SOA serials differ, one is
+/// simply behind and will catch up; if the serials are the same, nothing will
+/// make it catch up until someone bumps the serial.
+fn ns_disagree_finding(r: &PropagationResult) -> Finding {
+    let types = r.ns_disagree.join(", ");
+    let live: Vec<&VantageAnswer> = r.nameservers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).collect();
+    let with_soa: Vec<(&VantageAnswer, Soa)> = live.iter().filter_map(|n| n.soa.map(|s| (*n, s))).collect();
+    let low = with_soa.iter().min_by_key(|(_, s)| s.serial);
+    let high = with_soa.iter().max_by_key(|(_, s)| s.serial);
+    if let (Some((lag, ls)), Some((lead, hs))) = (low, high)
+        && ls.serial != hs.serial
+    {
+        return Finding {
+            code: "dns_authoritative_behind",
+            severity: Severity::Warning,
+            title: "A nameserver is behind",
+            message: format!(
+                "{} is on SOA serial {} while {} is on {}, so they hold different versions of the zone and visitors get different {types} depending on which one they reach. A nameserver that copies the zone catches up on its next refresh, which this zone sets to every {}.",
+                lag.vantage.name, ls.serial, lead.vantage.name, hs.serial, duration(ls.refresh),
+            ),
+            recommendation: Some("Usually just wait. If it stays behind longer than the refresh interval, check that the zone transfer from the primary works."),
+        };
+    }
+    let same = match low {
+        Some((_, s)) => format!(" They report the same serial ({}), so a nameserver that copies the zone will not pick the change up: the serial was not increased.", s.serial),
+        None => String::new(),
+    };
+    Finding {
+        code: "dns_authoritative_mismatch",
+        severity: Severity::Critical,
+        title: "Nameservers are out of sync",
+        message: format!("The authoritative nameservers give different answers for {types}, so visitors get different records depending on which one they reach.{same}"),
+        recommendation: Some("Make the zone identical on every listed nameserver. If they copy the zone from one primary, increase its SOA serial (re-saving the zone in the DNS panel usually does it); otherwise check that each nameserver was updated."),
+    }
 }
 
 fn duration(secs: u32) -> String {
@@ -492,16 +552,7 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
         return out;
     }
     if !r.ns_disagree.is_empty() {
-        out.push(Finding {
-            code: "dns_authoritative_mismatch",
-            severity: Severity::Critical,
-            title: "Nameservers are out of sync",
-            message: format!(
-                "The authoritative nameservers give different answers for {}, so visitors get different records depending on which one they reach.",
-                r.ns_disagree.join(", ")
-            ),
-            recommendation: Some("Make the zone identical on every listed nameserver; check for a failed zone transfer or a nameserver that was not updated."),
-        });
+        out.push(ns_disagree_finding(r));
         return out;
     }
     if r.stale.is_empty() {

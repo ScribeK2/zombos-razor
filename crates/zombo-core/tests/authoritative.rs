@@ -51,15 +51,43 @@ async fn everything_matching_the_nameservers_says_so() {
     assert!(code(&fs, "dns_authoritative_consistent").is_some(), "{fs:?}");
 }
 
+/// example.zone has serial 2024, moved_mx.zone 2025.
 #[tokio::test]
-async fn nameservers_that_disagree_are_a_zone_problem() {
+async fn a_nameserver_on_an_older_serial_is_behind_not_broken() {
     let (ns1, ns2) = (FakeDns::start(&zone("moved_mx")).await.authoritative(), FakeDns::start(&zone("example")).await.authoritative());
     let a = FakeDns::start(&zone("example")).await;
     let (res, fs) = run(&[r("A", &a)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
     assert_eq!(res.ns_disagree, ["MX"]);
     assert!(res.stale.is_empty(), "no truth to compare against: {:?}", res.stale);
+    let f = code(&fs, "dns_authoritative_behind").expect("behind finding");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(f.message.contains("ns2") && f.message.contains("2024") && f.message.contains("2025"), "{}", f.message);
+    assert!(f.message.contains("2 hours"), "the SOA refresh interval (7200 s): {}", f.message);
+    assert!(code(&fs, "dns_authoritative_mismatch").is_none(), "one alarm, not two");
+}
+
+#[tokio::test]
+async fn the_same_serial_with_different_data_means_the_serial_was_not_bumped() {
+    let same_serial = zone("moved_mx").replace("2025 7200", "2024 7200");
+    let (ns1, ns2) = (FakeDns::start(&same_serial).await.authoritative(), FakeDns::start(&zone("example")).await.authoritative());
+    let a = FakeDns::start(&zone("example")).await;
+    let (res, fs) = run(&[r("A", &a)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
+    assert_eq!(res.ns_disagree, ["MX"]);
     let f = code(&fs, "dns_authoritative_mismatch").expect("mismatch finding");
     assert_eq!(f.severity, Severity::Critical);
+    assert!(f.message.contains("same serial") && f.message.contains("2024"), "{}", f.message);
+    assert!(code(&fs, "dns_authoritative_behind").is_none());
+}
+
+#[tokio::test]
+async fn nameservers_that_agree_on_data_are_fine_whatever_their_serials() {
+    // Only the SOA differs: the data visitors get is the same, so nothing to report.
+    let newer = zone("example").replace("2024 7200", "2030 7200");
+    let (ns1, ns2) = (FakeDns::start(&newer).await.authoritative(), FakeDns::start(&zone("example")).await.authoritative());
+    let a = FakeDns::start(&zone("example")).await;
+    let (res, fs) = run(&[r("A", &a)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
+    assert!(res.ns_disagree.is_empty(), "{:?}", res.ns_disagree);
+    assert!(code(&fs, "dns_authoritative_behind").is_none() && code(&fs, "dns_authoritative_mismatch").is_none());
 }
 
 #[tokio::test]
