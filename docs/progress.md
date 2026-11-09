@@ -6,17 +6,13 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 ## Active now
 
-| Work | Owner | Notes |
-|---|---|---|
-| TLS certificate and chain level 1, TCP port test (`tls.rs`, `ports.rs`, `zombo tls`, `zombo ports`) | worker E | Go: `ssl.go`, `hosting.go`. Builds a reusable "inspect over a stream" seam for SMTP STARTTLS. Still running |
-
-Waiting on worker E: SMTP banner and STARTTLS. Rules for workers: `docs/agents/worker-rules.md`.
+Nothing running. Next batch below under "Next batch".
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
 ## Done
 
-- [x] Workers A, B, C, D, F, G reviewed and merged into `rewrite` (E still running). 386 tests pass; clippy, `cargo deny` and `cargo audit` clean. Registration, email auth, DNSSEC, evidence, blacklist and rDNS, web inspection are in. 236 tests pass; clippy, `cargo deny` and `cargo audit` clean. Email auth (`email_auth/`, `zombo email`): SPF walker with the 10-lookup count, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record. MX comes from the lookup inside `email_auth`
+- [x] Workers A to G (all six Check batches) reviewed and merged into `rewrite`. 419 tests pass; clippy, `cargo deny` and `cargo audit` clean. Registration, email auth, DNSSEC, evidence, blacklist and rDNS, web inspection are in. 236 tests pass; clippy, `cargo deny` and `cargo audit` clean. Email auth (`email_auth/`, `zombo email`): SPF walker with the 10-lookup count, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record. MX comes from the lookup inside `email_auth`
 
 - [x] Planning session, ADR-0006 and ADR-0007, `CONTEXT.md` rewritten
 - [x] GPUI spike passed (Ubuntu 24.04.5 laptop with Orca, 24.04 and 26.04 containers, AMD, Intel)
@@ -53,7 +49,7 @@ Go sources to port: `email_auth.go`, `blacklist.go`, `headers.go`, `maillog.go`.
 - [ ] SMTP banner and STARTTLS test
 - [x] Blacklist lookup (`blacklist.rs`, `zombo blacklist`): Go zones, system resolver (not public ones), 127.255.255.x refusal handling, bounded
 - [x] Reverse DNS and forward-confirmed reverse DNS (`rdns.rs`, `zombo rdns`)
-- [ ] SMTP banner and STARTTLS test (no Go source; new)
+- [ ] SMTP banner and STARTTLS test (new; unblocked now that `tls::inspect_stream` exists)
 - [x] Header analysis (Evidence) (`evidence/headers.rs`, `zombo evidence headers`)
 - [x] Mail-log analysis (Evidence) (`evidence/maillog.rs`, `zombo evidence maillog`)
 
@@ -63,9 +59,10 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 - [x] HTTP redirect chain, headers, status (`web/`, `zombo web`)
 - [x] Origin versus CDN comparison (`--origin IP`; new, the Go `origin.go` was a UI guard)
-- [ ] Certificate and chain, level 1 (trust, expiry, SAN match, OCSP stapling, HSTS, CAA)
+- [x] Certificate and chain (`tls.rs`, `zombo tls`): trust states, expiry, SAN match, incomplete chain, weak key, SHA-1, not-yet-valid; rustls + ring, a permissive verifier with its own trust judgement. Reusable `inspect_stream` seam for STARTTLS
+- [ ] TLS extras not in the Go code and not yet built: CAA check, OCSP stapling, HSTS preload view (HSTS header is already reported by `web`). TLS 1.0/1.1-only servers cannot be detected (rustls speaks 1.2 and 1.3 only): report 'handshake refused' with a hint
 - [x] CDN and ASN detection (headers, CNAME chain, Team Cymru DNS)
-- [ ] TCP port connect test
+- [x] TCP port connect test (`ports.rs`, `zombo ports`): Go service table, quick and full sweeps, banners, bounded
 
 ## To do: the app
 
@@ -135,6 +132,13 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 ## Network egress (what the app contacts), to document in `docs/network-egress.md`
 
 - [ ] Write the file: the target's own servers; the resolvers (public list, system resolver, nameservers found by discovery); RDAP bootstrap bases and registry WHOIS servers (port 43); Team Cymru DNS (`*.asn.cymru.com`); the DNSBL zones in the blacklist table; the release endpoint for updates. Nothing else, no telemetry
+
+## Next batch (not started)
+
+- [ ] SMTP banner and STARTTLS (worker): connect to MX hosts on port 25 (and 587), read the banner, EHLO, STARTTLS, then `tls::inspect_stream`. Many networks block outbound 25: report 'filtered' honestly. Needs the VPS to verify
+- [ ] TLS extras: CAA, OCSP stapling (worker, small)
+- [ ] `docs/network-egress.md` (lead, small)
+- [ ] Clean up merged worker worktrees and branches (lead)
 
 ## Still unverified
 

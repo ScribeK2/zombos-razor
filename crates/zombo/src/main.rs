@@ -10,6 +10,7 @@ use zombo_core::{
     registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
+use zombo_core::{ports::{FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for}, tls::{Trust, check_tls, tls_findings}};
 use zombo_core::evidence::{headers, maillog};
 use zombo_core::web::{WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
@@ -19,7 +20,7 @@ use zombo_core::{
 };
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     v.parse()
@@ -51,6 +52,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("blacklist") => blacklist(it).await,
         Some("rdns") => rdns(it).await,
         Some("evidence") => evidence(it),
+        Some("tls") => tls(it).await,
+        Some("ports") => ports(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -701,4 +704,118 @@ fn print_maillog(a: &maillog::MailLogAnalysis) {
     }
     println!("{} message(s), {} line(s) that are not Postfix or Dovecot", a.messages.len(), a.unparsed);
     println!();
+}
+
+const TLS_USAGE: &str = "usage: zombo tls <host[:port]> [--timeout-ms N] [--json]";
+
+const PORTS_USAGE: &str = "usage: zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]";
+
+fn split_port(raw: &str) -> (&str, Option<u16>) {
+    match raw.rsplit_once(':') {
+        Some((h, p)) if !h.contains(':') || h.ends_with(']') => match p.parse() {
+            Ok(port) => (h, Some(port)),
+            Err(_) => (raw, None),
+        },
+        _ => (raw, None),
+    }
+}
+
+async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout) = (None, false, Duration::from_secs(10));
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                timeout = Duration::from_millis(it.next().ok_or("--timeout-ms needs a value")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{TLS_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(TLS_USAGE.into()),
+        }
+    }
+    let raw = target.ok_or(TLS_USAGE)?;
+    let (host, port) = split_port(&raw);
+    let t = parse_target(host)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname | Kind::Ip) {
+        return Err(format!("tls needs a domain, host name or IP, not {:?}", t.kind));
+    }
+    let port = port.unwrap_or(443);
+    let r = check_tls(&t.value, port, timeout).await.map_err(|e| e.to_string())?;
+    let findings = tls_findings(&t.value, port, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{}:{port}  {}  {}", t.value, r.version, r.cipher);
+    let trust = match r.trust {
+        Trust::Ok => "chains to a trusted root",
+        Trust::SelfSigned => "self-signed",
+        Trust::MissingIntermediate => "intermediate missing",
+        Trust::UnknownAuthority => "unknown authority",
+        Trust::Invalid => "does not verify",
+    };
+    println!("  trust: {trust}; name {}; verified: {}", if r.hostname_match { "matches" } else { "does NOT match" }, if r.verified { "yes" } else { "NO" });
+    for (i, c) in r.chain.iter().enumerate() {
+        println!("  [{i}] {} (issuer {})", c.subject, c.issuer);
+        println!("      {}{}, signature {}, valid {} to {}", c.key, if c.self_signed { " (self-signed)" } else { "" }, c.signature, c.not_before.date(), c.not_after.date());
+        if !c.sans.is_empty() {
+            println!("      names: {}", c.sans.join(", "));
+        }
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut full, mut dial) = (None, false, false, Duration::from_secs(2));
+    let mut chosen: Vec<ServicePort> = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--full" => full = true,
+            "--timeout-ms" => dial = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--port" => {
+                let p: u16 = value("--port")?.parse().map_err(|_| "--port needs a number from 1 to 65535")?;
+                if p == 0 || chosen.len() >= 64 {
+                    return Err("--port needs a number from 1 to 65535, at most 64 times".into());
+                }
+                chosen.push(service_for(p));
+            }
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{PORTS_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(PORTS_USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(PORTS_USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname | Kind::Ip) {
+        return Err(format!("ports needs a domain, host name or IP, not {:?}", t.kind));
+    }
+    let table: &[ServicePort] = if !chosen.is_empty() { &chosen } else if full { FULL } else { QUICK };
+    let addresses = resolve_target(&t.value, dial.max(Duration::from_secs(4))).await.map_err(|e| e.to_string())?;
+    let r = probe(&addresses, table, Timing { dial, ..Timing::default() }).await;
+    let findings = ports_findings(&t.value, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    println!("{} ({:?}): {} addresses, {} ports", t.value, t.kind, r.addresses.len(), table.len());
+    if t.kind != Kind::Ip && !has_ipv6().await {
+        println!("  (this machine has no IPv6 route, so IPv6 addresses are not tested)");
+    }
+    for p in &r.ports {
+        let state = match p.state {
+            PortState::Open => "open",
+            PortState::Closed => "closed (refused)",
+            PortState::Filtered => "filtered (no answer)",
+            PortState::NoRoute => "no route from this network",
+        };
+        println!("  {:<40} {:>5}  {:<22} {state}{}", p.address.to_string(), p.port, p.service, p.banner.as_deref().map(|b| format!("  {b}")).unwrap_or_default());
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
 }
