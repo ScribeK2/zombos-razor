@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Zombo's Razor
+GenericName=DNS and mail diagnostics
+Comment=Diagnose DNS, email authentication, TLS and domain registration
+Exec=zombo-razor
+Icon=io.github.scribek2.zombos-razor
+Categories=Network;Utility;
+Keywords=dns;dkim;spf;dmarc;tls;whois;diagnostics;
+StartupWMClass=io.github.scribek2.zombos-razor
+Terminal=false

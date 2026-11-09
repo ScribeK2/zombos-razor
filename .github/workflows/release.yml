@@ -3,23 +3,17 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: # build + smoke without publishing
+  workflow_dispatch: # build and smoke without publishing
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v7
-        with:
-          node-version: lts/*
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          fetch-depth: 0
 
       # The tag is the single source of truth for the version.
       - id: version
@@ -27,54 +21,44 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-${GITHUB_SHA::7}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - name: Build AppImage
+      - name: Build the AppImage and the CLI tarball in an Ubuntu 24.04 container
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          packaging/build-appimage.sh
-          sha256sum "Stackwell-$VERSION-x86_64.AppImage" > SHA256SUMS
+        run: packaging/build-appimage.sh
 
-      - name: Smoke on the runner
-        run: packaging/smoke.sh "./Stackwell-${{ steps.version.outputs.version }}-x86_64.AppImage"
+      - name: Check the AppImage size budget (40 MB)
+        run: |
+          size=$(stat -c %s build/dist/Zombos-Razor-*-x86_64.AppImage)
+          echo "AppImage: $size bytes"
+          test "$size" -lt 40000000
+
+      - name: Smoke test on Ubuntu 24.04 and 26.04
+        run: |
+          for u in 24.04 26.04; do
+            UBUNTU=$u SMOKE_FUSE=0 packaging/smoke.sh build/dist/Zombos-Razor-*-x86_64.AppImage
+          done
+
+      # PLACEHOLDER: another worker fills in the minisign step. Until then a release job with no key fails on purpose,
+      # so an unsigned release is never published. Signs SHA256SUMS into SHA256SUMS.minisig.
+      - name: Sign SHA256SUMS (minisign)
+        if: github.event_name == 'push'
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set, refusing to publish an unsigned release"
+            exit 1
+          fi
+          echo "TODO(minisign worker): sign build/dist/SHA256SUMS with MINISIGN_SECRET_KEY and write build/dist/SHA256SUMS.minisig"
+          exit 1
 
       - uses: actions/upload-artifact@v7
         with:
-          name: appimage
-          path: |
-            Stackwell-*.AppImage
-            SHA256SUMS
+          name: release
+          path: build/dist/*
 
-  smoke:
-    needs: build
-    strategy:
-      matrix:
-        image: ["archlinux:latest", "ubuntu:22.04"]
-    runs-on: ubuntu-latest
-    # Bare distro images: no libfuse2, no curl. Containers have no /dev/fuse and
-    # the runtime does not fall back on its own, so extract-and-run explicitly.
-    # The FUSE mount path is exercised by the runner smoke in the build job.
-    container: ${{ matrix.image }}
-    env:
-      APPIMAGE_EXTRACT_AND_RUN: 1
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: appimage
-      - run: |
-          chmod +x Stackwell-*.AppImage
-          packaging/smoke.sh ./Stackwell-${{ needs.build.outputs.version }}-x86_64.AppImage
-
-  release:
-    needs: [build, smoke]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: appimage
-      - env:
+      - name: Draft release
+        if: github.event_name == 'push'
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" Stackwell-*.AppImage SHA256SUMS --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" build/dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes

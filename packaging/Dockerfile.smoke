@@ -1,0 +1,8 @@
+ARG UBUNTU=24.04
+FROM ubuntu:${UBUNTU}
+ENV DEBIAN_FRONTEND=noninteractive
+# Mirrors a stock Ubuntu desktop: fuse3 and no libfuse2, and no libxkbcommon (the AppImage bundles it).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fuse3 libxcb1 libxcb-xkb1 libwayland-client0 libfontconfig1 libfreetype6 libvulkan1 mesa-vulkan-drivers libgl1 libegl1 libx11-6 \
+    xvfb xauth x11-utils xkb-data ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
