@@ -273,7 +273,9 @@ mod tests {
         let t0 = Instant::now();
         let mut fb = Feedback::new();
         fb.set("a", Level::Hover, t0);
-        fb.set("a", Level::Hover, t0 + MS(70));
+        fb.set("a", Level::Hover, t0 + MS(40));
+        let mid = fb.color(&"a", t0 + MS(40), ON, 0, 0x100, 0);
+        assert!(mid > 0 && mid < 0x100, "{mid:#x}");
         assert_eq!(fb.color(&"a", t0 + MS(80), ON, 0, 0x100, 0), 0x100);
     }
 
