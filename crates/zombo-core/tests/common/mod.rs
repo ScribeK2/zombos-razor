@@ -33,6 +33,7 @@ struct State {
     ra: Option<bool>,
     validating: bool,
     bogus: bool,
+    servfail: bool,
 }
 
 pub struct FakeDns {
@@ -225,6 +226,12 @@ impl FakeDns {
         self
     }
 
+    /// Answer SERVFAIL to everything, CD or not: a plain DNS failure, not a DNSSEC one.
+    pub fn servfail(self) -> Self {
+        self.state.lock().unwrap().servfail = true;
+        self
+    }
+
     /// Answer REFUSED to queries of this type.
     pub fn refuse(self, t: RecordType) -> Self {
         self.state.lock().unwrap().refuse.push(t);
@@ -251,7 +258,7 @@ fn answer(state: &Mutex<State>, query: &[u8], udp: bool) -> Option<Vec<u8>> {
     m.metadata.authoritative = st.authoritative;
     m.add_query(q.clone());
     let dnssec_ok = req.edns.as_ref().is_some_and(|e| e.flags().dnssec_ok);
-    if st.bogus && !req.metadata.checking_disabled {
+    if st.servfail || (st.bogus && !req.metadata.checking_disabled) {
         m.metadata.response_code = ResponseCode::ServFail;
         return m.to_vec().ok();
     }

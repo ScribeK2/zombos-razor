@@ -9,7 +9,8 @@ use hickory_proto::{
 };
 use zombo_core::{
     dns::{QueryFlags, exchange_with},
-    dnssec::{Algorithm, DigestType, Dnskey, Ds, KeyTag, Rrsig, SigWindow},
+    dnssec::{Algorithm, DigestType, DnssecError, DnssecResult, Dnskey, Ds, KeyTag, ResolverStatus, Rrsig, SigWindow, check_dnssec, dnssec_with, validating_resolvers},
+    propagation::Vantage,
 };
 
 const T: Duration = Duration::from_millis(500);
@@ -95,6 +96,134 @@ fn the_digest_types_compute_the_published_test_vectors() {
     assert_eq!(hex(DigestType::Sha256), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     assert_eq!(hex(DigestType::Sha384), "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7");
     assert!(DigestType::from_number(3).digest(b"abc").is_none(), "GOST is not computed");
+}
+
+// The Check, run against fake servers
+
+const APEX: &str = "cloudflare.com";
+const WEB: &str = "cloudflare.com. 300 IN A 192.0.2.1\n";
+/// Inside the validity period of the real SOA signature in the fixture.
+fn now() -> SystemTime {
+    at(CF_START + 3600)
+}
+
+/// Run the Check: `parent` is what the recursive resolver knows (its DS), each
+/// of `nameservers` is one authoritative server's zone, and `resolvers` are the
+/// validating-resolver Vantages.
+async fn run_at(parent: &str, nameservers: &[&str], resolvers: Vec<(&str, FakeDns)>, now: SystemTime) -> DnssecResult {
+    let rec = FakeDns::start(&format!("{APEX}. 300 IN NS ns.{APEX}.\n{parent}")).await;
+    let ns: Vec<(String, FakeDns)> = fake_nameservers(nameservers).await;
+    let ns_v: Vec<Vantage> = ns.iter().map(|(n, s)| Vantage::nameserver(n, s.addr)).collect();
+    let res_v: Vec<Vantage> = resolvers.iter().map(|(n, s)| Vantage::resolver(n, "Test", s.addr)).collect();
+    dnssec_with(&[rec.addr], &res_v, &ns_v, APEX, now, T).await.unwrap()
+}
+
+async fn fake_nameservers(zones: &[&str]) -> Vec<(String, FakeDns)> {
+    let mut out = vec![];
+    for (i, z) in zones.iter().enumerate() {
+        out.push((format!("ns{}.{APEX}", i + 1), FakeDns::start(z).await.authoritative()));
+    }
+    out
+}
+
+async fn verdicts(resolvers: Vec<(&str, FakeDns)>) -> Vec<(String, ResolverStatus)> {
+    let z = dnssec_zone(APEX);
+    run_at(&z, &[&z], resolvers, now()).await.resolvers.into_iter().map(|v| (v.resolver, v.status)).collect()
+}
+
+#[tokio::test]
+async fn a_validating_resolver_that_sets_ad_says_secure() {
+    let v = verdicts(vec![("Good", FakeDns::start(WEB).await.validating())]).await;
+    assert_eq!(v, [("Good".to_string(), ResolverStatus::Secure)]);
+}
+
+#[tokio::test]
+async fn a_resolver_that_does_not_set_ad_says_insecure() {
+    let v = verdicts(vec![("Plain", FakeDns::start(WEB).await)]).await;
+    assert_eq!(v[0].1, ResolverStatus::Insecure);
+}
+
+#[tokio::test]
+async fn servfail_that_goes_away_with_cd_is_bogus() {
+    let v = verdicts(vec![("Strict", FakeDns::start(WEB).await.bogus())]).await;
+    assert_eq!(v[0].1, ResolverStatus::Bogus);
+}
+
+#[tokio::test]
+async fn servfail_with_cd_too_is_a_plain_dns_failure_not_a_dnssec_one() {
+    let v = verdicts(vec![("Broken", FakeDns::start(WEB).await.servfail())]).await;
+    assert_eq!(v[0].1, ResolverStatus::Failed);
+}
+
+#[tokio::test]
+async fn a_resolver_that_does_not_answer_says_no_answer_and_order_is_kept() {
+    let v = verdicts(vec![
+        ("A", FakeDns::silent().await),
+        ("B", FakeDns::start(WEB).await.validating()),
+        ("C", FakeDns::start(WEB).await.bogus()),
+    ])
+    .await;
+    assert_eq!(v.iter().map(|(n, s)| (n.as_str(), *s)).collect::<Vec<_>>(), [("A", ResolverStatus::NoAnswer), ("B", ResolverStatus::Secure), ("C", ResolverStatus::Bogus)]);
+}
+
+#[tokio::test]
+async fn the_real_ds_matches_the_keys_the_real_nameservers_serve() {
+    let z = dnssec_zone(APEX);
+    let r = run_at(&z, &[&z, &z], vec![], now()).await;
+    assert_eq!(r.ds.len(), 1);
+    assert!(r.ds[0].matched, "{:?}", r.ds);
+    assert_eq!((r.ds[0].ds.key_tag, r.ds[0].ds.digest_type), (KeyTag(2371), DigestType::Sha256));
+    for n in &r.nameservers {
+        assert!(n.error.is_none() && n.authoritative, "{n:?}");
+        assert_eq!(n.dnskeys.iter().map(|k| k.key_tag).collect::<Vec<_>>(), [KeyTag(34505), KeyTag(2371)]);
+        assert!(matches!(n.soa_rrsig.as_ref().unwrap().window(now()), SigWindow::Valid { .. }));
+    }
+}
+
+#[tokio::test]
+async fn a_ds_with_no_matching_key_is_not_matched() {
+    let z = dnssec_zone(APEX);
+    let parent = z.replace("2371 13 2 32996839", "2371 13 2 32996838");
+    let r = run_at(&parent, &[&z], vec![], now()).await;
+    assert!(!r.ds[0].matched);
+}
+
+#[tokio::test]
+async fn a_zone_that_serves_no_dnskey_matches_no_ds() {
+    let z = dnssec_zone(APEX);
+    let unsigned: String = z.lines().filter(|l| !l.contains(" DNSKEY ") && !l.contains(" RRSIG ")).collect::<Vec<_>>().join("\n");
+    let r = run_at(&z, &[&unsigned], vec![], now()).await;
+    assert!(r.nameservers[0].dnskeys.is_empty() && r.nameservers[0].soa_rrsig.is_none());
+    assert!(!r.ds[0].matched);
+}
+
+#[tokio::test]
+async fn nothing_answering_at_all_is_an_error() {
+    let z = dnssec_zone(APEX);
+    let rec = FakeDns::start(&z).await;
+    let down = FakeDns::silent().await;
+    let ns = [Vantage::nameserver("ns", down.addr)];
+    let res = [Vantage::resolver("R", "Test", down.addr)];
+    let err = dnssec_with(&[rec.addr], &res, &ns, APEX, now(), Duration::from_millis(200)).await.unwrap_err();
+    assert!(matches!(err, DnssecError::NoneAnswered), "{err}");
+}
+
+#[tokio::test]
+async fn finds_the_zone_and_its_nameservers_even_through_a_resolver_that_rejects_the_zone() {
+    // A validating resolver SERVFAILs on the NS lookup of a broken zone unless CD is set.
+    let z = dnssec_zone(APEX);
+    let ns = FakeDns::start(&z).await.authoritative();
+    let rec = FakeDns::start(&format!("{APEX}. 300 IN NS ns1.{APEX}.\nns1.{APEX}. 300 IN A 127.0.0.1\n{z}")).await.bogus();
+    let r = check_dnssec(&[rec.addr], &[], &format!("www.{APEX}"), ns.addr.port(), now(), T).await.unwrap();
+    assert_eq!(r.apex, APEX);
+    assert_eq!(r.nameservers.len(), 1);
+    assert!(r.ds[0].matched);
+}
+
+#[test]
+fn the_validating_resolvers_are_the_four_verified_ones() {
+    let addrs: Vec<String> = validating_resolvers().iter().map(|v| v.address.to_string()).collect();
+    assert_eq!(addrs, ["8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53", "208.67.222.222:53"]);
 }
 
 // RRSIG validity windows

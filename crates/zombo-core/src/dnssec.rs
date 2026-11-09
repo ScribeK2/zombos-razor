@@ -10,13 +10,23 @@
 
 use std::{
     fmt,
-    time::{SystemTime, UNIX_EPOCH},
+    net::{IpAddr, SocketAddr},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hickory_proto::rr::{Name, RecordType};
+use hickory_proto::{
+    op::{Message, ResponseCode},
+    rr::{Name, RData, RecordType},
+};
 use serde::{Serialize, Serializer};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384};
+use tokio::task::JoinSet;
+
+use crate::{
+    dns::{QueryFlags, exchange_with},
+    propagation::{DiscoverError, Vantage, ipv6_available},
+};
 
 /// RFC 4034 Appendix B key tag: a checksum that names a DNSKEY, so a DS or an
 /// RRSIG can say which key it refers to. Not unique.
@@ -334,4 +344,275 @@ impl Rrsig {
 /// Seconds since 1970 modulo 2^32, the form RRSIG times use.
 fn epoch_secs(t: SystemTime) -> u32 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as u32)
+}
+
+/// What one validating resolver says about the domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolverStatus {
+    /// Answered, and set the AD flag: the answer was validated.
+    Secure,
+    /// Answered without AD: the domain is not signed, as far as this resolver can tell.
+    Insecure,
+    /// SERVFAIL, but an answer once checking is disabled: DNSSEC itself is broken.
+    Bogus,
+    /// Anything else, such as SERVFAIL even with checking disabled, which is a
+    /// plain DNS failure and says nothing about DNSSEC.
+    Failed,
+    NoAnswer,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolverVerdict {
+    pub resolver: String,
+    pub status: ResolverStatus,
+}
+
+/// Public resolvers that validate DNSSEC. Verified to SERVFAIL on a broken
+/// signature and answer when the CD flag is set; a resolver that does not
+/// validate would make every domain look fine.
+pub fn validating_resolvers() -> Vec<Vantage> {
+    [
+        ("Google", "Global anycast", "8.8.8.8"),
+        ("Cloudflare", "Global anycast", "1.1.1.1"),
+        ("Quad9", "Global anycast", "9.9.9.9"),
+        ("OpenDNS", "United States", "208.67.222.222"),
+    ]
+    .map(|(n, l, ip)| Vantage::resolver(n, l, SocketAddr::new(ip.parse().unwrap(), 53)))
+    .into()
+}
+
+/// A nameserver's own DNSKEY set and SOA signature, asked directly.
+#[derive(Debug, Clone, Serialize)]
+pub struct NameserverView {
+    pub name: String,
+    /// Set when the nameserver gave no usable answer, with why.
+    pub error: Option<String>,
+    pub authoritative: bool,
+    pub recursion_available: bool,
+    pub dnskeys: Vec<Dnskey>,
+    /// The signature over the zone's SOA with the latest expiry (during a key
+    /// rollover there can be two).
+    pub soa_rrsig: Option<Rrsig>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DsStatus {
+    #[serde(flatten)]
+    pub ds: Ds,
+    /// Whether it points at a DNSKEY some nameserver serves.
+    pub matched: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DnssecResult {
+    pub apex: String,
+    /// Seconds since 1970 when the Check ran: what signature times are judged against.
+    pub checked_at: u64,
+    pub resolvers: Vec<ResolverVerdict>,
+    /// The DS records the parent zone publishes for the apex.
+    pub ds: Vec<DsStatus>,
+    pub nameservers: Vec<NameserverView>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DnssecError {
+    #[error(transparent)]
+    Discover(#[from] DiscoverError),
+    #[error("{0} is not a valid DNS name")]
+    BadName(String),
+    #[error("no resolver could say whether {0} has a DS record at its parent")]
+    NoDs(String),
+    #[error("neither the validating resolvers nor the nameservers answered; outbound DNS may be blocked on this network")]
+    NoneAnswered,
+}
+
+/// Run the Check for the zone `target` is in. `ns_port` is 53 outside tests.
+///
+/// The zone and its nameservers are found with CD set: a validating
+/// bootstrap resolver would otherwise SERVFAIL on exactly the broken zones
+/// this Check exists to explain.
+pub async fn check_dnssec(
+    bootstrap: &[SocketAddr],
+    validating: &[Vantage],
+    target: &str,
+    ns_port: u16,
+    now: SystemTime,
+    limit: Duration,
+) -> Result<DnssecResult, DnssecError> {
+    let (apex, ns_names) = find_zone(bootstrap, target, limit).await?;
+    let nameservers = nameserver_vantages(bootstrap, &ns_names, ns_port, limit).await;
+    dnssec_with(bootstrap, validating, &nameservers, &apex, now, limit).await
+}
+
+/// The Check against a known zone and known nameservers.
+pub async fn dnssec_with(
+    bootstrap: &[SocketAddr],
+    validating: &[Vantage],
+    nameservers: &[Vantage],
+    apex: &str,
+    now: SystemTime,
+    limit: Duration,
+) -> Result<DnssecResult, DnssecError> {
+    let apex_name = Name::from_ascii(apex).map_err(|_| DnssecError::BadName(apex.into()))?;
+    let resolver_jobs: Vec<_> = validating.iter().cloned().map(|v| verdict(v, apex_name.clone(), limit)).collect();
+    let ns_jobs: Vec<_> = nameservers.iter().cloned().map(|v| nameserver_view(v, apex_name.clone(), now, limit)).collect();
+    let (resolvers, nameservers, ds_answer) =
+        tokio::join!(in_order(resolver_jobs), in_order(ns_jobs), lookup(bootstrap, &apex_name, RecordType::DS, limit));
+    let ds_answer = ds_answer.filter(|m| m.metadata.response_code == ResponseCode::NoError).ok_or_else(|| DnssecError::NoDs(apex.into()))?;
+
+    if resolvers.iter().all(|r| r.status == ResolverStatus::NoAnswer) && nameservers.iter().all(|n| n.error.is_some()) {
+        return Err(DnssecError::NoneAnswered);
+    }
+    let keys: Vec<&Dnskey> = nameservers.iter().flat_map(|n| &n.dnskeys).collect();
+    let ds = rdata_of(&ds_answer, RecordType::DS)
+        .filter_map(Ds::from_rdata)
+        .map(|ds| DsStatus { matched: keys.iter().any(|k| ds.matches(&apex_name, k)), ds })
+        .collect();
+    Ok(DnssecResult { apex: apex.into(), checked_at: u64::from(epoch_secs(now)), resolvers, ds, nameservers })
+}
+
+/// Run the jobs at the same time and return their results in the order given.
+async fn in_order<T: Send + 'static>(jobs: Vec<impl Future<Output = T> + Send + 'static>) -> Vec<T> {
+    let mut set = JoinSet::new();
+    let mut slots: Vec<Option<T>> = jobs.iter().map(|_| None).collect();
+    for (i, job) in jobs.into_iter().enumerate() {
+        set.spawn(async move { (i, job.await) });
+    }
+    while let Some(Ok((i, out))) = set.join_next().await {
+        slots[i] = Some(out);
+    }
+    slots.into_iter().flatten().collect()
+}
+
+/// The raw RDATA of the answers of one type.
+fn rdata_of(m: &Message, t: RecordType) -> impl Iterator<Item = &[u8]> {
+    m.answers.iter().filter(move |r| r.record_type() == t).filter_map(|r| match &r.data {
+        RData::Unknown { rdata, .. } => Some(rdata.anything.as_slice()),
+        _ => None,
+    })
+}
+
+fn classify(checked: Option<(ResponseCode, bool)>, unchecked: Option<(ResponseCode, bool)>) -> ResolverStatus {
+    use ResponseCode::{NoError, ServFail};
+    match (checked, unchecked) {
+        (None, _) => ResolverStatus::NoAnswer,
+        (Some((NoError, true)), _) => ResolverStatus::Secure,
+        (Some((NoError, false)), _) => ResolverStatus::Insecure,
+        (Some((ServFail, _)), Some((NoError, _))) => ResolverStatus::Bogus,
+        _ => ResolverStatus::Failed,
+    }
+}
+
+/// Ask the apex A record twice, with and without checking: a resolver that fails
+/// only when it checks is rejecting the domain's DNSSEC.
+async fn verdict(v: Vantage, apex: Name, limit: Duration) -> ResolverVerdict {
+    let ask = |checking_disabled| {
+        let flags = QueryFlags { recursion_desired: true, dnssec_ok: true, checking_disabled };
+        exchange_with(v.address, &apex, RecordType::A, flags, limit)
+    };
+    let (checked, unchecked) = tokio::join!(ask(false), ask(true));
+    let summary = |m: Result<Message, _>| m.ok().map(|m| (m.metadata.response_code, m.metadata.authentic_data));
+    ResolverVerdict { status: classify(summary(checked), summary(unchecked)), resolver: v.name }
+}
+
+async fn nameserver_view(v: Vantage, apex: Name, now: SystemTime, limit: Duration) -> NameserverView {
+    let ask = |t| exchange_with(v.address, &apex, t, QueryFlags { recursion_desired: false, dnssec_ok: true, checking_disabled: false }, limit);
+    let (keys, soa) = tokio::join!(ask(RecordType::DNSKEY), ask(RecordType::SOA));
+    let mut view = NameserverView {
+        name: v.name,
+        error: None,
+        authoritative: false,
+        recursion_available: false,
+        dnskeys: vec![],
+        soa_rrsig: None,
+    };
+    match keys {
+        Err(e) => view.error = Some(e.to_string()),
+        Ok(m) if m.metadata.response_code != ResponseCode::NoError => view.error = Some(m.metadata.response_code.to_str().into()),
+        Ok(m) => {
+            view.authoritative = m.metadata.authoritative;
+            view.recursion_available = m.metadata.recursion_available;
+            view.dnskeys = rdata_of(&m, RecordType::DNSKEY).filter_map(Dnskey::from_rdata).collect();
+        }
+    }
+    let until_expiry = |s: &Rrsig| s.expiration.wrapping_sub(epoch_secs(now)) as i32;
+    view.soa_rrsig = soa
+        .ok()
+        .iter()
+        .flat_map(|m| rdata_of(m, RecordType::RRSIG))
+        .filter_map(Rrsig::from_rdata)
+        .filter(|s| s.type_covered() == RecordType::SOA)
+        .max_by_key(until_expiry);
+    view
+}
+
+/// One recursive answer for `name`, asked with DO and CD set so that a
+/// validating resolver still answers for a zone whose DNSSEC is broken. The
+/// first resolver to give a NOERROR answer wins, else the first answer at all.
+async fn lookup(bootstrap: &[SocketAddr], name: &Name, t: RecordType, limit: Duration) -> Option<Message> {
+    let flags = QueryFlags { recursion_desired: true, dnssec_ok: true, checking_disabled: true };
+    let mut fallback = None;
+    for &s in bootstrap {
+        match exchange_with(s, name, t, flags, limit).await {
+            Ok(m) if m.metadata.response_code == ResponseCode::NoError => return Some(m),
+            Ok(m) => fallback = fallback.or(Some(m)),
+            Err(_) => {}
+        }
+    }
+    fallback
+}
+
+/// The zone `target` is in: walks up from the target (never above its
+/// registrable domain) until a name has NS records.
+async fn find_zone(bootstrap: &[SocketAddr], target: &str, limit: Duration) -> Result<(String, Vec<Name>), DiscoverError> {
+    let floor = psl::domain_str(target).unwrap_or(target).to_string();
+    let mut zone = target.to_string();
+    loop {
+        let name = Name::from_ascii(&zone).map_err(|_| DiscoverError::NoNameservers(target.into()))?;
+        let m = lookup(bootstrap, &name, RecordType::NS, limit).await.ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
+        let ns: Vec<Name> = m
+            .answers
+            .iter()
+            .filter_map(|r| match &r.data {
+                RData::NS(ns) => Some(ns.0.clone()),
+                _ => None,
+            })
+            .collect();
+        if !ns.is_empty() {
+            return Ok((zone, ns));
+        }
+        match zone.split_once('.') {
+            Some((_, parent)) if zone != floor => zone = parent.to_string(),
+            _ => return Err(DiscoverError::NoNameservers(target.into())),
+        }
+    }
+}
+
+/// The zone's nameservers as Vantages: one IPv4 and one IPv6 address each (IPv6
+/// only when this machine has a route), as `discover_nameservers` does.
+async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16, limit: Duration) -> Vec<Vantage> {
+    let mut out = vec![];
+    for ns in names.iter().take(8) {
+        let mut ips = vec![];
+        for t in [RecordType::A, RecordType::AAAA] {
+            if let Some(m) = lookup(bootstrap, ns, t, limit).await {
+                ips.extend(m.answers.iter().filter_map(|r| match &r.data {
+                    RData::A(a) => Some(IpAddr::V4(a.0)),
+                    RData::AAAA(a) => Some(IpAddr::V6(a.0)),
+                    _ => None,
+                }));
+            }
+        }
+        let v4 = ips.iter().find(|ip| ip.is_ipv4());
+        let v6 = ips.iter().find(|ip| ip.is_ipv6()).filter(|_| ipv6_available());
+        let picked: Vec<&IpAddr> = v4.into_iter().chain(v6).collect();
+        let label = ns.to_string();
+        let label = label.trim_end_matches('.');
+        for ip in &picked {
+            let name = if picked.len() > 1 { format!("{label} {ip}") } else { label.to_string() };
+            out.push(Vantage::nameserver(&name, SocketAddr::new(**ip, port)));
+        }
+    }
+    out
 }
