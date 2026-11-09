@@ -9,7 +9,7 @@
 use std::{borrow::Cow, fmt, io, sync::Arc, time::Duration};
 
 use rustls::{
-    CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
+    AlertDescription, CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
     client::{
         danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
         verify_server_cert_signed_by_trust_anchor, verify_server_name,
@@ -235,10 +235,10 @@ pub async fn check_tls(host: &str, port: u16, timeout: Duration) -> Result<TlsRe
 fn handshake_error(e: io::Error) -> TlsError {
     let inner = e.get_ref().and_then(|i| i.downcast_ref::<RustlsError>());
     match inner {
-        // rustls speaks TLS 1.2 and 1.3 only, so a server stuck on 1.0 or 1.1 shows up as this.
-        Some(RustlsError::AlertReceived(rustls::AlertDescription::ProtocolVersion) | RustlsError::PeerIncompatible(_)) => {
-            TlsError::Handshake(format!("the server does not offer TLS 1.2 or 1.3; it may offer only TLS 1.0 or 1.1, which are deprecated ({e})"))
-        }
+        // rustls speaks TLS 1.2 and 1.3 only, so a server stuck on 1.0 or 1.1 answers with one of these.
+        Some(RustlsError::AlertReceived(AlertDescription::ProtocolVersion | AlertDescription::HandshakeFailure) | RustlsError::PeerIncompatible(_)) => TlsError::Handshake(format!(
+            "the server refused the handshake; it may offer only TLS 1.0 or 1.1 (deprecated, and not spoken by this tool) or no cipher suite in common ({e})"
+        )),
         _ => TlsError::Handshake(clean(&e.to_string())),
     }
 }
@@ -317,7 +317,8 @@ fn clean(s: &str) -> String {
 fn describe(der: &CertificateDer<'_>, leaf: bool) -> Result<TlsCert, TlsError> {
     let (_, c) = x509_parser::parse_x509_certificate(der.as_ref()).map_err(|e| TlsError::Chain(format!("unreadable certificate: {e}")))?;
     let name = |n: &x509_parser::x509::X509Name<'_>| {
-        let cn = n.iter_common_name().next().and_then(|a| a.as_str().ok()).map(str::to_string);
+        // A "*" is not a PrintableString character, so a strict decode refuses wildcard names.
+        let cn = n.iter_common_name().next().map(|a| a.as_str().map_or_else(|_| String::from_utf8_lossy(a.attr_value().data).into_owned(), str::to_string));
         clean(&cn.unwrap_or_else(|| n.to_string()))
     };
     let sans = match (leaf, c.subject_alternative_name()) {

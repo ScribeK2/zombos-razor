@@ -99,7 +99,7 @@ async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     println!("  trust: {trust}; name {}; verified: {}", if r.hostname_match { "matches" } else { "does NOT match" }, if r.verified { "yes" } else { "NO" });
     for (i, c) in r.chain.iter().enumerate() {
         println!("  [{i}] {} (issuer {})", c.subject, c.issuer);
-        println!("      {} {}, signature {}, valid {} to {}", c.key, if c.self_signed { "self-signed" } else { "" }, c.signature, c.not_before.date(), c.not_after.date());
+        println!("      {}{}, signature {}, valid {} to {}", c.key, if c.self_signed { " (self-signed)" } else { "" }, c.signature, c.not_before.date(), c.not_after.date());
         if !c.sans.is_empty() {
             println!("      names: {}", c.sans.join(", "));
         }
