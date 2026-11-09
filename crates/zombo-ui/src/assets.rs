@@ -16,6 +16,7 @@ const SHAPES: &[(&str, &str)] = &[
     ("close", r#"<path d="M4 4l8 8M12 4l-8 8"/>"#),
     ("minimize", r#"<path d="M3.5 8h9"/>"#),
     ("maximize", r#"<rect x="3.5" y="3.5" width="9" height="9" rx="1"/>"#),
+    ("grip", r#"<path d="M14 5L5 14M14 9.5L9.5 14"/>"#),
     ("chevron", r#"<path d="M6 4l4 4-4 4"/>"#),
 ];
 

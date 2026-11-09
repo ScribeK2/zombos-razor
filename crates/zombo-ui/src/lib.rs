@@ -1,11 +1,17 @@
 pub mod checks;
+pub mod chrome;
 pub mod config;
 pub mod diagnosis;
+pub mod dns_data;
 pub mod evidence_model;
+pub mod finding_owner;
 pub mod keys;
+pub mod motion;
 pub mod notice;
 pub mod ondemand;
+pub mod open_state;
 pub mod outcome;
+pub mod rail;
 pub mod record;
 pub mod runtime;
 pub mod section;

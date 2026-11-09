@@ -11,6 +11,8 @@ use zombo_ui::{
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
     notice, ondemand,
+    motion::{self, Fade, Feedback, Level, Motion},
+    open_state::OpenState,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
     runtime,
@@ -23,8 +25,10 @@ use zombo_ui::{
 use zombo_core::Severity;
 
 mod evidence;
+mod frame;
 
 const FINDING_HANDLES: usize = 64;
+const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
 const TOAST_FOR: Duration = Duration::from_secs(8);
 
 pub struct Shell {
@@ -34,8 +38,16 @@ pub struct Shell {
     pane_focus: FocusHandle,
     rail_focus: Vec<FocusHandle>,
     finding_focus: Vec<FocusHandle>,
+    action_focus: Vec<FocusHandle>,
     palette: Option<usize>,
     open: HashSet<&'static str>,
+    tab_open: OpenState,
+    row_focus: Vec<FocusHandle>,
+    motion: Motion,
+    fx: Feedback<(&'static str, usize)>,
+    fade: Fade<(String, Section, &'static str)>,
+    pane_opacity: f32,
+    toast_leave: Option<Instant>,
     watches: Watches,
     pastes: HashMap<u64, Entity<TextareaState>>,
     toast: Option<(String, Instant)>,
@@ -118,6 +130,14 @@ impl Shell {
             }
         })
         .detach();
+        cx.spawn(async move |this, cx| {
+            let motion = cx.background_executor().spawn(async { zombo_ui::motion::read_system_motion() }).await;
+            let _ = this.update(cx, |app, cx| {
+                app.motion = motion;
+                cx.notify();
+            });
+        })
+        .detach();
         let config = Config::load(Dirs::from_env());
         let ws = Workspace { recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()), ..Workspace::default() };
         let toast = [("config.toml", &config.settings_problem), ("recent.toml", &config.recent_problem)]
@@ -132,8 +152,16 @@ impl Shell {
             pane_focus: cx.focus_handle(),
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             finding_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            action_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
             open: HashSet::new(),
+            motion: Motion::default(),
+            fx: Feedback::new(),
+            fade: Fade::default(),
+            pane_opacity: 1.0,
+            toast_leave: None,
+            tab_open: OpenState::default(),
+            row_focus: DISCLOSURES.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             watches: Watches::default(),
             pastes: HashMap::new(),
             toast,
@@ -259,11 +287,18 @@ impl Shell {
         let now = Instant::now();
         let alive: Vec<String> = self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
+        self.tab_open.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
         }
-        if self.toast.as_ref().is_some_and(|(_, at)| now.duration_since(*at) > TOAST_FOR) {
-            self.toast = None;
+        if let Some((_, at)) = self.toast {
+            if now.duration_since(at) > TOAST_FOR && self.toast_leave.is_none_or(|l| l < at) {
+                self.toast_leave = Some(now);
+            }
+            if self.toast_leave.is_some_and(|l| l >= at && !self.motion.running(now.duration_since(l), motion::TOAST_OUT)) {
+                self.toast = None;
+                self.toast_leave = None;
+            }
         }
         if !self.watches.is_empty() || self.toast.is_some() {
             cx.notify();
@@ -668,6 +703,7 @@ impl Shell {
             let state = tab.state(section);
             let selected = tab.section == section;
             let g = state.glyph();
+            let count_line = zombo_ui::rail::count_line(section, &state, &tab.findings(section));
             let group = match i {
                 1 => Some("CHECKS"),
                 Section::FIRST_ON_DEMAND => Some("ON DEMAND"),
@@ -686,8 +722,7 @@ impl Shell {
                 .border_color(color(t::BG_200))
                 .text_size(px(t::TEXT_BODY))
                 .text_color(color(if selected { t::GRAY_1000 } else { t::GRAY_900 }))
-                .when(selected, |s| s.bg(color(t::GRAY_300)))
-                .hover(|s| s.bg(color(t::GRAY_200)))
+                .map(|s| if selected { s.bg(color(t::GRAY_300)) } else { self.fx(s, ("rail", i), t::BG_200, t::GRAY_200, t::GRAY_300, cx) })
                 .focus_visible(focus_ring)
                 .cursor_pointer()
                 .role(Role::Tab)
@@ -711,7 +746,7 @@ impl Shell {
                         .truncate()
                         .text_size(px(t::TEXT_CAPTION))
                         .text_color(color(t::GRAY_900))
-                        .child(state.label()),
+                        .child(count_line),
                 );
             div().flex().flex_col().when_some(group, |s, g| s.child(heading(g))).child(item)
         });
@@ -739,12 +774,13 @@ impl Shell {
         let show_chips = !findings.is_empty();
         let watchable = checks::watchable(section) && state != zombo_ui::status::CheckState::NotRun;
         let watching = self.watches.is_watching(&tab.target.value, section);
-        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f));
+        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, Some(section), cx)).collect::<Vec<_>>();
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
             .id("pane")
+            .opacity(self.pane_opacity)
             .track_focus(&self.pane_focus)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| window.focus(&this.pane_focus, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
@@ -867,8 +903,7 @@ impl Shell {
                                     .text_size(px(t::TEXT_LABEL))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(color(t::GRAY_200)))
-                                    .active(|s| s.bg(color(t::GRAY_300)))
+                                    .map(|s| self.fx(s, ("run", 0), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                                     .focus_visible(focus_ring)
                                     .role(Role::Button)
                                     .aria_label(run_label.unwrap_or("Run this Check"))
@@ -895,8 +930,7 @@ impl Shell {
                         .bg(color(t::GRAY_100))
                         .text_size(px(t::TEXT_CAPTION))
                         .cursor_pointer()
-                        .hover(|s| s.bg(color(t::GRAY_200)))
-                        .active(|s| s.bg(color(t::GRAY_300)))
+                        .map(|s| self.fx(s, ("retry", 0), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                         .focus_visible(focus_ring)
                         .role(Role::Button)
                         .aria_label("Retry this Check")
@@ -919,13 +953,14 @@ impl Shell {
                         .children(finding_views),
                 )
             })
-            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)))
+            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)).child(self.dns_rows(tab, cx)))
             .when(section != Section::Dns && section != Section::Summary, |s| s.child(self.facts(tab, section, cx)))
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
     }
 
-    fn finding_card(&self, i: usize, f: &zombo_core::Finding) -> Stateful<Div> {
+    fn finding_card(&self, i: usize, f: &zombo_core::Finding, current: Option<Section>, cx: &mut Context<Self>) -> Stateful<Div> {
         let c = severity_color(f.severity);
+        let go = current.and_then(|c| zombo_ui::finding_owner::jump_target(f.code, c));
         let label = dg::finding_label(f);
         div()
             .id(("finding", i))
@@ -973,7 +1008,42 @@ impl Shell {
                         s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(r.to_string()))
                     }),
             )
-}
+            .when_some(go, |s, target| s.child(self.go_button(i, target, cx)))
+    }
+
+    fn go_button(&self, i: usize, target: Section, cx: &mut Context<Self>) -> impl IntoElement {
+        let jump = move |this: &mut Self, cx: &mut Context<Self>| {
+            this.ws.jump(target.index());
+            cx.notify();
+        };
+        div()
+            .id(("go", i))
+            .track_focus(&self.action_focus[i.min(FINDING_HANDLES - 1)])
+            .flex_none()
+            .h(px(28.))
+            .px(px(12.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .border_1()
+            .border_color(color(t::GRAY_500))
+            .rounded(px(t::RADIUS_SMALL))
+            .text_size(px(t::TEXT_CAPTION))
+            .cursor_pointer()
+            .map(|s| self.fx(s, ("go", i), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
+            .focus_visible(focus_ring)
+            .role(Role::Button)
+            .aria_label(format!("Go to the {} section", target.label()))
+            .on_click(cx.listener(move |this, _, _, cx| jump(this, cx)))
+            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                    jump(this, cx);
+                }
+            }))
+            .child(format!("{} \u{2192}", target.label()))
+            .when_some(zombo_ui::finding_owner::jump_digit(target), |s, d| s.child(kbd(&format!("Ctrl {d}"))))
+    }
 
     fn watch_button(&self, watching: bool, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -986,11 +1056,9 @@ impl Shell {
             .border_1()
             .border_color(color(if watching { t::ACCENT } else { t::GRAY_500 }))
             .rounded(px(t::RADIUS_SMALL))
-            .bg(color(if watching { t::GRAY_300 } else { t::GRAY_100 }))
             .text_size(px(t::TEXT_CAPTION))
             .cursor_pointer()
-            .hover(|s| s.bg(color(t::GRAY_200)))
-            .active(|s| s.bg(color(t::GRAY_300)))
+            .map(|s| self.fx(s, ("watch", 0), if watching { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
             .focus_visible(focus_ring)
             .role(Role::Button)
             .aria_label(if watching { "Stop watching this Check" } else { "Watch this Check until its answer changes" })
@@ -1002,8 +1070,42 @@ impl Shell {
             .child(kbd("W"))
     }
 
+    /// Hover and press feedback: the element's background blends between the three colors over
+    /// 80 ms, and its mouse events feed `Feedback`.
+    fn fx(&self, el: Stateful<Div>, key: (&'static str, usize), rest: u32, hover: u32, press: u32, cx: &mut Context<Self>) -> Stateful<Div> {
+        let set = move |level: Level| {
+            move |this: &mut Self, cx: &mut Context<Self>| {
+                this.fx.set(key, level, Instant::now());
+                cx.notify();
+            }
+        };
+        let hovered = set(Level::Hover);
+        let rested = set(Level::Rest);
+        let pressed = set(Level::Press);
+        el.bg(color(self.fx.color(&key, Instant::now(), self.motion, rest, hover, press)))
+            .on_hover(cx.listener(move |this, h: &bool, _, cx| if *h { hovered(this, cx) } else { rested(this, cx) }))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| pressed(this, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(move |this, _, _, cx| hovered(this, cx)))
+    }
+
+    fn toggle_row(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        if let Some((target, section)) = self.ws.current().map(|t| (t.target.value.clone(), t.section)) {
+            self.tab_open.toggle(&target, section, id);
+        }
+        cx.notify();
+    }
+
+    fn dns_rows(&self, tab: &dg::Tab, cx: &mut Context<Self>) -> Div {
+        let rows = [zombo_ui::dns_data::nameserver_answers(&tab.propagation.rows), zombo_ui::dns_data::all_records(&tab.propagation.rows)];
+        div().w_full().min_w_0().flex().flex_col().gap(px(8.)).children(rows.into_iter().flatten().map(|c| {
+            let lines = c.lines.into_iter().map(|(k, v)| (k, v, t::GRAY_1000)).collect();
+            self.disclosure(c.id, c.title.to_string(), c.summary, lines, cx)
+        }))
+    }
+
     fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
-        let open = self.open.contains(id);
+        let open = self.ws.current().is_some_and(|t| self.tab_open.is_open(&t.target.value, t.section, id));
+        let slot = DISCLOSURES.iter().position(|&d| d == id).unwrap_or(0);
         let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
             div()
                 .id((id, i))
@@ -1033,22 +1135,24 @@ impl Shell {
             .child(
                 div()
                     .id((id, 9999usize))
+                    .track_focus(&self.row_focus[slot])
                     .h(px(32.))
                     .px(px(12.))
                     .flex()
                     .items_center()
                     .gap(px(8.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .map(|s| self.fx(s, ("disc", slot), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                     .focus_visible(focus_ring)
                     .role(Role::Button)
                     .aria_expanded(open)
                     .aria_label(format!("{title}, {summary}"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.open.remove(id) {
-                            this.open.insert(id);
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_row(id, cx)))
+                    .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                        if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+                            cx.stop_propagation();
+                            this.toggle_row(id, cx);
                         }
-                        cx.notify();
                     }))
                     .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
                     .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(title))
@@ -1196,13 +1300,11 @@ impl Shell {
                     .rounded(px(t::RADIUS_SMALL))
                     .border_1()
                     .border_color(color(if on { t::ACCENT } else { t::GRAY_400 }))
-                    .bg(color(if on { t::GRAY_300 } else { t::GRAY_100 }))
                     .text_color(color(if on { t::GRAY_1000 } else { t::GRAY_900 }))
                     .font_family(t::FONT_MONO)
                     .text_size(px(t::TEXT_LABEL))
                     .cursor_pointer()
-                    .hover(|s| s.bg(color(t::GRAY_200)))
-                    .active(|s| s.bg(color(t::GRAY_300)))
+                    .map(|s| self.fx(s, ("rtype", i), if on { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
                     .role(Role::Tab)
                     .aria_selected(on)
                     .aria_label(format!("Compare {} records", kind.code()))
@@ -1342,6 +1444,13 @@ impl Render for Shell {
             self.rendered = true;
             eprintln!("first render {:?} after main()", self.started.elapsed());
         }
+        let now = Instant::now();
+        if let Some((key, word)) = self.ws.current().map(|t| (t.target.value.clone(), (t.section, t.state(t.section).word()))) {
+            self.pane_opacity = self.fade.opacity((key, word.0, word.1), now, self.motion);
+        }
+        if self.fx.animating(now, self.motion) || self.fade.animating(now, self.motion) || self.toast.as_ref().is_some_and(|&(_, at)| self.motion.running(now.saturating_duration_since(at), motion::TOAST_IN) || self.toast_leave.is_some_and(|l| l >= at && self.motion.running(now.saturating_duration_since(l), motion::TOAST_OUT))) {
+            window.request_animation_frame();
+        }
         let body = if self.ws.is_empty_state() {
             div().flex_1().flex().flex_col().child(self.empty_state(cx).into_any_element())
         } else if self.ws.current_evidence().is_some() {
@@ -1349,7 +1458,7 @@ impl Render for Shell {
         } else {
             div().flex_1().min_h_0().flex().child(self.rail(cx)).child(self.pane(cx))
         };
-        div()
+        let root = div()
             .id("root")
             .key_context("Zombo")
             .track_focus(&self.root_focus)
@@ -1367,12 +1476,16 @@ impl Render for Shell {
             .when(!self.ws.tabs.is_empty(), |s| s.child(self.tab_strip(cx)))
             .child(body)
             .child(self.status_bar())
-            .when_some(self.toast.clone(), |s, (text, _)| {
+            .when_some(self.toast.clone().and_then(|(text, at)| {
+                let left = self.toast_leave.filter(|&l| l >= at).map(|l| now.saturating_duration_since(l));
+                motion::toast_frame(self.motion, now.saturating_duration_since(at), left).map(|(o, y)| (text, o, y))
+            }), |s, (text, opacity, drop)| {
                 s.child(
                     div()
                         .id("toast")
                         .absolute()
-                        .bottom(px(t::STATUS_BAR_HEIGHT + 12.))
+                        .opacity(opacity)
+                        .bottom(px(t::STATUS_BAR_HEIGHT + 12. - drop))
                         .right(px(16.))
                         .w(px(420.))
                         .flex()
@@ -1389,7 +1502,7 @@ impl Render for Shell {
                         .role(Role::Alert)
                         .aria_label(text.clone())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.toast = None;
+                            this.toast_leave = Some(Instant::now());
                             cx.notify();
                         }))
                         .child(glyph(Glyph::Info, 16.))
@@ -1398,6 +1511,7 @@ impl Render for Shell {
             })
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
-            .when_some(self.settings.clone(), |s, pane| s.child(pane))
+            .when_some(self.settings.clone(), |s, pane| s.child(pane));
+        frame::frame(window, root)
     }
 }
