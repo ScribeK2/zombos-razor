@@ -25,6 +25,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     dns::{QueryFlags, exchange_with},
+    finding::{Finding, Severity},
     propagation::{DiscoverError, Vantage, ipv6_available},
 };
 
@@ -470,6 +471,203 @@ pub async fn dnssec_with(
         .map(|ds| DsStatus { matched: keys.iter().any(|k| ds.matches(&apex_name, k)), ds })
         .collect();
     Ok(DnssecResult { apex: apex.into(), checked_at: u64::from(epoch_secs(now)), resolvers, ds, nameservers })
+}
+
+/// A signature this close to expiring is a warning: zones are normally re-signed days ahead.
+const EXPIRING_SOON_SECS: u32 = 3 * 86_400;
+
+fn span(secs: u32) -> String {
+    let (n, unit) = match secs {
+        0..=119 => (secs, "second"),
+        120..=7199 => (secs / 60, "minute"),
+        7200..=172_799 => (secs / 3600, "hour"),
+        _ => (secs / 86_400, "day"),
+    };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
+}
+
+fn tags(keys: &[Dnskey]) -> String {
+    match keys {
+        [] => "no keys".into(),
+        keys => format!("key{} {}", if keys.len() == 1 { "" } else { "s" }, keys.iter().map(|k| k.key_tag.to_string()).collect::<Vec<_>>().join(", ")),
+    }
+}
+
+/// What the Check found, in plain sentences for a support rep.
+pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
+    let mut out = vec![];
+    let answered: Vec<&NameserverView> = r.nameservers.iter().filter(|n| n.error.is_none()).collect();
+    let resolvers = |s: ResolverStatus| r.resolvers.iter().filter(|v| v.status == s).map(|v| v.resolver.as_str()).collect::<Vec<_>>();
+    let (bogus, secure) = (resolvers(ResolverStatus::Bogus), resolvers(ResolverStatus::Secure));
+
+    let any_keys = answered.iter().any(|n| !n.dnskeys.is_empty());
+    let ds_without_dnskey = !r.ds.is_empty() && !answered.is_empty() && !any_keys;
+    let ds_mismatch = !r.ds.is_empty() && any_keys && r.ds.iter().all(|d| !d.matched);
+
+    let now = UNIX_EPOCH + Duration::from_secs(r.checked_at);
+    let windows: Vec<(&str, SigWindow)> = answered.iter().filter_map(|n| n.soa_rrsig.as_ref().map(|s| (n.name.as_str(), s.window(now)))).collect();
+    let expired: Vec<String> = windows
+        .iter()
+        .filter_map(|(n, w)| match w {
+            SigWindow::Expired { ago } => Some(format!("{n} (expired {} ago)", span(*ago))),
+            _ => None,
+        })
+        .collect();
+    // Under three days left, but never more than a quarter of the signature's lifetime: some
+    // providers (Cloudflare) sign for just two days and re-sign continuously, so a flat three
+    // days would flag them permanently.
+    let expiring: Vec<String> = answered
+        .iter()
+        .filter_map(|n| n.soa_rrsig.as_ref().map(|s| (n, s, s.expiration.wrapping_sub(s.inception))))
+        .filter_map(|(n, s, lifetime)| match s.window(now) {
+            SigWindow::Valid { expires_in } if expires_in < EXPIRING_SOON_SECS.min(lifetime / 4) => Some(format!("{} (expires in {})", n.name, span(expires_in))),
+            _ => None,
+        })
+        .collect();
+
+    if answered.len() >= 2 && answered.iter().all(|n| !n.authoritative && n.recursion_available) {
+        let names: Vec<&str> = answered.iter().map(|n| n.name.as_str()).collect();
+        out.push(crate::dns::interception_finding(&names));
+    }
+
+    if !bogus.is_empty() {
+        let cause = if ds_without_dnskey {
+            " The likely cause: the parent zone publishes a DS record but the zone serves no DNSKEY, so it looks unsigned."
+        } else if ds_mismatch {
+            " The likely cause: the DS record at the parent matches none of the keys the zone serves."
+        } else if !expired.is_empty() {
+            " The likely cause: the zone's signatures have expired."
+        } else {
+            ""
+        };
+        out.push(Finding {
+            code: "dnssec_bogus",
+            severity: Severity::Critical,
+            title: "Validating resolvers reject this domain",
+            message: format!(
+                "{} answer SERVFAIL for {} but answer normally when DNSSEC checking is turned off, so the domain's DNSSEC is broken. Validating resolvers refuse to answer, so the domain is unreachable for most users.{cause}",
+                bogus.join(", "),
+                r.apex
+            ),
+            recommendation: Some("Fix the DNSSEC problem reported with this finding. If it cannot be fixed quickly, remove the DS record at the registrar: the domain then works again, without DNSSEC."),
+        });
+    }
+    if ds_without_dnskey {
+        out.push(Finding {
+            code: "dnssec_ds_without_dnskey",
+            severity: Severity::Critical,
+            title: "DS record but no DNSKEY",
+            message: format!(
+                "The parent zone publishes a DS record for {}, which says the zone is signed, but its nameservers serve no DNSKEY. The zone is unsigned or its DNS provider stopped signing, and validating resolvers will treat every answer as forged.",
+                r.apex
+            ),
+            recommendation: Some("Turn DNSSEC signing back on at the DNS provider, or remove the DS record at the registrar."),
+        });
+    }
+    if ds_mismatch {
+        let ds: Vec<String> = r.ds.iter().map(|d| format!("{} ({})", d.ds.key_tag, d.ds.digest_type)).collect();
+        let served: Vec<String> = answered.iter().flat_map(|n| n.dnskeys.iter().filter(|k| k.is_ksk())).map(|k| k.key_tag.to_string()).collect();
+        let served: std::collections::BTreeSet<String> = served.into_iter().collect();
+        out.push(Finding {
+            code: "dnssec_ds_mismatch",
+            severity: Severity::Critical,
+            title: "DS record matches none of the zone's keys",
+            message: format!(
+                "The parent zone publishes DS for key {} but the nameservers serve {}, so the chain of trust is broken and validating resolvers reject the zone. This usually happens after moving DNS to a new provider.",
+                ds.join(", "),
+                if served.is_empty() { "no signing key".to_string() } else { format!("signing key {}", served.into_iter().collect::<Vec<_>>().join(", ")) }
+            ),
+            recommendation: Some("Give the registrar the new provider's DS record, or remove the DS record to turn DNSSEC off."),
+        });
+    }
+    if !expired.is_empty() {
+        out.push(Finding {
+            code: "dnssec_signature_expired",
+            severity: Severity::Critical,
+            title: "The zone's signatures have expired",
+            message: format!("The signature on the zone's SOA record has expired: {}. Validating resolvers reject every answer from the zone.", expired.join(", ")),
+            recommendation: Some("Have the zone re-signed. DNS providers do this automatically, so ask the provider why it stopped."),
+        });
+    }
+    if !expiring.is_empty() {
+        out.push(Finding {
+            code: "dnssec_signature_expiring",
+            severity: Severity::Warning,
+            title: "The zone's signatures expire soon",
+            message: format!("The signature on the zone's SOA record is about to expire: {}. Zones are normally re-signed well before that, so signing may have stopped.", expiring.join(", ")),
+            recommendation: Some("Check that the zone is being re-signed. If it is not, validating resolvers will reject the domain when the signature expires."),
+        });
+    }
+    let deprecated: std::collections::BTreeMap<u8, Algorithm> = r
+        .ds
+        .iter()
+        .map(|d| d.ds.algorithm)
+        .chain(answered.iter().flat_map(|n| n.dnskeys.iter().map(|k| k.algorithm)))
+        .filter(|a| a.deprecated())
+        .map(|a| (a.number(), a))
+        .collect();
+    if !deprecated.is_empty() {
+        out.push(Finding {
+            code: "dnssec_algorithm_deprecated",
+            severity: Severity::Warning,
+            title: "Deprecated signing algorithm",
+            message: format!(
+                "The zone is signed with {}, which is deprecated: it is weak, and validating resolvers are dropping support for it, which can make the domain look unsigned or broken.",
+                deprecated.values().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            ),
+            recommendation: Some("Ask the DNS provider to switch the zone to a modern algorithm such as ECDSAP256SHA256 (13)."),
+        });
+    }
+    let key_sets: Vec<std::collections::BTreeSet<(u16, u8, &[u8])>> =
+        answered.iter().map(|n| n.dnskeys.iter().map(|k| (k.flags, k.algorithm.number(), k.public_key.as_slice())).collect()).collect();
+    if key_sets.windows(2).any(|w| w[0] != w[1]) {
+        let each: Vec<String> = answered.iter().map(|n| format!("{} serves {}", n.name, tags(&n.dnskeys))).collect();
+        out.push(Finding {
+            code: "dnssec_nameservers_disagree",
+            severity: Severity::Warning,
+            title: "Nameservers serve different keys",
+            message: format!(
+                "The nameservers do not serve the same DNSKEY set ({}). The zone is out of sync or in the middle of a key rollover, and validation can fail depending on which nameserver a resolver reaches.",
+                each.join("; ")
+            ),
+            recommendation: Some("Make every nameserver serve the same signed zone. If a key rollover is under way, wait for it to finish and check again."),
+        });
+    }
+    if r.ds.is_empty() && !answered.is_empty() {
+        if any_keys {
+            out.push(Finding {
+                code: "dnssec_ds_missing",
+                severity: Severity::Info,
+                title: "Signed, but not linked to the parent",
+                message: format!("The nameservers serve DNSKEY records but the parent zone has no DS record for {}, so validating resolvers ignore the signatures and treat the zone as unsigned.", r.apex),
+                recommendation: Some("If DNSSEC should be on, publish the zone's DS record at the registrar."),
+            });
+        } else {
+            out.push(Finding {
+                code: "dnssec_not_signed",
+                severity: Severity::Info,
+                title: "DNSSEC is not enabled",
+                message: format!("{} has no DS record at its parent and its nameservers serve no DNSKEY, so the zone is not signed. That works everywhere, but its answers cannot be verified.", r.apex),
+                recommendation: None,
+            });
+        }
+    }
+    if out.is_empty() && !secure.is_empty() && r.ds.iter().any(|d| d.matched) {
+        let left = windows.iter().filter_map(|(_, w)| if let SigWindow::Valid { expires_in } = w { Some(*expires_in) } else { None }).min();
+        out.push(Finding {
+            code: "dnssec_secure",
+            severity: Severity::Ok,
+            title: "DNSSEC is healthy",
+            message: format!(
+                "{} confirm the answers for {} are authentic, the DS record at the parent matches the zone's key, and the signatures are valid{}.",
+                secure.join(", "),
+                r.apex,
+                left.map_or(String::new(), |s| format!(" for another {}", span(s)))
+            ),
+            recommendation: None,
+        });
+    }
+    out
 }
 
 /// Run the jobs at the same time and return their results in the order given.

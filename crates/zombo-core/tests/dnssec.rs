@@ -8,8 +8,9 @@ use hickory_proto::{
     rr::{Name, RecordType},
 };
 use zombo_core::{
+    Finding, Severity,
     dns::{QueryFlags, exchange_with},
-    dnssec::{Algorithm, DigestType, DnssecError, DnssecResult, Dnskey, Ds, KeyTag, ResolverStatus, Rrsig, SigWindow, check_dnssec, dnssec_with, validating_resolvers},
+    dnssec::{Algorithm, DigestType, DnssecError, DnssecResult, Dnskey, Ds, KeyTag, ResolverStatus, Rrsig, SigWindow, check_dnssec, dnssec_findings, dnssec_with, validating_resolvers},
     propagation::Vantage,
 };
 
@@ -111,11 +112,15 @@ fn now() -> SystemTime {
 /// of `nameservers` is one authoritative server's zone, and `resolvers` are the
 /// validating-resolver Vantages.
 async fn run_at(parent: &str, nameservers: &[&str], resolvers: Vec<(&str, FakeDns)>, now: SystemTime) -> DnssecResult {
-    let rec = FakeDns::start(&format!("{APEX}. 300 IN NS ns.{APEX}.\n{parent}")).await;
+    run_for(APEX, parent, nameservers, resolvers, now).await
+}
+
+async fn run_for(apex: &str, parent: &str, nameservers: &[&str], resolvers: Vec<(&str, FakeDns)>, now: SystemTime) -> DnssecResult {
+    let rec = FakeDns::start(&format!("{apex}. 300 IN NS ns.{apex}.\n{parent}")).await;
     let ns: Vec<(String, FakeDns)> = fake_nameservers(nameservers).await;
     let ns_v: Vec<Vantage> = ns.iter().map(|(n, s)| Vantage::nameserver(n, s.addr)).collect();
     let res_v: Vec<Vantage> = resolvers.iter().map(|(n, s)| Vantage::resolver(n, "Test", s.addr)).collect();
-    dnssec_with(&[rec.addr], &res_v, &ns_v, APEX, now, T).await.unwrap()
+    dnssec_with(&[rec.addr], &res_v, &ns_v, apex, now, T).await.unwrap()
 }
 
 async fn fake_nameservers(zones: &[&str]) -> Vec<(String, FakeDns)> {
@@ -218,6 +223,164 @@ async fn finds_the_zone_and_its_nameservers_even_through_a_resolver_that_rejects
     assert_eq!(r.apex, APEX);
     assert_eq!(r.nameservers.len(), 1);
     assert!(r.ds[0].matched);
+}
+
+// Findings
+
+fn codes(fs: &[Finding]) -> Vec<&str> {
+    fs.iter().map(|f| f.code).collect()
+}
+fn code<'a>(fs: &'a [Finding], c: &str) -> &'a Finding {
+    fs.iter().find(|f| f.code == c).unwrap_or_else(|| panic!("no {c} in {:?}", codes(fs)))
+}
+/// A healthy domain, as the real cloudflare.com data says, with one good resolver.
+async fn healthy(now: SystemTime) -> DnssecResult {
+    let z = dnssec_zone(APEX);
+    run_at(&z, &[&z, &z], vec![("Google", FakeDns::start(WEB).await.validating())], now).await
+}
+
+#[tokio::test]
+async fn healthy_dnssec_says_so_and_nothing_else() {
+    let fs = dnssec_findings(&healthy(now()).await);
+    assert_eq!(codes(&fs), ["dnssec_secure"]);
+    assert_eq!(fs[0].severity, Severity::Ok);
+    assert!(fs[0].message.contains("Google") && fs[0].message.contains("another 2 days"), "{}", fs[0].message);
+}
+
+#[tokio::test]
+async fn a_resolver_that_rejects_the_domain_is_named_and_the_domain_is_called_unreachable() {
+    let z = dnssec_zone(APEX);
+    let r = run_at(&z, &[&z], vec![("Strict", FakeDns::start(WEB).await.bogus()), ("Good", FakeDns::start(WEB).await.validating())], now()).await;
+    let fs = dnssec_findings(&r);
+    let f = code(&fs, "dnssec_bogus");
+    assert_eq!(f.severity, Severity::Critical);
+    assert!(f.message.contains("Strict") && !f.message.contains("Good") && f.message.contains("unreachable"), "{}", f.message);
+    assert!(!f.message.contains("likely cause"), "no local cause here: {}", f.message);
+    assert!(fs.iter().all(|f| f.code != "dnssec_secure"), "{fs:?}");
+}
+
+#[tokio::test]
+async fn a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict() {
+    let z = dnssec_zone(APEX);
+    let parent = z.replace("2371 13 2 32996839", "2371 13 2 32996838");
+    let r = run_at(&parent, &[&z], vec![("Strict", FakeDns::start(WEB).await.bogus())], now()).await;
+    let fs = dnssec_findings(&r);
+    assert_eq!(code(&fs, "dnssec_ds_mismatch").severity, Severity::Critical);
+    assert!(code(&fs, "dnssec_ds_mismatch").message.contains("2371") && code(&fs, "dnssec_ds_mismatch").message.contains("new provider"));
+    assert!(code(&fs, "dnssec_bogus").message.contains("matches none of the keys"), "{}", code(&fs, "dnssec_bogus").message);
+    assert!(fs.iter().all(|f| f.code != "dnssec_ds_without_dnskey"));
+}
+
+#[tokio::test]
+async fn a_ds_at_the_parent_with_no_dnskey_in_the_zone_is_called_out() {
+    let z = dnssec_zone(APEX);
+    let unsigned: String = z.lines().filter(|l| !l.contains(" DNSKEY ") && !l.contains(" RRSIG ")).collect::<Vec<_>>().join("\n");
+    let r = run_at(&z, &[&unsigned], vec![("Strict", FakeDns::start(WEB).await.bogus())], now()).await;
+    let fs = dnssec_findings(&r);
+    assert_eq!(code(&fs, "dnssec_ds_without_dnskey").severity, Severity::Critical);
+    assert!(code(&fs, "dnssec_bogus").message.contains("serves no DNSKEY"));
+    assert!(fs.iter().all(|f| f.code != "dnssec_ds_mismatch"), "one cause, not two: {:?}", codes(&fs));
+}
+
+#[tokio::test]
+async fn a_signature_past_its_expiration_is_critical() {
+    let r = healthy(at(CF_END + 2 * 86_400)).await;
+    let fs = dnssec_findings(&r);
+    let f = code(&fs, "dnssec_signature_expired");
+    assert_eq!(f.severity, Severity::Critical);
+    assert!(f.message.contains("ns1") && f.message.contains("expired 2 days ago"), "{}", f.message);
+    assert!(fs.iter().all(|f| f.code != "dnssec_secure"));
+}
+
+#[tokio::test]
+async fn a_signature_about_to_expire_is_a_warning() {
+    // cloudflare.com signs for two days, so "about to expire" is the last quarter of that.
+    let fs = dnssec_findings(&healthy(at(CF_END - 3 * 3600)).await);
+    let f = code(&fs, "dnssec_signature_expiring");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(f.message.contains("expires in 3 hours"), "{}", f.message);
+    assert!(fs.iter().all(|f| f.code != "dnssec_signature_expired" && f.code != "dnssec_secure"));
+}
+
+/// iana.org signs for three weeks: inception 2026-11-08 16:48:04, expiration 2026-11-29 22:54:07.
+const IANA_END: u64 = 1795992847;
+
+async fn iana_at(now: u64) -> Vec<Finding> {
+    let z = dnssec_zone("iana.org");
+    let web = "iana.org. 300 IN A 192.0.2.1\n";
+    dnssec_findings(&run_for("iana.org", &z, &[&z], vec![("Google", FakeDns::start(web).await.validating())], at(now)).await)
+}
+
+#[tokio::test]
+async fn under_three_days_left_on_a_long_signature_is_a_warning() {
+    let fs = iana_at(IANA_END - 2 * 86_400).await;
+    assert_eq!(code(&fs, "dnssec_signature_expiring").severity, Severity::Warning);
+    assert!(code(&fs, "dnssec_signature_expiring").message.contains("expires in 2 days"));
+}
+
+#[tokio::test]
+async fn more_than_three_days_left_is_fine() {
+    assert_eq!(codes(&iana_at(IANA_END - 4 * 86_400).await), ["dnssec_secure"]);
+}
+
+#[tokio::test]
+async fn a_deprecated_algorithm_is_a_warning_naming_it() {
+    let mut r = healthy(now()).await;
+    r.nameservers[0].dnskeys[1].algorithm = Algorithm::RsaSha1;
+    r.nameservers[1].dnskeys[1].algorithm = Algorithm::RsaSha1;
+    let fs = dnssec_findings(&r);
+    let f = code(&fs, "dnssec_algorithm_deprecated");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(f.message.contains("RSASHA1 (5)"), "{}", f.message);
+}
+
+#[tokio::test]
+async fn nameservers_serving_different_keys_are_a_warning_listing_each() {
+    let z = dnssec_zone(APEX);
+    let without_zsk: String = z.lines().filter(|l| !l.contains("DNSKEY 256")).collect::<Vec<_>>().join("\n");
+    let r = run_at(&z, &[&z, &without_zsk], vec![("Google", FakeDns::start(WEB).await.validating())], now()).await;
+    let fs = dnssec_findings(&r);
+    let f = code(&fs, "dnssec_nameservers_disagree");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(f.message.contains("ns1.cloudflare.com serves keys 34505, 2371") && f.message.contains("ns2.cloudflare.com serves key 2371"), "{}", f.message);
+    assert!(fs.iter().all(|f| f.code != "dnssec_secure"), "{:?}", codes(&fs));
+}
+
+#[tokio::test]
+async fn no_ds_and_no_dnskey_is_just_unsigned() {
+    let z = dnssec_zone(APEX);
+    let plain: String = z.lines().filter(|l| !l.contains(" DNSKEY ") && !l.contains(" RRSIG ") && !l.contains(" DS ")).collect::<Vec<_>>().join("\n");
+    let r = run_at(&plain, &[&plain], vec![("Plain", FakeDns::start(WEB).await)], now()).await;
+    let fs = dnssec_findings(&r);
+    assert_eq!(codes(&fs), ["dnssec_not_signed"]);
+    assert_eq!(fs[0].severity, Severity::Info);
+}
+
+#[tokio::test]
+async fn keys_with_no_ds_are_signed_but_not_linked() {
+    let z = dnssec_zone(APEX);
+    let no_ds: String = z.lines().filter(|l| !l.contains(" DS ")).collect::<Vec<_>>().join("\n");
+    let r = run_at(&no_ds, &[&z], vec![("Plain", FakeDns::start(WEB).await)], now()).await;
+    assert_eq!(codes(&dnssec_findings(&r)), ["dnssec_ds_missing"]);
+}
+
+#[tokio::test]
+async fn nameservers_that_all_answer_like_a_forwarder_mean_the_network_intercepts_dns() {
+    let mut r = healthy(now()).await;
+    for n in &mut r.nameservers {
+        (n.authoritative, n.recursion_available) = (false, true);
+    }
+    let fs = dnssec_findings(&r);
+    assert_eq!(code(&fs, "dns_network_intercepts").severity, Severity::Warning);
+    assert!(fs.iter().all(|f| f.code != "dnssec_secure"));
+}
+
+#[test]
+fn the_result_serialises_to_json_without_key_material() {
+    let ds = Ds::from_rdata(&[0x09, 0x43, 13, 2, 0xab, 0xcd]).unwrap();
+    let json = serde_json::to_value(&ds).unwrap();
+    assert_eq!(json["key_tag"], 2371);
+    assert_eq!((json["algorithm"].as_str(), json["digest_type"].as_str(), json["digest"].as_str()), (Some("ECDSAP256SHA256 (13)"), Some("SHA-256"), Some("abcd")));
 }
 
 #[test]
