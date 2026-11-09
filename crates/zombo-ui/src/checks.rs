@@ -14,7 +14,7 @@ use zombo_core::{
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
     tls::{TlsResult, check_tls, tls_findings},
-    tls_extras::ocsp_findings,
+    tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
     web::{WebOptions, WebResult, check_web, parse_web_target, web_findings},
 };
 
@@ -123,7 +123,10 @@ async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_p
             let opts = WebOptions { timeout: query, ..WebOptions::default() };
             Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
         }
-        Section::Tls => check_tls(name, 443, query).await.map(|r| tls_outcome(name, &r)).map_err(|e| e.to_string()),
+        Section::Tls => {
+            let (tls, caa) = tokio::join!(check_tls(name, 443, query), check_caa(&bootstrap, name, query));
+            tls.map(|r| with_caa(tls_outcome(name, &r), &caa, Some(&r))).map_err(|e| e.to_string())
+        }
         Section::Registration => check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
             .await
             .map(|r| registration_outcome(name, &r))
@@ -262,6 +265,22 @@ pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
     let mut findings = tls_findings(host, 443, r);
     findings.extend(ocsp_findings(host, 443, r));
     Outcome { findings, facts, details_title: "Certificate chain", details }
+}
+
+/// The CAA records that apply to the name, as rows and findings in the TLS section.
+pub fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Outcome {
+    match (&caa.error, caa.found_at.as_deref()) {
+        (Some(e), _) => o.facts.push(Fact::new("CAA", format!("lookup failed: {e}"))),
+        (None, None) => o.facts.push(Fact::new("CAA", "none: any certificate authority may issue")),
+        (None, Some(at)) => {
+            for r in &caa.records {
+                o.facts.push(Fact::new(format!("CAA at {at}"), format!("{} {} \"{}\"", if r.critical { 128 } else { 0 }, r.tag, r.value)));
+            }
+        }
+    }
+    o.findings.extend(caa_findings(caa, tls));
+    o.findings = crate::diagnosis::ordered(&o.findings);
+    o
 }
 
 pub fn registration_outcome(target: &str, r: &Registration) -> Outcome {
@@ -434,6 +453,42 @@ mod tests {
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
             assert!(automatic(kind).iter().all(|s| !s.is_on_demand()));
         }
+    }
+
+    fn caa(found_at: Option<&str>, records: &[(bool, &str, &str)], error: Option<&str>) -> CaaResult {
+        CaaResult {
+            name: "www.example.com".into(),
+            found_at: found_at.map(Into::into),
+            records: records.iter().map(|(c, t, v)| zombo_core::tls_extras::CaaRecord { critical: *c, tag: t.to_string(), value: v.to_string() }).collect(),
+            error: error.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings() {
+        let o = with_caa(Outcome::default(), &caa(Some("example.com"), &[(false, "issue", "letsencrypt.org")], None), None);
+        assert_eq!(o.records(), ["CAA at example.com: 0 issue \"letsencrypt.org\""]);
+        assert!(o.findings.iter().any(|f| f.code == "caa_ok"), "{:?}", o.findings.iter().map(|f| f.code).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn no_caa_record_is_stated_and_flagged_not_left_blank() {
+        let o = with_caa(Outcome::default(), &caa(None, &[], None), None);
+        assert_eq!(o.records(), ["CAA: none: any certificate authority may issue"]);
+        assert!(o.findings.iter().any(|f| f.code == "caa_none"));
+    }
+
+    #[test]
+    fn a_caa_lookup_that_failed_says_so_and_is_a_warning() {
+        let o = with_caa(Outcome::default(), &caa(None, &[], Some("timed out")), None);
+        assert_eq!(o.records(), ["CAA: lookup failed: timed out"]);
+        assert!(o.findings.iter().any(|f| f.code == "caa_lookup_failed"));
+    }
+
+    #[test]
+    fn a_critical_flag_is_shown_as_128() {
+        let o = with_caa(Outcome::default(), &caa(Some("example.com"), &[(true, "issue", ";")], None), None);
+        assert!(o.records()[0].contains(": 128 issue"));
     }
 
     #[test]
