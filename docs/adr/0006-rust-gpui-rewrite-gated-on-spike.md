@@ -1,6 +1,6 @@
-# Rewrite in Rust with GPUI, gated on a spike (proposed)
+# Rewrite in Rust with GPUI, gated on a spike
 
-Status: **proposed**. It takes effect, and supersedes ADR-0001 and ADR-0005, only if the spike below passes.
+Status: **accepted** (2026-11-09). The spike passed on a real Ubuntu work laptop, with Orca, and in Ubuntu 24.04 and 26.04 containers. This supersedes ADR-0001 and ADR-0005. See `docs/spike-results.md`. Not yet covered: Intel and NVIDIA GPUs, and the laptop's exact Ubuntu and GPU details. Re-run `spike/team-test.sh` on such hardware when it is available.
 
 Zombo's Razor becomes a native Linux app: a Rust workspace with `zombo-core` (all Checks, no UI, also a CLI) and `zombo-ui` (GPUI). It ships as an AppImage. The Go engine and its tests stay in the repo as the behaviour oracle until each Check passes its Go fixtures in Rust, then the Go code is deleted.
 

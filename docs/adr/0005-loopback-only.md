@@ -6,4 +6,4 @@ Listening on loopback is not enough on its own: any web page the rep has open ca
 
 ## Status
 
-Moot if ADR-0006 is accepted: the Rust GPUI app has no localhost server. Stays in force if the spike fails.
+Moot: ADR-0006 is accepted, and the Rust GPUI app has no localhost server.

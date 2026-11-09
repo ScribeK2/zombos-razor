@@ -14,4 +14,4 @@ The app still has to handle port selection, single-instance and opening the brow
 
 ## Status
 
-Proposed to be superseded by [ADR-0006](0006-rust-gpui-rewrite-gated-on-spike.md), gated on a GPUI spike. Stays in force if the spike fails.
+Superseded by [ADR-0006](0006-rust-gpui-rewrite-gated-on-spike.md).

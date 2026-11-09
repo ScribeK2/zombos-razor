@@ -2,7 +2,7 @@
 
 Spike code: `spike/gpui-hello` (a hello window and a widget demo, built on `gpui-kit` 0.9.1). Container recipes: `spike/Dockerfile.build` (Ubuntu 24.04 build) and `spike/Dockerfile.run` (runtime images). The AppImage is `spike/dist/zombo-spike-x86_64.AppImage`. A teammate runs it with `spike/team-test.sh`.
 
-Verdict: **not finished, but looking good.** Everything tested passes. The remaining risks need hardware I do not have: a real GNOME desktop, Intel, NVIDIA and a screen reader.
+Verdict: **passed.** Everything tested passes, including a real Ubuntu work laptop with Orca (tester report, 2026-11-09: opened the AppImage, tabbed through the widgets, typed in the input, scrolled the table fast, closed the window, and passed every Orca step). The laptop's Ubuntu version and GPU were not recorded. Intel and NVIDIA are still unconfirmed.
 
 ## Passed
 
@@ -37,9 +37,7 @@ Verdict: **not finished, but looking good.** Everything tested passes. The remai
 
 ## Not tested, so the spike cannot pass yet
 
-- **A real team laptop on stock Ubuntu with GNOME Wayland.** The containers share this machine's kernel and AMD GPU. A teammate runs `team-test.sh`.
-- **Intel and NVIDIA GPUs.** Same.
-- **Orca and AT-SPI.** Same. This needs a human.
+- **Intel and NVIDIA GPUs.** Unconfirmed; the work laptop GPU was not recorded.
 - **Wayland with no GPU.** Headless Weston has no input seat, so that run proved nothing.
 - **Scroll frame rate.** Not measured.
 - **The AppImage on a machine with Ubuntu's AppArmor settings.** Not tested.

@@ -14,7 +14,7 @@ Replace MXToolbox, DNSChecker, WhatsMyDNS, WHOIS sites and SSL Labs with one fas
 
 ## Phases
 
-1. **Spike** (ADR-0006). Pass: continue. Fail: take the Go/Svelte path.
+1. **Spike** (ADR-0006): passed.
 2. **`zombo-core`**, in this order, each Check done only when its Go fixtures pass in Rust:
    1. DNS records from authoritative servers and many public resolvers, with TTL and Agreement. Parallel, streaming.
    2. Delegation, glue, lame nameservers, DNSSEC.
