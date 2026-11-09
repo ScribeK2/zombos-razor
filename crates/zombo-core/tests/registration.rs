@@ -515,3 +515,23 @@ fn without_a_registrar_name_the_recommendation_has_no_empty_parentheses() {
     let rec = code(&fs, "registration_expired").unwrap().recommendation.as_deref().unwrap_or_default().to_string();
     assert!(rec.starts_with("Renew it at the registrar now,"), "{rec}");
 }
+
+/// The RDAP client names the running build, as the web Check does, and not the HTTP library.
+#[tokio::test]
+async fn the_rdap_request_carries_the_release_user_agent() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", ln.local_addr().unwrap());
+    let seen = tokio::spawn(async move {
+        let (mut s, _) = ln.accept().await.unwrap();
+        let mut buf = vec![0u8; 4096];
+        let n = s.read(&mut buf).await.unwrap();
+        let _ = s.write_all(b"HTTP/1.1 404 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    });
+    let _ = check_registration("example.test", &rdap_only("test", &base), T).await;
+    let request = seen.await.unwrap().to_lowercase();
+    let want = format!("user-agent: {}\r\n", zombo_core::user_agent()).to_lowercase();
+    assert!(request.contains(&want), "{request}");
+    assert!(!request.contains("ureq/"), "{request}");
+}

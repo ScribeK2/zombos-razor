@@ -30,7 +30,6 @@ const MAX_BODY: u64 = 64 * 1024;
 const MAX_HEADER_BLOCK: usize = 32 * 1024;
 const MAX_HEADERS: usize = 128;
 const MAX_HEADER_VALUE: usize = 8 * 1024;
-const USER_AGENT: &str = concat!("zombo/", env!("CARGO_PKG_VERSION"));
 
 /// One response in the chain: the URL asked, what came back, and where it pointed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -195,7 +194,8 @@ pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration, tls: 
             f.error = Some("timed out".into());
             return f;
         }
-        let request = agent.get(&url).config().timeout_global(Some(left)).build().header("User-Agent", USER_AGENT);
+        let request =
+            agent.get(&url).config().timeout_global(Some(left)).build().header("User-Agent", crate::user_agent());
         let mut resp = match request.call() {
             Ok(r) => r,
             Err(e) => {

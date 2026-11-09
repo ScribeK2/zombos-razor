@@ -18,6 +18,11 @@ fn running() -> Version {
     Version::parse("1.2.3").unwrap()
 }
 
+#[test]
+fn the_updater_names_the_version_it_is_running_in_its_user_agent() {
+    assert_eq!(Endpoints::real(&running()).user_agent, "zombo/1.2.3");
+}
+
 async fn check_in(ep: Endpoints, release: bool) -> Result<Option<Available>, UpdateError> {
     tokio::task::spawn_blocking(move || update::check_in(&ep, &running(), release)).await.unwrap()
 }
