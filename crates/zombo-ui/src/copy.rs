@@ -158,7 +158,7 @@ mod tests {
         };
         let o = Outcome {
             findings: vec![f],
-            facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`b")],
+            facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`\u{202e}\u{200b}b")],
             details_title: "Redirect chain",
             details: vec![Fact::new("Hop 1", "301 http://example.com")],
         };
@@ -173,14 +173,16 @@ mod tests {
         assert!(md.starts_with("## Web\n\n**1 PROBLEM.** "), "{md}");
         assert!(md.contains("- **Warning** No HSTS: Add the header. [31m Set it.\n"), "{md}");
         assert!(md.contains("- Status: `200`\n"), "{md}");
-        assert!(md.contains("- Server: `a'b`\n"), "{md}");
+        assert!(md.contains("- Server: `a' b`\n"), "{md}");
         assert!(md.contains("\n### Redirect chain\n\n- Hop 1: `301 http://example.com`\n"), "{md}");
     }
 
     #[test]
     fn no_copied_text_holds_a_control_character() {
         let t = tab_with_web();
-        for text in [section_markdown(&t, Section::Web), diagnosis_markdown(&t), strip("a\u{1b}[2Jb\nc")] {
+        for text in
+            [section_markdown(&t, Section::Web), diagnosis_markdown(&t), strip("a\u{1b}[2J\u{202e}b\u{200b}\nc")]
+        {
             assert!(!text.chars().any(|c| zombo_core::text::is_unsafe_char(c) && c != '\n'), "{text:?}");
         }
         assert_eq!(strip("a\u{7}b\r\nc"), "abc");

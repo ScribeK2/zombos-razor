@@ -136,3 +136,18 @@ pub(crate) fn presentation(d: &RData) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use hickory_proto::rr::{RData, rdata::TXT};
+
+    use super::presentation;
+
+    #[test]
+    fn a_txt_answer_with_bidirectional_and_invisible_characters_prints_as_ascii() {
+        let hostile = "v=spf1 \u{202e}evil\u{200b} -all";
+        let shown = presentation(&RData::TXT(TXT::from_bytes(vec![hostile.as_bytes()])));
+        assert!(shown.starts_with("\"v=spf1 ") && shown.contains("evil"), "{shown}");
+        assert!(shown.is_ascii(), "{shown}");
+    }
+}
