@@ -1,6 +1,7 @@
 mod app;
 mod assets;
 mod settings;
+mod update_ui;
 
 use std::{
     any::Any,

@@ -379,3 +379,20 @@ fn updates_are_unavailable_in_a_release_build_that_embeds_the_test_key() {
     assert!(!update::available_in(true));
     assert!(update::available_in(false));
 }
+
+/// Not a test: serves a signed 1.4.0 for a manual run of the app.
+/// `ZOMBO_FIXTURE_DIR=<dir> [ZOMBO_FIXTURE_TAMPER=1] cargo test -p zombo-core --test update serve_fixture -- --ignored`
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn serve_fixture_for_a_manual_run() {
+    let dir = std::path::PathBuf::from(std::env::var("ZOMBO_FIXTURE_DIR").unwrap());
+    let mut fx = Fixture::signed("1.4.0", b"#!/bin/sh\necho new version\n", &TestKey::embedded());
+    fx.notes = "Faster lookups.\nFixes the SPF finding.".into();
+    if std::env::var("ZOMBO_FIXTURE_TAMPER").is_ok() {
+        fx.appimage.extend_from_slice(b"# tampered\n");
+    }
+    let server = serve(move |p, port| fx.reply(p, port)).await;
+    std::fs::write(dir.join("ca.der"), &server.ca_der).unwrap();
+    std::fs::write(dir.join("port"), server.port.to_string()).unwrap();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+}

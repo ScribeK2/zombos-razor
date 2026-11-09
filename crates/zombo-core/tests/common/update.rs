@@ -125,8 +125,7 @@ impl Fixture {
 
     /// The standard routes. A test wraps this to break one of them.
     pub fn reply(&self, path: &str, port: u16) -> Reply {
-        let api = format!("/repos/{REPO}/releases");
-        if path.starts_with(&api) {
+        if path.starts_with("/repos/") && path.contains("/releases") {
             return Reply::ok(self.metadata(port).into_bytes());
         }
         if path == format!("/dl/{}", self.name) {
@@ -161,11 +160,13 @@ impl Reply {
     }
 }
 
+type Headers = Vec<(String, String)>;
+
 pub struct Server {
     pub port: u16,
     pub ca_der: Vec<u8>,
     /// The request headers of every request, lowercase names.
-    pub seen: Arc<Mutex<Vec<Vec<(String, String)>>>>,
+    pub seen: Arc<Mutex<Vec<Headers>>>,
 }
 
 pub async fn serve(handler: impl Fn(&str, u16) -> Reply + Send + Sync + 'static) -> Server {

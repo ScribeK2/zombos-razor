@@ -7,6 +7,7 @@ use gpui_kit::*;
 use zombo_ui::{
     settings_model::{Draft, Field, FieldError, Settings, split_list},
     theme as t,
+    update_model::Availability,
 };
 
 pub enum PaneEvent {
@@ -19,8 +20,8 @@ pub struct SettingsPane {
     inputs: [(Field, Entity<InputState>); 4],
     notifications: bool,
     check_updates: bool,
-    /// Only an AppImage can update itself, so only an AppImage shows the control.
-    can_update: bool,
+    /// Only an AppImage with a real signing key can update itself.
+    updates: Availability,
     errors: Vec<FieldError>,
     save_error: Option<String>,
     file_problem: Option<String>,
@@ -40,7 +41,7 @@ const APPLY_RULE: &str =
 impl SettingsPane {
     pub fn new(
         current: &Settings,
-        can_update: bool,
+        updates: Availability,
         file_problem: Option<String>,
         path: Option<PathBuf>,
         window: &mut Window,
@@ -65,7 +66,7 @@ impl SettingsPane {
             inputs,
             notifications: current.notifications,
             check_updates: current.check_updates,
-            can_update,
+            updates,
             errors: vec![],
             save_error: None,
             file_problem,
@@ -282,7 +283,10 @@ impl Render for SettingsPane {
                                 cx.notify();
                             })),
                     )
-                    .when(self.can_update, |s| {
+                    .when(self.updates == Availability::NoSigningKey, |s| {
+                        s.child(div().id("updates-off").text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child("Updates are not available in this build"))
+                    })
+                    .when(self.updates == Availability::Ready, |s| {
                         s.child(
                             Checkbox::new("check-updates")
                                 .checked(check_updates)

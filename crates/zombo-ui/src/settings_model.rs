@@ -31,7 +31,14 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { resolvers: vec![], selectors: vec![], timeout: None, proxy: None, notifications: true, check_updates: true }
+        Settings {
+            resolvers: vec![],
+            selectors: vec![],
+            timeout: None,
+            proxy: None,
+            notifications: true,
+            check_updates: true,
+        }
     }
 }
 
@@ -129,7 +136,14 @@ impl Draft {
         let timeout = timeout(&self.timeout).map_err(|m| fail(Field::Timeout, m)).unwrap_or_default();
         let proxy = proxy(&self.proxy).map_err(|m| fail(Field::Proxy, m)).unwrap_or_default();
         if errors.is_empty() {
-            Ok(Settings { resolvers, selectors, timeout, proxy, notifications: self.notifications, check_updates: self.check_updates })
+            Ok(Settings {
+                resolvers,
+                selectors,
+                timeout,
+                proxy,
+                notifications: self.notifications,
+                check_updates: self.check_updates,
+            })
         } else {
             Err(errors)
         }
@@ -323,6 +337,13 @@ mod tests {
         };
         assert_eq!(parse(&to_toml(&s)).unwrap(), s);
         assert_eq!(parse(&to_toml(&Settings::default())).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn update_checks_are_on_by_default_and_can_be_switched_off_in_the_file() {
+        assert!(Settings::default().check_updates);
+        assert!(parse("").unwrap().check_updates);
+        assert!(!parse("check_updates = false\n").unwrap().check_updates);
     }
 
     #[test]
