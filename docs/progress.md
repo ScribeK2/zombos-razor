@@ -76,8 +76,13 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] One box (Diagnosis): all relevant Checks in parallel, results streaming
 - [ ] Command palette for single Checks
 - [ ] Watch (re-run until the answer changes)
-- [ ] Design foundation in code: Geist scales, LCH theme, fonts, 6/12 px radii; write `DESIGN.md` with sizes, spacing, motion, keyboard rules
+- [x] `DESIGN.md` written (layout, Checks per target kind, states, Evidence, copy, history, Watch, keyboard, settings, accessibility, motion, type scale, spacing, initial dark palette with contrast checked)
+- [ ] Design foundation in code: tokens, LCH theme derivation, fonts, 6/12 px radii
 - [ ] Table cell labels for screen readers on every result view
+- [ ] Tabs, rail with five Check states, status bar with Watches, empty state with recent targets
+- [ ] Copy at three levels (value, section, Diagnosis) in Markdown, plus JSON per section
+- [ ] Evidence paste tabs; settings pane (resolvers, DKIM selectors, timeout, proxy, notifications)
+- [ ] Optional sketch of the main screen in Pencil before the first UI code
 - [ ] Window title and app ID set; clear error when the compositor has no `wl_seat`
 - [ ] Recent-lookups list (no Cases)
 
