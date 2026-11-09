@@ -35,7 +35,7 @@ Verdict: **passed.** Everything tested passes, including a real Ubuntu work lapt
 6. **The table can describe cells to a screen reader.** `TableDelegate::cell_label` exists, and plain text is otherwise invisible to assistive technology. Every Check result view must provide labels.
 7. **The first-render timing stops at the first render call.** It is not the first presented frame.
 
-## Not tested, so the spike cannot pass yet
+## Still untested (not blocking)
 
 - **Intel and NVIDIA GPUs.** Unconfirmed; the work laptop GPU was not recorded.
 - **Wayland with no GPU.** Headless Weston has no input seat, so that run proved nothing.
