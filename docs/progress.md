@@ -199,3 +199,10 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] No way back to edit pasted text after a successful analysis (open a new tab)
 - [ ] Tab times are UTC (local time is not safe to read in a threaded process)
 - [ ] Unverified: a pasted `message/rfc822` clipboard from a real mail client, a real hostile paste live, X11, GNOME, screen reader
+
+## UI polish (merged 2026-11-09, 686 tests pass)
+
+- [x] Honest rail marks (Evidence and Diagnosis, notes use the info glyph), rail count lines, per-finding section buttons, collapsed Nameserver answers and All records rows, Diagnosis copy (value, section, whole, section JSON on Ctrl+Shift+J), SMTP resolves MX first with a port field, on-demand pane card collapse and Enter focus, key column sizing, CAA in TLS, window frame with shadow and resize strips (only where the compositor does not draw one), motion with the system animation switch
+- [ ] Rail captions ("done · 3 problems", "no received headers") truncate a little in the 132 px caption
+- [ ] Remaining differences from the sketch: no Watch button on Summary, no live "Watching" status line unless a Watch exists, tab height and strip border, propagation table has a type switcher and header summary "TXT · 2 of 10 differ" is missing, DNSSEC rail label ("not signed") is a count line here
+- [ ] Unverified: client-decorated frame on GNOME or KDE, resize drags, motion visually and with animations off, failed-MX fallback, 465 implicit TLS, the lowest MX silent and a later one answering, keyboard-only tab order
