@@ -1,0 +1,15 @@
+[package]
+name = "zombo-ui"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zombo-razor"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "=0.9.1"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "time"] }
+zombo-core = { path = "../zombo-core" }
