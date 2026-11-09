@@ -106,6 +106,7 @@ pub struct Row {
     pub ttls: BTreeMap<String, u32>,
     pub error: Option<String>,
     pub authoritative: bool,
+    pub serial: Option<u32>,
 }
 
 /// What the table shows for one Vantage and one record type.
@@ -128,6 +129,7 @@ impl Row {
             ttls: a.ttl.clone(),
             error: a.error.clone(),
             authoritative: a.vantage.kind == VantageKind::Authoritative,
+            serial: a.soa.as_ref().map(|s| s.serial),
         }
     }
 

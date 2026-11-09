@@ -355,7 +355,7 @@ impl Shell {
     fn evidence_results(&self, tab: &ev::EvidenceTab, report: &ev::Report, cx: &mut Context<Self>) -> Div {
         let section = tab.section;
         let v = ev::view(report, section);
-        let finding_views = v.findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f));
+        let finding_views = v.findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, None, cx)).collect::<Vec<_>>();
         let copy = |id: &'static str, label: &'static str, hint: &'static str, all: bool, cx: &mut Context<Self>| {
             button(id, label, Some(hint), false).on_click(cx.listener(move |this, _, _, cx| {
                 this.copy_evidence(all, cx);
