@@ -1,4 +1,5 @@
 pub mod checks;
+pub mod chrome;
 pub mod config;
 pub mod diagnosis;
 pub mod dns_data;

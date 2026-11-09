@@ -24,6 +24,7 @@ use zombo_ui::{
 use zombo_core::Severity;
 
 mod evidence;
+mod frame;
 
 const FINDING_HANDLES: usize = 64;
 const DISCLOSURES: [&str; 4] = ["nameservers", "records", "details", "changes"];
@@ -1415,7 +1416,7 @@ impl Render for Shell {
         } else {
             div().flex_1().min_h_0().flex().child(self.rail(cx)).child(self.pane(cx))
         };
-        div()
+        let root = div()
             .id("root")
             .key_context("Zombo")
             .track_focus(&self.root_focus)
@@ -1464,6 +1465,7 @@ impl Render for Shell {
             })
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
-            .when_some(self.settings.clone(), |s, pane| s.child(pane))
+            .when_some(self.settings.clone(), |s, pane| s.child(pane));
+        frame::frame(window, root)
     }
 }
