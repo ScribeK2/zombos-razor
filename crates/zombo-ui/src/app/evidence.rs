@@ -57,8 +57,14 @@ impl Shell {
         let id = self.ws.open_evidence(kind, unix_secs());
         let state = cx.new(|cx| TextareaState::new(window, cx).placeholder("Paste here with Ctrl+V"));
         cx.subscribe_in(&state, window, move |this, state, ev: &InputEvent, _, cx| {
-            if matches!(ev, InputEvent::Change) {
-                this.refresh_suggestion(id, state, cx);
+            match ev {
+                InputEvent::Change => this.refresh_suggestion(id, state, cx),
+                // The text area binds Ctrl+Enter itself, ahead of the window's key handler.
+                InputEvent::PressEnter { secondary: true, .. } => {
+                    this.analyse_pasted(cx);
+                    cx.notify();
+                }
+                _ => {}
             }
         })
         .detach();
