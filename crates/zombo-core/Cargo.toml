@@ -27,3 +27,6 @@ x509-parser = { version = "0.18.1", features = ["verify"] }
 [dev-dependencies]
 data-encoding = "2.11.1"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+
+[lints]
+workspace = true

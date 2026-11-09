@@ -232,7 +232,7 @@ pub async fn check_blacklist(resolvers: &[SocketAddr], target: &str, opts: Optio
     let gate = Arc::new(Semaphore::new(PARALLEL));
     let mut set = JoinSet::new();
     for (subject, s) in &mut res.subjects {
-        for (i, l) in DNSBLS.iter().enumerate().filter(|(_, l)| l.kind == s.kind) {
+        for l in DNSBLS.iter().filter(|l| l.kind == s.kind) {
             s.lists.insert(l.name.to_string(), Verdict::unknown(l, "no answer before the deadline"));
             let name = match subject.parse::<Ipv4Addr>() {
                 Ok(ip) if s.kind == SubjectKind::Ip => format!("{}.{}", reversed(ip), l.zone),
@@ -241,16 +241,16 @@ pub async fn check_blacklist(resolvers: &[SocketAddr], target: &str, opts: Optio
             let (resolver, gate, subject) = (resolver.clone(), gate.clone(), subject.clone());
             set.spawn(async move {
                 let _permit = gate.acquire_owned().await;
-                (subject, i, query_dnsbl(&resolver, &DNSBLS[i], &name).await)
+                (subject, l.name, query_dnsbl(&resolver, l, &name).await)
             });
         }
     }
     let collect = async {
         while let Some(done) = set.join_next().await {
-            if let Ok((subject, i, v)) = done
+            if let Ok((subject, list, v)) = done
                 && let Some(s) = res.subjects.get_mut(&subject)
             {
-                s.lists.insert(DNSBLS[i].name.to_string(), v);
+                s.lists.insert(list.to_string(), v);
             }
         }
     };
@@ -287,23 +287,26 @@ async fn mail_addresses(resolver: &Resolver, domain: &str) -> Result<Vec<(Ipv4Ad
     }
     let mut found: Vec<Vec<Ipv4Addr>> = vec![vec![]; hosts.len()];
     let mut errs: Vec<(usize, String)> = vec![];
+    let host = |i: usize| hosts.get(i).map(String::as_str).unwrap_or_default();
     while let Some(Ok((i, r))) = set.join_next().await {
         match r {
             Ok(m) => {
-                found[i] = m
-                    .answers
-                    .iter()
-                    .filter_map(|a| if let RData::A(ip) = &a.data { Some(ip.0) } else { None })
-                    .collect()
+                if let Some(slot) = found.get_mut(i) {
+                    *slot = m
+                        .answers
+                        .iter()
+                        .filter_map(|a| if let RData::A(ip) = &a.data { Some(ip.0) } else { None })
+                        .collect();
+                }
             }
-            Err(e) => errs.push((i, format!("{}: {e}", printable(&clip(&hosts[i]))))),
+            Err(e) => errs.push((i, format!("{}: {e}", printable(&clip(host(i)))))),
         }
     }
     let out: Vec<(Ipv4Addr, String)> = found
         .iter()
         .enumerate()
         .flat_map(|(i, ips)| ips.iter().map(move |ip| (*ip, i)))
-        .map(|(ip, i)| (ip, format!("{source}{}", printable(&clip(&hosts[i])))))
+        .map(|(ip, i)| (ip, format!("{source}{}", printable(&clip(host(i))))))
         .collect();
     if out.is_empty() && !errs.is_empty() {
         errs.sort();

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! Web inspection against fake servers: the Go `website_inspection` scenarios, the
 //! hostile-input cases, origin versus CDN, and provider detection.
 //! HTTPS is never served here (no certificate to trust offline): the HTTPS port is

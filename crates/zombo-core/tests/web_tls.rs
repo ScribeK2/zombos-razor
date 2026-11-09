@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! The origin comparison over TLS: the public name is served with a certificate the
 //! test trusts, the origin presents a self-signed one.
 

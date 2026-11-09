@@ -63,8 +63,9 @@ pub fn default_resolvers() -> Vec<Vantage> {
         ("114DNS", "China", "114.114.114.114"),
         ("CleanBrowsing", "Netherlands", "185.228.168.9"),
     ]
-    .map(|(n, l, ip)| Vantage::resolver(n, l, SocketAddr::new(ip.parse().unwrap(), 53)))
-    .into()
+    .into_iter()
+    .filter_map(|(n, l, ip)| Some(Vantage::resolver(n, l, SocketAddr::new(ip.parse().ok()?, 53))))
+    .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -241,7 +242,9 @@ pub async fn propagation_with(
     let mut slots: Vec<Option<VantageAnswer>> = vec![None; all.len()];
     while let Some(Ok((i, a))) = set.join_next().await {
         on_answer(&a);
-        slots[i] = Some(a);
+        if let Some(slot) = slots.get_mut(i) {
+            *slot = Some(a);
+        }
     }
     let mut answers: Vec<VantageAnswer> = slots.into_iter().flatten().collect();
     let ns_answers = answers.split_off(resolvers.len());

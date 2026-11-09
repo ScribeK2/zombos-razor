@@ -88,7 +88,7 @@ async fn udp(server: SocketAddr, wire: &[u8], id: u16) -> Result<Message, Exchan
     let mut buf = vec![0u8; 4096];
     loop {
         let n = sock.recv(&mut buf).await?;
-        match Message::from_vec(&buf[..n]) {
+        match Message::from_vec(buf.get(..n).unwrap_or_default()) {
             Ok(m) if m.metadata.id == id => return Ok(m),
             Ok(_) => continue, // a stray answer to another query; keep waiting
             Err(e) => return Err(ExchangeError::Bad(e.to_string())),

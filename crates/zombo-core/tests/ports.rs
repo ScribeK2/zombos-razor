@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! The TCP port test against fake hosts made of local listeners. The Go
 //! `hosting_reachability` scenarios, with the dial injected as in the Go tests.
 

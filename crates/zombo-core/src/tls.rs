@@ -329,9 +329,9 @@ pub fn assess(
     roots: &RootCertStore,
     now: OffsetDateTime,
 ) -> Result<Assessment, TlsError> {
-    if chain.is_empty() {
+    let Some((first, intermediates)) = chain.split_first() else {
         return Err(TlsError::NoCertificate);
-    }
+    };
     if chain.len() > MAX_CHAIN {
         return Err(TlsError::Chain(format!("{} certificates, more than {MAX_CHAIN}", chain.len())));
     }
@@ -339,11 +339,11 @@ pub fn assess(
         return Err(TlsError::Chain(format!("a certificate of {} bytes, more than {MAX_CERT_BYTES}", big.len())));
     }
     let certs = chain.iter().enumerate().map(|(i, der)| describe(der, i == 0)).collect::<Result<Vec<_>, _>>()?;
-    let (leaf, last) = (&certs[0], &certs[certs.len() - 1]);
+    let (Some(leaf), Some(last)) = (certs.first(), certs.last()) else { return Err(TlsError::NoCertificate) };
 
     let name = ServerName::try_from(server_name.to_owned()).map_err(|_| TlsError::BadName(server_name.to_owned()))?;
     let algs = provider().signature_verification_algorithms.all;
-    let parsed = match ParsedCertificate::try_from(&chain[0]) {
+    let parsed = match ParsedCertificate::try_from(first) {
         Ok(p) => p,
         Err(e) => {
             let (trust, verify_error) = (Trust::Invalid, Some(clean(&e.to_string())));
@@ -351,7 +351,7 @@ pub fn assess(
         }
     };
     let verify =
-        |at: OffsetDateTime| verify_server_cert_signed_by_trust_anchor(&parsed, roots, &chain[1..], unix(at), algs);
+        |at: OffsetDateTime| verify_server_cert_signed_by_trust_anchor(&parsed, roots, intermediates, unix(at), algs);
     let name_error = verify_server_name(&parsed, &name).err();
     let at_now = verify(now);
     let in_date = leaf.not_before <= now && now <= leaf.not_after;
@@ -585,7 +585,7 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
         ));
     }
 
-    let last = &r.chain[r.chain.len() - 1];
+    let Some(last) = r.chain.last() else { return out };
     match r.trust {
         Trust::SelfSigned => out.push(finding(
             "ssl_inspection_self_signed",

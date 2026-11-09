@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! CAA lookup and OCSP stapling detection, against scripted DNS and local TLS servers.
 
 #[path = "common/tls.rs"]

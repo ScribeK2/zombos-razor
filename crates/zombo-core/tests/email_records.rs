@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! TLS-RPT, BIMI and the MTA-STS TXT record: DNS only, no Go oracle.
 
 mod common;

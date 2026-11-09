@@ -44,7 +44,10 @@ impl fmt::Display for KeyTag {
 fn key_tag(rdata: &[u8], algorithm: Algorithm) -> KeyTag {
     if algorithm == Algorithm::RsaMd5 {
         // The one exception in Appendix B: the top 16 of the last 24 bits of the key.
-        return KeyTag(rdata.len().checked_sub(3).map_or(0, |i| u16::from_be_bytes([rdata[i], rdata[i + 1]])));
+        return KeyTag(match rdata.len().checked_sub(3).and_then(|i| rdata.get(i..i + 2)) {
+            Some(&[a, b]) => u16::from_be_bytes([a, b]),
+            _ => 0,
+        });
     }
     let mut sum: u32 = rdata.iter().enumerate().map(|(i, &b)| u32::from(b) << if i % 2 == 0 { 8 } else { 0 }).sum();
     sum += sum >> 16;
@@ -312,7 +315,7 @@ impl Rrsig {
     /// TTL, expiration, inception, key tag, signer name, signature.
     pub fn from_rdata(rdata: &[u8]) -> Option<Self> {
         let (head, rest) = rdata.split_first_chunk::<18>()?;
-        let u32_at = |i: usize| u32::from_be_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+        let [t0, t1, alg, _, _, _, _, _, e0, e1, e2, e3, i0, i1, i2, i3, k0, k1] = *head;
         let mut signer = String::new();
         let mut labels = rest;
         loop {
@@ -327,12 +330,12 @@ impl Rrsig {
             labels = tail;
         }
         Some(Rrsig {
-            covered: RecordType::from(u16::from_be_bytes([head[0], head[1]])),
-            algorithm: Algorithm::from_number(head[2]),
-            key_tag: KeyTag(u16::from_be_bytes([head[16], head[17]])),
+            covered: RecordType::from(u16::from_be_bytes([t0, t1])),
+            algorithm: Algorithm::from_number(alg),
+            key_tag: KeyTag(u16::from_be_bytes([k0, k1])),
             signer: if signer.is_empty() { ".".into() } else { signer },
-            expiration: u32_at(8),
-            inception: u32_at(12),
+            expiration: u32::from_be_bytes([e0, e1, e2, e3]),
+            inception: u32::from_be_bytes([i0, i1, i2, i3]),
         })
     }
 
@@ -405,8 +408,9 @@ pub fn validating_resolvers() -> Vec<Vantage> {
         ("Quad9", "Global anycast", "9.9.9.9"),
         ("OpenDNS", "United States", "208.67.222.222"),
     ]
-    .map(|(n, l, ip)| Vantage::resolver(n, l, SocketAddr::new(ip.parse().unwrap(), 53)))
-    .into()
+    .into_iter()
+    .filter_map(|(n, l, ip)| Some(Vantage::resolver(n, l, SocketAddr::new(ip.parse().ok()?, 53))))
+    .collect()
 }
 
 /// A nameserver's own DNSKEY set and SOA signature, asked directly.
@@ -665,7 +669,7 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         .iter()
         .map(|n| n.dnskeys.iter().map(|k| (k.flags, k.algorithm.number(), k.public_key.as_slice())).collect())
         .collect();
-    if key_sets.windows(2).any(|w| w[0] != w[1]) {
+    if key_sets.windows(2).any(|w| w.first() != w.get(1)) {
         let each: Vec<String> = answered.iter().map(|n| format!("{} serves {}", n.name, tags(&n.dnskeys))).collect();
         out.push(Finding {
             code: "dnssec_nameservers_disagree",
@@ -726,7 +730,9 @@ async fn in_order<T: Send + 'static>(jobs: Vec<impl Future<Output = T> + Send + 
         set.spawn(async move { (i, job.await) });
     }
     while let Some(Ok((i, out))) = set.join_next().await {
-        slots[i] = Some(out);
+        if let Some(slot) = slots.get_mut(i) {
+            *slot = Some(out);
+        }
     }
     slots.into_iter().flatten().collect()
 }

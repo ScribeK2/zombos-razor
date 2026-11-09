@@ -202,8 +202,8 @@ pub fn parse_spf(domain: &str, record: &str) -> ParsedSpf {
         }
         let term = |qualifier, mechanism| SpfTerm { qualifier, mechanism, void: false, target: None };
         // A modifier is `name=value`: the `=` comes before any `:` or `/`.
-        if let Some(i) = tok.find(['=', ':', '/']).filter(|&i| i > 0 && tok.as_bytes()[i] == b'=') {
-            let (name, value) = (tok[..i].to_ascii_lowercase(), &tok[i + 1..]);
+        if let Some((name, value)) = tok.split_once('=').filter(|(n, _)| !n.is_empty() && !n.contains([':', '/'])) {
+            let name = name.to_ascii_lowercase();
             let (mechanism, seen, label) = match name.as_str() {
                 "redirect" => (Mechanism::Redirect(value.into()), &mut has_redirect, "redirect"),
                 "exp" => (Mechanism::Exp(value.into()), &mut has_exp, "exp"),
@@ -215,11 +215,11 @@ pub fn parse_spf(domain: &str, record: &str) -> ParsedSpf {
             out.terms.push(term(Qualifier::Pass, mechanism));
             continue;
         }
-        let (qualifier, tok) = match tok.as_bytes()[0] {
-            b'+' => (Qualifier::Pass, &tok[1..]),
-            b'-' => (Qualifier::Fail, &tok[1..]),
-            b'~' => (Qualifier::SoftFail, &tok[1..]),
-            b'?' => (Qualifier::Neutral, &tok[1..]),
+        let (qualifier, tok) = match tok.chars().next() {
+            Some('+') => (Qualifier::Pass, &tok[1..]),
+            Some('-') => (Qualifier::Fail, &tok[1..]),
+            Some('~') => (Qualifier::SoftFail, &tok[1..]),
+            Some('?') => (Qualifier::Neutral, &tok[1..]),
             _ => (Qualifier::Pass, tok),
         };
         let (name, mut rest) = tok.split_once(':').unwrap_or((tok, ""));
@@ -356,6 +356,40 @@ impl Slot {
     }
 }
 
+/// The slots of one walk. Indices come only from `push`, so they are always in
+/// range; the spare slot keeps `[]` total without a panic path.
+struct Arena {
+    slots: Vec<Slot>,
+    spare: Slot,
+}
+
+impl Arena {
+    fn new(root: Slot) -> Arena {
+        Arena { slots: vec![root], spare: Slot::new(String::new(), vec![], None) }
+    }
+
+    fn push(&mut self, slot: Slot) -> usize {
+        self.slots.push(slot);
+        self.slots.len() - 1
+    }
+}
+
+impl std::ops::Index<usize> for Arena {
+    type Output = Slot;
+    fn index(&self, i: usize) -> &Slot {
+        self.slots.get(i).unwrap_or(&self.spare)
+    }
+}
+
+impl std::ops::IndexMut<usize> for Arena {
+    fn index_mut(&mut self, i: usize) -> &mut Slot {
+        match self.slots.get_mut(i) {
+            Some(s) => s,
+            None => &mut self.spare,
+        }
+    }
+}
+
 enum Query {
     /// The SPF record of an include or redirect target.
     Fetch(String, RefKind),
@@ -414,7 +448,7 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
     if audit.records.len() != 1 {
         return audit;
     }
-    let mut arena = vec![Slot::new(domain.to_string(), vec![domain.to_string()], Some(audit.records[0].clone()))];
+    let mut arena = Arena::new(Slot::new(domain.to_string(), vec![domain.to_string()], audit.records.first().cloned()));
     let mut level = vec![0];
     while !level.is_empty() {
         let mut jobs = vec![];
@@ -446,8 +480,7 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
                             audit.errors.push(SpfError::Loop { kind, domain: target.clone() });
                             let mut slot = Slot::new(target, vec![], None);
                             slot.error = Some(NodeError::Loop);
-                            arena.push(slot);
-                            let idx = arena.len() - 1;
+                            let idx = arena.push(slot);
                             arena[s].children.push((i, idx));
                             continue;
                         }
@@ -504,8 +537,7 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
                         }
                         Ok(Answer::Count(_)) => {}
                     }
-                    arena.push(slot);
-                    let idx = arena.len() - 1;
+                    let idx = arena.push(slot);
                     if arena[idx].record.is_some() {
                         level.push(idx);
                     }
@@ -513,7 +545,9 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
                 }
                 (Query::Count(name, host), Err(e)) => audit.failed.push(format!("{name}:{host}: {e}")),
                 (Query::Count(..), Ok(Answer::Count(0))) => {
-                    arena[job.slot].terms[job.term].void = true;
+                    if let Some(t) = arena[job.slot].terms.get_mut(job.term) {
+                        t.void = true;
+                    }
                     audit.void_lookups += 1;
                 }
                 (Query::Count(..), Ok(_)) => {}
@@ -531,11 +565,14 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
 }
 
 /// The arena as a tree. Depth is at most the lookup cap, since each level of it took a lookup.
-fn build(arena: &mut [Slot], i: usize) -> SpfNode {
+fn build(arena: &mut Arena, i: usize) -> SpfNode {
     let children = std::mem::take(&mut arena[i].children);
     let mut terms = std::mem::take(&mut arena[i].terms);
     for (term, child) in children {
-        terms[term].target = Some(Box::new(build(arena, child)));
+        let node = Box::new(build(arena, child));
+        if let Some(t) = terms.get_mut(term) {
+            t.target = Some(node);
+        }
     }
     SpfNode {
         domain: std::mem::take(&mut arena[i].domain),

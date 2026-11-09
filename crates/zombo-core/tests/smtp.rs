@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! The SMTP Check against a scripted server on 127.0.0.1 with throwaway certificates.
 
 #[path = "common/smtp.rs"]

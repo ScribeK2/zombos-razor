@@ -304,8 +304,10 @@ impl RdapEntity {
         let rows = self.vcard.get(1)?.as_array()?;
         rows.iter()
             .filter_map(|row| row.as_array())
-            .filter(|row| row.len() >= 4 && row[0] == "fn")
-            .filter_map(|row| row[3].as_str())
+            .filter_map(|row| match row.as_slice() {
+                [kind, _, _, value, ..] if kind == "fn" => value.as_str(),
+                _ => None,
+            })
             .next_back()
             .filter(|s| !s.is_empty())
             .map(String::from)
@@ -697,7 +699,7 @@ pub fn registrable_domain(host: &str) -> String {
 /// both become the EPP spelling, clientHold.
 fn epp_status(s: &str) -> String {
     let mut words: Vec<&str> = s.split_whitespace().collect();
-    if words.len() > 1 && words[words.len() - 1].starts_with("http") {
+    if words.len() > 1 && words.last().is_some_and(|w| w.starts_with("http")) {
         words.pop(); // WHOIS appends the ICANN explainer URL
     }
     let Some((first, rest)) = words.split_first() else { return String::new() };

@@ -768,7 +768,7 @@ impl Shell {
             };
             let item = div()
                 .id(("rail", i))
-                .track_focus(&self.rail_focus[i])
+                .when_some(self.rail_focus.get(i), |d, h| d.track_focus(h))
                 .h(px(t::RAIL_ITEM_HEIGHT))
                 .px(px(8.))
                 .flex()
@@ -1083,7 +1083,7 @@ impl Shell {
             .id(("finding", i))
             .w_full()
             .min_w_0()
-            .track_focus(&self.finding_focus[i.min(FINDING_HANDLES - 1)])
+            .when_some(self.finding_focus.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
             .flex()
             .gap(px(12.))
             .items_start()
@@ -1153,7 +1153,7 @@ impl Shell {
         };
         div()
             .id(("go", i))
-            .track_focus(&self.action_focus[i.min(FINDING_HANDLES - 1)])
+            .when_some(self.action_focus.get(i.min(FINDING_HANDLES - 1)), |d, h| d.track_focus(h))
             .flex_none()
             .h(px(28.))
             .px(px(12.))
@@ -1301,7 +1301,7 @@ impl Shell {
             .child(
                 div()
                     .id((id, 9999usize))
-                    .track_focus(&self.row_focus[slot])
+                    .when_some(self.row_focus.get(slot), |d, h| d.track_focus(h))
                     .h(px(32.))
                     .px(px(12.))
                     .flex()
@@ -1363,7 +1363,11 @@ impl Shell {
                         .role(Role::Table)
                         .aria_label(format!("{} data", section.label()))
                         .children(open_rows.into_iter().enumerate().map(|(i, (k, v, c))| {
-                            let shown = if i > 0 && o.facts[i - 1].key == k { String::new() } else { k.clone() };
+                            let shown = if i > 0 && o.facts.get(i - 1).is_some_and(|f| f.key == k) {
+                                String::new()
+                            } else {
+                                k.clone()
+                            };
                             div()
                                 .id(("fact", i))
                                 .min_h(px(t::ROW_HEIGHT))
