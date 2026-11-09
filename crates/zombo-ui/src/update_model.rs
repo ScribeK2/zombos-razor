@@ -89,11 +89,12 @@ impl Stage {
 pub fn background_check(
     setting: bool,
     target: Option<&Target>,
+    release_build: bool,
     state_path: &Path,
     now: i64,
     check: impl FnOnce() -> Result<Option<Available>, UpdateError>,
 ) -> Option<Offer> {
-    let target = target.filter(|_| setting)?;
+    let target = target.filter(|_| setting && availability(target, release_build) == Availability::Ready)?;
     let mut state = UpdateState::load(state_path);
     if !state.due(now) {
         return None;
@@ -169,7 +170,7 @@ mod tests {
         let path = dir.join("update.toml");
         let asked = Cell::new(0);
         let ask = |setting, t: Option<&Target>, now| {
-            background_check(setting, t, &path, now, || {
+            background_check(setting, t, false, &path, now, || {
                 asked.set(asked.get() + 1);
                 Ok(Some(release("v1.4.0")))
             })
@@ -190,7 +191,7 @@ mod tests {
     fn a_failed_check_still_counts_as_the_days_attempt_and_shows_nothing() {
         let dir = tmp("fail");
         let path = dir.join("update.toml");
-        let r = background_check(true, Some(&target(true)), &path, 7, || Err(UpdateError::TimedOut));
+        let r = background_check(true, Some(&target(true)), false, &path, 7, || Err(UpdateError::TimedOut));
         assert!(r.is_none());
         assert_eq!(UpdateState::load(&path).checked_at, Some(7));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -201,11 +202,26 @@ mod tests {
         let dir = tmp("skip");
         let path = dir.join("update.toml");
         skip(&path, &Version::parse("1.4.0").unwrap()).unwrap();
-        let ask = |now, tag: &str| background_check(true, Some(&target(true)), &path, now, || Ok(Some(release(tag))));
+        let ask =
+            |now, tag: &str| background_check(true, Some(&target(true)), false, &path, now, || Ok(Some(release(tag))));
         assert!(ask(0, "v1.4.0").is_none());
         assert!(ask(INTERVAL_SECS, "v1.5.0").is_some());
         assert_eq!(UpdateState::load(&path).skipped.as_deref(), Some("1.4.0"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_release_build_with_the_test_key_never_asks_and_leaves_no_trace() {
+        let dir = tmp("nokey");
+        let path = dir.join("update.toml");
+        let asked = Cell::new(0);
+        let r = background_check(true, Some(&target(true)), true, &path, 1, || {
+            asked.set(1);
+            Ok(Some(release("v1.4.0")))
+        });
+        assert!(r.is_none());
+        assert_eq!(asked.get(), 0, "the network closure must not run");
+        assert!(!path.exists(), "not even the day's stamp is written");
     }
 
     #[test]

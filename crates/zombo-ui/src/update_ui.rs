@@ -49,9 +49,14 @@ impl UpdateCard {
             let job = cx.background_executor().spawn(async move {
                 let target = Target::detect(std::env::var_os("APPIMAGE").as_deref());
                 let offer = path.and_then(|p| {
-                    update_model::background_check(check_updates, target.as_ref(), &p, config::unix_now(), || {
-                        update::check(&ep, &v)
-                    })
+                    update_model::background_check(
+                        check_updates,
+                        target.as_ref(),
+                        !cfg!(debug_assertions),
+                        &p,
+                        config::unix_now(),
+                        || update::check(&ep, &v),
+                    )
                 });
                 (target, offer)
             });
@@ -99,6 +104,9 @@ impl UpdateCard {
             Stage::Prompt(o) | Stage::Failed(o, _) if o.can_install => o.clone(),
             _ => return,
         };
+        if self.availability() != Availability::Ready {
+            return;
+        }
         let Some(target) = self.target.clone() else { return };
         self.stage = Stage::Applying(offer.clone());
         let ep = self.endpoints.clone();

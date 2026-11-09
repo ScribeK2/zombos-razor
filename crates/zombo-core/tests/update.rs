@@ -359,8 +359,10 @@ async fn a_release_configuration_refuses_the_embedded_test_key_before_any_reques
     let rel = check_in(ep.clone(), false).await.unwrap().unwrap();
     let inst = Install::new("testkey");
     let target = inst.path.clone();
+    let before = server.seen.lock().unwrap().len();
     let r = tokio::task::spawn_blocking(move || update::install_in(&ep, &rel, &target, true)).await.unwrap();
     assert!(matches!(r, Err(UpdateError::TestKeyEmbedded)), "{r:?}");
+    assert_eq!(server.seen.lock().unwrap().len(), before, "install sent no request");
     assert!(inst.untouched());
 }
 
