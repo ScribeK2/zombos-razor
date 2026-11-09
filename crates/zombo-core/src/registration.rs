@@ -33,11 +33,21 @@ pub struct Endpoints {
     pub whois_iana: String,
     /// Port of the server an IANA referral names.
     pub whois_referral_port: u16,
+    /// An `http://` or `https://` proxy for the RDAP requests. `None` honours `HTTP_PROXY` and `HTTPS_PROXY`.
+    pub proxy: Option<String>,
+}
+
+/// Whether a proxy setting can be used: an http or https URL that `ureq` accepts.
+pub fn check_proxy(proxy: &str) -> Result<(), String> {
+    if !(proxy.starts_with("http://") || proxy.starts_with("https://")) {
+        return Err("a proxy must start with http:// or https://".into());
+    }
+    ureq::Proxy::new(proxy).map(|_| ()).map_err(|e| e.to_string())
 }
 
 impl Default for Endpoints {
     fn default() -> Self {
-        Endpoints { rdap: BTreeMap::new(), whois: BTreeMap::new(), whois_iana: "whois.iana.org:43".into(), whois_referral_port: 43 }
+        Endpoints { rdap: BTreeMap::new(), whois: BTreeMap::new(), whois_iana: "whois.iana.org:43".into(), whois_referral_port: 43, proxy: None }
     }
 }
 
@@ -164,7 +174,7 @@ pub async fn check_registration(target: &str, endpoints: &Endpoints, limit: Dura
         let base = endpoints.rdap.get(tld).map(String::as_str).or_else(|| rdap_bases().get(tld).map(String::as_str));
         let rdap = match base {
             None => RdapError::NoService(tld.into()),
-            Some(base) => match rdap_lookup(base, &name, deadline).await {
+            Some(base) => match rdap_lookup(base, &name, deadline, endpoints.proxy.clone()).await {
                 Ok(r) => return Ok(r),
                 Err(e) => e,
             },
@@ -286,12 +296,12 @@ impl RdapEntity {
     }
 }
 
-async fn rdap_lookup(base: &str, name: &str, deadline: Instant) -> Result<Registration, RdapError> {
+async fn rdap_lookup(base: &str, name: &str, deadline: Instant, proxy: Option<String>) -> Result<Registration, RdapError> {
     let url = format!("{}/domain/{name}", base.trim_end_matches('/'));
     // Plain http is accepted only when the caller named such a base itself (a test server).
     let https_only = !base.starts_with("http://");
     let left = deadline.saturating_duration_since(Instant::now());
-    let (status, body) = tokio::task::spawn_blocking(move || rdap_get(&url, https_only, left))
+    let (status, body) = tokio::task::spawn_blocking(move || rdap_get(&url, https_only, left, proxy.as_deref()))
         .await
         .map_err(|e| RdapError::Request(e.to_string()))??;
     let mut r = Registration::empty(name, Source::Rdap, base);
@@ -322,9 +332,13 @@ async fn rdap_lookup(base: &str, name: &str, deadline: Instant) -> Result<Regist
 
 /// One bounded GET: (status, body). The body is read only for a 200, and an
 /// oversized one is an error, not a truncation.
-fn rdap_get(url: &str, https_only: bool, limit: Duration) -> Result<(ureq::http::StatusCode, Vec<u8>), RdapError> {
+fn rdap_get(url: &str, https_only: bool, limit: Duration, proxy: Option<&str>) -> Result<(ureq::http::StatusCode, Vec<u8>), RdapError> {
     let fail = |e: ureq::Error| RdapError::Request(e.to_string());
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let mut builder = ureq::Agent::config_builder();
+    if let Some(p) = proxy {
+        builder = builder.proxy(Some(ureq::Proxy::new(p).map_err(fail)?));
+    }
+    let agent: ureq::Agent = builder
         .timeout_global(Some(limit))
         .max_redirects(MAX_REDIRECTS)
         .https_only(https_only)

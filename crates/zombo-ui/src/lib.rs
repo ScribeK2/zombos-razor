@@ -1,11 +1,14 @@
 pub mod checks;
+pub mod config;
 pub mod diagnosis;
 pub mod keys;
+pub mod notice;
 pub mod ondemand;
 pub mod outcome;
 pub mod record;
 pub mod runtime;
 pub mod section;
+pub mod settings_model;
 pub mod status;
 pub mod theme;
 pub mod watch;
