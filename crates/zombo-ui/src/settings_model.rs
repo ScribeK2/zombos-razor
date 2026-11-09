@@ -279,7 +279,7 @@ fn default_budget(section: Section) -> Budget {
         Section::Registration => (15, 12),
         Section::Email => (25, 4),
         Section::Web => (12, 10),
-        Section::Tls => (10, 8),
+        Section::Tls | Section::TlsPort => (10, 8),
         Section::Smtp => (40, 40),
         Section::Blacklist => (25, 25),
         _ => (20, 4),
@@ -522,6 +522,7 @@ mod tests {
             (Section::Tls, 10, 8),
             (Section::Registration, 15, 12),
             (Section::Smtp, 40, 40),
+            (Section::TlsPort, 10, 8),
             (Section::Blacklist, 25, 25),
             (Section::Ports, 20, 4),
         ];
@@ -542,7 +543,7 @@ mod tests {
 
     #[test]
     fn an_on_demand_check_never_gets_less_than_its_default() {
-        for s in [Section::Ports, Section::Smtp, Section::Blacklist] {
+        for s in [Section::Ports, Section::Smtp, Section::TlsPort, Section::Blacklist] {
             let d = budget(s, None);
             assert_eq!(budget(s, Some(secs(1))), d, "{s:?}");
             assert_eq!(budget(s, Some(secs(120))).whole, secs(120));

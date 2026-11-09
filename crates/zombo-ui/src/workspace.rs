@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(ws.current().unwrap().section, Section::Email);
         ws.jump(Section::FIRST_ON_DEMAND);
         assert_eq!(ws.current().unwrap().section, Section::Ports);
-        ws.jump(11);
+        ws.jump(12);
         assert_eq!(ws.current().unwrap().section, Section::Ports);
         ws.jump(4);
         ws.step_section(1);

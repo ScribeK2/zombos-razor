@@ -39,7 +39,7 @@ pub fn owner(code: &str) -> Option<Section> {
 /// The section a "go there" button should open from `current`: the owner, unless the rep is
 /// already looking at it.
 pub fn jump_target(code: &str, current: Section) -> Option<Section> {
-    owner(code).filter(|&s| s != current)
+    owner(code).filter(|&s| s != current && !(current == Section::TlsPort && s == Section::Tls))
 }
 
 /// The digit of the Ctrl+digit shortcut that opens `section`, when it has one. Ctrl+9 opens the
@@ -126,6 +126,13 @@ mod tests {
         for (code, want) in cases {
             assert_eq!(owner(code), want, "{code}");
         }
+    }
+
+    #[test]
+    fn a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section() {
+        assert_eq!(jump_target("tls_expired", Section::TlsPort), None);
+        assert_eq!(jump_target("tls_expired", Section::Summary), Some(Section::Tls));
+        assert_eq!(jump_target("caa_no_issue", Section::TlsPort), None);
     }
 
     #[test]

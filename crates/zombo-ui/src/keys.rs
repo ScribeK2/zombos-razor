@@ -32,7 +32,8 @@ pub enum Action {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Omnibox,
-    /// The Evidence paste pane's text area: typing, like the omnibox, but Enter adds a line.
+    /// A text field other than the omnibox (the Evidence paste area, the TLS port field): typing, so
+    /// no plain key is a shortcut.
     Paste,
     Browse,
     Palette,
@@ -84,6 +85,7 @@ const BINDINGS: &[Binding] = &[
     bind("r", true, false, false, When::Always, Action::Rerun, "Re-run this section's Check"),
     bind("p", true, false, true, When::Always, Action::Run(Section::Ports), "Run port scan"),
     bind("s", true, false, true, When::Always, Action::Run(Section::Smtp), "Run SMTP banner check"),
+    bind("t", true, false, true, When::Always, Action::Run(Section::TlsPort), "Run TLS on a port check"),
     bind("b", true, false, true, When::Always, Action::Run(Section::Blacklist), "Run blacklist check"),
     bind("h", true, false, true, When::Always, Action::OpenEvidence(Kind::Headers), "Analyse pasted headers"),
     bind("m", true, false, true, When::Always, Action::OpenEvidence(Kind::MailLog), "Analyse pasted mail log"),
@@ -237,6 +239,7 @@ mod tests {
             (ctrl("9"), Jump(8)),
             (press("p", true, false, true), Run(Section::Ports)),
             (press("s", true, false, true), Run(Section::Smtp)),
+            (press("t", true, false, true), Run(Section::TlsPort)),
             (press("b", true, false, true), Run(Section::Blacklist)),
         ];
         for (p, want) in cases {

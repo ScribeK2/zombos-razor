@@ -5,7 +5,7 @@ use std::{
 
 use crate::settings::{PaneEvent, SettingsPane};
 use crate::update_ui::UpdateCard;
-use gpui_kit::component::input::{Input, InputState, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use zombo_core::Severity;
@@ -41,6 +41,7 @@ const TOAST_FOR: Duration = Duration::from_secs(8);
 pub struct Shell {
     ws: Workspace,
     input: Entity<InputState>,
+    port_input: Entity<InputState>,
     root_focus: FocusHandle,
     pane_focus: FocusHandle,
     rail_focus: Vec<FocusHandle>,
@@ -129,6 +130,19 @@ impl Shell {
     pub fn new(started: Instant, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("domain, host, IP or email"));
         input.update(cx, |i, cx| i.focus(window, cx));
+        let port_input = cx.new(|cx| InputState::new(window, cx).placeholder("other port"));
+        cx.subscribe_in(&port_input, window, |this, input, ev: &InputEvent, window, cx| match ev {
+            InputEvent::Change => {
+                let text = input.read(cx).value().to_string();
+                if let Some(tab) = this.ws.current_mut() {
+                    tab.tls_port.typed(&text);
+                }
+                cx.notify();
+            }
+            InputEvent::PressEnter { .. } => this.perform(Action::Run(Section::TlsPort), window, cx),
+            _ => {}
+        })
+        .detach();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -164,6 +178,7 @@ impl Shell {
         Shell {
             ws,
             input,
+            port_input,
             root_focus: cx.focus_handle(),
             pane_focus: cx.focus_handle(),
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
@@ -200,7 +215,9 @@ impl Shell {
             Mode::Sheet
         } else if self.input.read(cx).focus_handle(cx).is_focused(window) {
             Mode::Omnibox
-        } else if self.pastes.values().any(|p| p.read(cx).focus_handle(cx).is_focused(window)) {
+        } else if self.port_input.read(cx).focus_handle(cx).is_focused(window)
+            || self.pastes.values().any(|p| p.read(cx).focus_handle(cx).is_focused(window))
+        {
             Mode::Paste
         } else {
             Mode::Browse
@@ -219,6 +236,12 @@ impl Shell {
     fn sync_omnibox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.ws.current().map(|t| t.target.value.clone()).unwrap_or_default();
         self.set_omnibox(&text, window, cx);
+        self.sync_port_input(window, cx);
+    }
+
+    fn sync_port_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let port = self.ws.current().map(|t| t.tls_port.text().to_string()).unwrap_or_default();
+        self.port_input.update(cx, |i, cx| i.set_value(port, window, cx));
     }
 
     fn focus_omnibox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -240,7 +263,7 @@ impl Shell {
         }
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
-        let smtp = tab.smtp_request();
+        let options = tab.options();
         if section == Section::Dns {
             let settings = self.config.settings.clone();
             let mut rx = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
@@ -265,11 +288,18 @@ impl Shell {
             .detach();
             return;
         }
+        let options = match options {
+            Ok(o) => o,
+            Err(e) => {
+                self.toast = Some((e.into(), Instant::now()));
+                return;
+            }
+        };
         if let Some(tab) = self.ws.diagnosis_mut_for(&key) {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, smtp, tx));
+        let mut rx = runtime::stream(move |tx| checks::run_section(section, name, settings, options, tx));
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {
                 let key = key.clone();
@@ -404,6 +434,10 @@ impl Shell {
                 match self.ws.current().map(|t| t.section) {
                     Some(Section::Dns) => self.ws.step_record(delta),
                     Some(Section::Smtp) => self.ws.current_mut().into_iter().for_each(|t| t.step_port(delta)),
+                    Some(Section::TlsPort) => {
+                        self.ws.current_mut().into_iter().for_each(|t| t.step_tls_port(delta));
+                        self.sync_port_input(window, cx);
+                    }
                     _ => {}
                 }
             }
@@ -1032,6 +1066,7 @@ impl Shell {
                 )
             })
             .when(section == Section::Smtp, |s| s.child(self.port_field(tab, cx)))
+            .when(section == Section::TlsPort, |s| s.child(self.tls_port_field(tab, cx)))
             .when(state.can_retry(), |s| {
                 s.child(
                     div()

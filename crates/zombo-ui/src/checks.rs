@@ -101,30 +101,41 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
     let _ = tx.send(event);
 }
 
+/// What the tab asks of the Checks that take a choice: the SMTP port and host, the TLS port.
+#[derive(Debug, Clone, Copy)]
+pub struct Options {
+    pub smtp: smtp_plan::Request,
+    pub tls_port: u16,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { smtp: smtp_plan::Request::default(), tls_port: crate::tls_port::PRESETS[0] }
+    }
+}
+
 pub async fn run_section(
     section: Section,
     name: String,
     settings: Settings,
-    smtp: smtp_plan::Request,
+    options: Options,
     tx: UnboundedSender<CheckEvent>,
 ) {
     let _ = tx.send(CheckEvent::Started);
-    let event =
-        match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings, smtp))
-            .await
-        {
-            Ok(result) => CheckEvent::Finished(Box::new(result)),
-            Err(_) => CheckEvent::TimedOut,
-        };
+    let event = match tokio::time::timeout(
+        budget(section, settings.timeout).whole,
+        produce(section, &name, &settings, options),
+    )
+    .await
+    {
+        Ok(result) => CheckEvent::Finished(Box::new(result)),
+        Err(_) => CheckEvent::TimedOut,
+    };
     let _ = tx.send(event);
 }
 
-async fn produce(
-    section: Section,
-    name: &str,
-    settings: &Settings,
-    smtp: smtp_plan::Request,
-) -> Result<Outcome, String> {
+async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
+    let smtp = options.smtp;
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section {
@@ -154,6 +165,10 @@ async fn produce(
             let (tls, caa) = tokio::join!(check_tls(name, 443, query), check_caa(&bootstrap, name, query));
             tls.map(|r| with_caa(tls_outcome(name, &r), &caa, Some(&r))).map_err(|e| e.to_string())
         }
+        Section::TlsPort => check_tls(name, options.tls_port, query)
+            .await
+            .map(|r| tls_outcome_on(name, options.tls_port, &r))
+            .map_err(|e| e.to_string()),
         Section::Registration => {
             check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
                 .await
@@ -296,12 +311,22 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
 }
 
 pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
-    let mut facts = vec![
+    tls_outcome_on(host, 443, r)
+}
+
+/// The TLS section's rows and findings for a handshake on any port. Off 443 the port is the
+/// first row, so a copied section says which service it describes.
+pub fn tls_outcome_on(host: &str, port: u16, r: &TlsResult) -> Outcome {
+    let mut facts = vec![];
+    if port != 443 {
+        facts.push(Fact::new("Port", port.to_string()));
+    }
+    facts.extend([
         Fact::new("Protocol", &r.version),
         Fact::new("Cipher", &r.cipher),
         Fact::new("Trust", format!("{:?}", r.trust)),
         Fact::new("Name matches", if r.hostname_match { "yes" } else { "no" }),
-    ];
+    ]);
     if let Some(leaf) = r.chain.first() {
         facts.push(Fact::new("Subject", &leaf.subject));
         facts.push(Fact::new("Issuer", &leaf.issuer));
@@ -315,8 +340,8 @@ pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
             Fact::new(format!("Certificate {}", i + 1), format!("{} issued by {}, {}", c.subject, c.issuer, c.key))
         })
         .collect();
-    let mut findings = tls_findings(host, 443, r);
-    findings.extend(ocsp_findings(host, 443, r));
+    let mut findings = tls_findings(host, port, r);
+    findings.extend(ocsp_findings(host, port, r));
     Outcome { findings, facts, details_title: "Certificate chain", details }
 }
 
@@ -505,6 +530,42 @@ mod tests {
         assert_eq!(automatic(Kind::Hostname), [Section::Dns, Section::Web, Section::Tls, Section::Registration]);
         assert!(automatic(Kind::Ip).is_empty());
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
+    }
+
+    fn tls_result() -> TlsResult {
+        use zombo_core::tls::{KeyInfo, TlsCert, Trust};
+        let now = time::OffsetDateTime::now_utc();
+        TlsResult {
+            version: "TLS 1.3".into(),
+            cipher: "TLS_AES_128_GCM_SHA256".into(),
+            chain: vec![TlsCert {
+                subject: "other.example".into(),
+                issuer: "Test CA".into(),
+                sans: vec!["other.example".into()],
+                not_before: now - time::Duration::days(30),
+                not_after: now + time::Duration::days(300),
+                self_signed: false,
+                is_ca: false,
+                key: KeyInfo::Rsa(2048),
+                signature: "SHA256-RSA".into(),
+            }],
+            hostname_match: false,
+            verified: false,
+            trust: Trust::Ok,
+            verify_error: None,
+            ocsp_stapled: false,
+        }
+    }
+
+    #[test]
+    fn a_tls_check_on_another_port_names_the_port_in_its_rows_and_findings() {
+        let on_993 = tls_outcome_on("mail.example.com", 993, &tls_result());
+        assert_eq!(on_993.facts[0], Fact::new("Port", "993"));
+        assert!(on_993.findings.iter().any(|f| f.message.contains("mail.example.com:993")), "{:?}", on_993.findings);
+        assert!(on_993.findings.iter().all(|f| !f.message.contains(":443")), "{:?}", on_993.findings);
+        let on_443 = tls_outcome("mail.example.com", &tls_result());
+        assert_eq!(on_443.facts[0].key, "Protocol");
+        assert!(on_443.findings.iter().any(|f| f.message.contains("mail.example.com:443")));
     }
 
     #[test]

@@ -13,7 +13,9 @@ pub struct Brief {
 /// The Checks a rep can ask for on this kind of target. They never start by themselves.
 pub fn on_demand(kind: Kind) -> &'static [Section] {
     match kind {
-        Kind::Domain | Kind::Hostname | Kind::Email | Kind::Ip => &[Section::Ports, Section::Smtp, Section::Blacklist],
+        Kind::Domain | Kind::Hostname | Kind::Email | Kind::Ip => {
+            &[Section::Ports, Section::Smtp, Section::TlsPort, Section::Blacklist]
+        }
     }
 }
 
@@ -30,6 +32,7 @@ pub fn run_label(section: Section) -> Option<&'static str> {
     match section {
         Section::Ports => Some("Run port scan"),
         Section::Smtp => Some("Run SMTP banner check"),
+        Section::TlsPort => Some("Run TLS check"),
         Section::Blacklist => Some("Run blacklist check"),
         _ => None,
     }
@@ -55,6 +58,11 @@ pub fn brief(section: Section) -> Option<Brief> {
             "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
             "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
         )),
+        Section::TlsPort => Some(brief(
+            "Opens a TLS connection to one port of the target and reads the certificate and protocol it presents. It sends no mail and no web request.",
+            "The target's own server, on the port you pick below: its first address, found by this machine's resolver. The target sees one TLS handshake.".into(),
+            "Port 443 is the website. Mail servers present their own certificate on 465, 993 and 995. A server that starts TLS with STARTTLS on 25 or 587 is checked in the SMTP banner check.",
+        )),
         Section::Blacklist => Some(brief(
             "Asks public blocklists whether the target's address, or a domain and its mail hosts, are listed for spam.",
             format!(
@@ -72,9 +80,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_target_kind_can_ask_for_the_three_checks() {
+    fn every_target_kind_can_ask_for_the_four_checks() {
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
-            assert_eq!(on_demand(kind), [Section::Ports, Section::Smtp, Section::Blacklist], "{kind:?}");
+            assert_eq!(
+                on_demand(kind),
+                [Section::Ports, Section::Smtp, Section::TlsPort, Section::Blacklist],
+                "{kind:?}"
+            );
         }
     }
 
@@ -104,6 +116,7 @@ mod tests {
         let ports = brief(Section::Ports).unwrap();
         assert!(ports.contacts.contains("25") && ports.contacts.contains("3306"));
         assert!(brief(Section::Smtp).unwrap().contacts.contains("MX hosts"));
+        assert!(brief(Section::TlsPort).unwrap().contacts.contains("on the port you pick"));
         assert!(brief(Section::Blacklist).unwrap().contacts.contains("Nothing connects to the target"));
     }
 }

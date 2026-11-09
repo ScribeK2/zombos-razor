@@ -273,6 +273,7 @@ pub struct Tab {
     pub record: RecordKind,
     pub runs: HashMap<Section, Run>,
     pub smtp_port: u16,
+    pub tls_port: crate::tls_port::PortChoice,
 }
 
 impl Tab {
@@ -284,6 +285,7 @@ impl Tab {
             record: RecordKind::default(),
             runs: HashMap::new(),
             smtp_port: smtp_plan::PORTS[0],
+            tls_port: Default::default(),
         }
     }
 
@@ -291,8 +293,20 @@ impl Tab {
         self.smtp_port = crate::cycle::step(&smtp_plan::PORTS, self.smtp_port, delta);
     }
 
+    /// `[` and `]` step through the five chips. A typed port that is not a chip starts at the first.
+    pub fn step_tls_port(&mut self, delta: isize) {
+        let next = crate::cycle::step(&crate::tls_port::PRESETS, self.tls_port.port(), delta);
+        self.tls_port.choose(next);
+    }
+
     pub fn smtp_request(&self) -> smtp_plan::Request {
         smtp_plan::Request::new(self.target.kind, self.smtp_port)
+    }
+
+    /// The choices the on-demand Checks run with. A typed TLS port that is not a port is an
+    /// error here, so the Check never runs on a port the rep did not ask for.
+    pub fn options(&self) -> Result<crate::checks::Options, &'static str> {
+        Ok(crate::checks::Options { smtp: self.smtp_request(), tls_port: self.tls_port.to_run()? })
     }
 
     pub fn run_mut(&mut self, section: Section) -> &mut Run {
@@ -607,10 +621,25 @@ mod tests {
             assert_eq!(v.word, "NOT RUN");
             assert!(v.why.contains("has not started"), "{}", v.why);
         }
-        for s in [Section::Ports, Section::Smtp, Section::Blacklist] {
+        for s in [Section::Ports, Section::Smtp, Section::TlsPort, Section::Blacklist] {
             assert_eq!(t.state(s), CheckState::NotRun);
             assert!(t.verdict(s).why.contains("only when you ask"));
         }
+    }
+
+    #[test]
+    fn the_tls_port_runs_what_was_chosen_and_never_a_bad_typed_port() {
+        let mut t = tab();
+        assert_eq!(t.options().map(|o| o.tls_port), Ok(443));
+        t.step_tls_port(1);
+        assert_eq!(t.options().map(|o| o.tls_port), Ok(465));
+        t.step_tls_port(-1);
+        t.step_tls_port(-1);
+        assert_eq!(t.options().map(|o| o.tls_port), Ok(8443));
+        t.tls_port.typed("0");
+        assert_eq!(t.options().map(|o| o.tls_port), Err(crate::tls_port::INVALID));
+        t.tls_port.typed("2525");
+        assert_eq!(t.options().map(|o| o.tls_port), Ok(2525));
     }
 
     #[test]
