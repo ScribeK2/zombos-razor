@@ -45,7 +45,10 @@ fn reverse_names_for_both_families() {
     assert_eq!(reverse_name("203.0.113.7".parse().unwrap()), "7.113.0.203.in-addr.arpa.");
     let v6 = format!("1.{}8.b.d.0.1.0.0.2.ip6.arpa.", "0.".repeat(23));
     assert_eq!(reverse_name("2001:db8::1".parse().unwrap()), v6);
-    assert_eq!(reverse_name("fe80::abcd".parse().unwrap()), "d.c.b.a.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.e.f.ip6.arpa.");
+    assert_eq!(
+        reverse_name("fe80::abcd".parse().unwrap()),
+        "d.c.b.a.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.e.f.ip6.arpa."
+    );
 }
 
 #[tokio::test]
@@ -71,7 +74,11 @@ async fn a_ptr_resolving_to_another_address_fails_forward_confirmation() {
     assert!(!ptrs(&r)[0].confirmed);
     assert_eq!(codes(&fs), ["rdns_not_confirmed"]);
     assert_eq!(fs[0].severity, Severity::Warning);
-    assert!(fs[0].message.contains("resolves to 203.0.113.99, not 203.0.113.7") && fs[0].message.contains("FCrDNS"), "{}", fs[0].message);
+    assert!(
+        fs[0].message.contains("resolves to 203.0.113.99, not 203.0.113.7") && fs[0].message.contains("FCrDNS"),
+        "{}",
+        fs[0].message
+    );
 }
 
 #[tokio::test]
@@ -132,7 +139,10 @@ async fn a_silent_forward_lookup_is_unknown_not_a_failure() {
 async fn a_host_reports_each_address() {
     let (r, fs) = run(&zone("example"), "example.com").await;
     let RdnsResult::Host { addresses, errors, .. } = &r else { panic!("{r:?}") };
-    assert_eq!(addresses.iter().map(ToString::to_string).collect::<Vec<_>>(), ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]);
+    assert_eq!(
+        addresses.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]
+    );
     assert!(errors.is_empty());
     assert_eq!(codes(&fs), ["rdns_addresses"]);
     assert!(fs[0].message.contains("93.184.216.34, 2606:2800:220:1:248:1893:25c8:1946"));
@@ -164,9 +174,10 @@ async fn a_reply_with_no_answers_means_no_ptr() {
 async fn a_cname_in_front_of_the_ptr_is_followed_by_the_resolver_and_read() {
     // RFC 2317 classless delegation: the reverse name is an alias of the name that holds the PTR.
     let server = serve(|name, t| match (name, t) {
-        ("7.113.0.203.in-addr.arpa", RecordType::PTR) => {
-            Reply::Answers(vec![cname(name, "7.0-25.113.0.203.in-addr.arpa."), ptr("7.0-25.113.0.203.in-addr.arpa.", "mail.example.com.")])
-        }
+        ("7.113.0.203.in-addr.arpa", RecordType::PTR) => Reply::Answers(vec![
+            cname(name, "7.0-25.113.0.203.in-addr.arpa."),
+            ptr("7.0-25.113.0.203.in-addr.arpa.", "mail.example.com."),
+        ]),
         ("mail.example.com", RecordType::A) => Reply::Answers(vec![a(name, "203.0.113.7")]),
         _ => Reply::NxDomain,
     })
@@ -190,7 +201,9 @@ async fn a_cname_instead_of_an_address_does_not_confirm() {
 #[tokio::test]
 async fn a_flood_of_ptr_names_is_bounded() {
     let server = serve(|name, t| match (name, t) {
-        ("7.113.0.203.in-addr.arpa", RecordType::PTR) => Reply::Answers((0..60).map(|i| ptr(name, &format!("h{i}.example.com."))).collect()),
+        ("7.113.0.203.in-addr.arpa", RecordType::PTR) => {
+            Reply::Answers((0..60).map(|i| ptr(name, &format!("h{i}.example.com."))).collect())
+        }
         _ => Reply::NxDomain,
     })
     .await;

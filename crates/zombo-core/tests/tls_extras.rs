@@ -1,21 +1,18 @@
 //! CAA lookup and OCSP stapling detection, against scripted DNS and local TLS servers.
 
+#[path = "common/tls.rs"]
+mod pki;
 #[path = "common/scripted.rs"]
 mod scripted;
 #[path = "common/stapling.rs"]
 mod stapling;
-#[path = "common/tls.rs"]
-mod pki;
 
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use hickory_proto::rr::{
-    Name, RData, Record, RecordType,
-    rdata::CAA,
-};
+use hickory_proto::rr::{Name, RData, Record, RecordType, rdata::CAA};
 use pki::{Ca, NOW};
 use scripted::Reply;
 use zombo_core::{
@@ -41,7 +38,8 @@ async fn dns(sets: Vec<(&'static str, &'static str, &'static str)>) -> (std::net
     let addr = scripted::serve(move |name, t| {
         assert_eq!(t, RecordType::CAA);
         log.lock().unwrap().push(name.to_string());
-        let records: Vec<Record> = sets.iter().filter(|(o, _, _)| *o == name).map(|(o, tag, v)| caa(o, tag, v)).collect();
+        let records: Vec<Record> =
+            sets.iter().filter(|(o, _, _)| *o == name).map(|(o, tag, v)| caa(o, tag, v)).collect();
         Reply::Answers(records)
     })
     .await;
@@ -74,7 +72,8 @@ async fn the_lookup_climbs_to_the_nearest_parent_with_records() {
 
 #[tokio::test]
 async fn the_nearest_set_wins_and_the_climb_stops_below_the_root() {
-    let (addr, asked) = dns(vec![("www.example.test", "issue", "digicert.com"), ("example.test", "issue", "letsencrypt.org")]).await;
+    let (addr, asked) =
+        dns(vec![("www.example.test", "issue", "digicert.com"), ("example.test", "issue", "letsencrypt.org")]).await;
     let r = check_caa(&[addr], HOST, Duration::from_secs(2)).await;
     assert_eq!(r.found_at.as_deref(), Some("www.example.test"));
     assert_eq!(asked.lock().unwrap().len(), 1);
@@ -129,7 +128,11 @@ async fn issuewild_is_noted_and_judges_wildcard_certificates() {
     let fs = caa_findings(&r, Some(&wild));
     assert!(codes(&fs).contains(&"caa_forbids_all"), "{:?}", codes(&fs));
 
-    let r = caa_of(vec![("www.example.test", "issue", "letsencrypt.org"), ("www.example.test", "issuewild", "digicert.com")]).await;
+    let r = caa_of(vec![
+        ("www.example.test", "issue", "letsencrypt.org"),
+        ("www.example.test", "issuewild", "digicert.com"),
+    ])
+    .await;
     let fs = caa_findings(&r, Some(&wild));
     assert!(codes(&fs).contains(&"caa_forbids_issuer"), "{:?}", codes(&fs));
 }
@@ -145,7 +148,11 @@ async fn records_that_do_not_restrict_issuance_say_so() {
 
 #[tokio::test]
 async fn hostile_caa_values_are_cleaned_and_bounded() {
-    let r = caa_of(vec![("www.example.test", "issue", "evil\x1b[2J.test"), ("www.example.test", "issue", Box::leak("x".repeat(5000).into_boxed_str()))]).await;
+    let r = caa_of(vec![
+        ("www.example.test", "issue", "evil\x1b[2J.test"),
+        ("www.example.test", "issue", Box::leak("x".repeat(5000).into_boxed_str())),
+    ])
+    .await;
     assert!(r.records.iter().all(|c| !c.value.chars().any(char::is_control) && c.value.len() < 400));
 }
 

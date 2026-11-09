@@ -72,7 +72,13 @@ pub async fn dns_lookup(
         let name = name.clone();
         set.spawn(async move { (t, exchange(server, &name, t, recursion_desired, limit).await) });
     }
-    let mut res = LookupResult { rcode: Rcode::NoError, authoritative: true, recursion_available: false, records: BTreeMap::new(), errors: BTreeMap::new() };
+    let mut res = LookupResult {
+        rcode: Rcode::NoError,
+        authoritative: true,
+        recursion_available: false,
+        records: BTreeMap::new(),
+        errors: BTreeMap::new(),
+    };
     let (mut answers, mut first_err) = (0, String::new());
     while let Some(Ok((t, out))) = set.join_next().await {
         let typ = t.to_string();

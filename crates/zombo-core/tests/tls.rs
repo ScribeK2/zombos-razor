@@ -16,7 +16,11 @@ use zombo_core::{
 const HOST: &str = "example.test";
 const WAIT: Duration = Duration::from_secs(5);
 
-async fn inspect(addr: std::net::SocketAddr, roots: &rustls::RootCertStore, now: time::OffsetDateTime) -> Result<TlsResult, TlsError> {
+async fn inspect(
+    addr: std::net::SocketAddr,
+    roots: &rustls::RootCertStore,
+    now: time::OffsetDateTime,
+) -> Result<TlsResult, TlsError> {
     check_tls_via(addr, HOST, roots, now, WAIT).await
 }
 
@@ -121,7 +125,11 @@ async fn the_soonest_expiry_in_the_chain_is_reported_by_name() {
     let r = inspect(addr, &root.roots(), NOW).await.unwrap();
     let fs = tls_findings_at(HOST, 443, &r, NOW);
     let f = find(&fs, "ssl_inspection_expiring");
-    assert!(f.message.starts_with("The chain certificate Test Intermediate on example.test:443 expires on "), "{}", f.message);
+    assert!(
+        f.message.starts_with("The chain certificate Test Intermediate on example.test:443 expires on "),
+        "{}",
+        f.message
+    );
 }
 
 #[tokio::test]
@@ -241,7 +249,8 @@ fn garbage_in_place_of_a_certificate_is_an_error_not_a_panic() {
 async fn a_server_that_never_answers_times_out() {
     let addr = pki::serve_silent().await;
     let began = std::time::Instant::now();
-    let e = check_tls_via(addr, HOST, &rustls::RootCertStore::empty(), NOW, Duration::from_millis(300)).await.unwrap_err();
+    let e =
+        check_tls_via(addr, HOST, &rustls::RootCertStore::empty(), NOW, Duration::from_millis(300)).await.unwrap_err();
     assert!(matches!(e, TlsError::TimedOut), "{e:?}");
     assert!(began.elapsed() < Duration::from_secs(3));
 }

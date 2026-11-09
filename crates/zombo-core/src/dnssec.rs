@@ -450,7 +450,9 @@ pub enum DnssecError {
     BadName(String),
     #[error("no resolver could say whether {0} has a DS record at its parent")]
     NoDs(String),
-    #[error("neither the validating resolvers nor the nameservers answered; outbound DNS may be blocked on this network")]
+    #[error(
+        "neither the validating resolvers nor the nameservers answered; outbound DNS may be blocked on this network"
+    )]
     NoneAnswered,
 }
 
@@ -483,10 +485,13 @@ pub async fn dnssec_with(
 ) -> Result<DnssecResult, DnssecError> {
     let apex_name = Name::from_ascii(apex).map_err(|_| DnssecError::BadName(apex.into()))?;
     let resolver_jobs: Vec<_> = validating.iter().cloned().map(|v| verdict(v, apex_name.clone(), limit)).collect();
-    let ns_jobs: Vec<_> = nameservers.iter().cloned().map(|v| nameserver_view(v, apex_name.clone(), now, limit)).collect();
+    let ns_jobs: Vec<_> =
+        nameservers.iter().cloned().map(|v| nameserver_view(v, apex_name.clone(), now, limit)).collect();
     let (resolvers, nameservers, ds_answer) =
         tokio::join!(in_order(resolver_jobs), in_order(ns_jobs), lookup(bootstrap, &apex_name, RecordType::DS, limit));
-    let ds_answer = ds_answer.filter(|m| m.metadata.response_code == ResponseCode::NoError).ok_or_else(|| DnssecError::NoDs(apex.into()))?;
+    let ds_answer = ds_answer
+        .filter(|m| m.metadata.response_code == ResponseCode::NoError)
+        .ok_or_else(|| DnssecError::NoDs(apex.into()))?;
 
     if resolvers.iter().all(|r| r.status == ResolverStatus::NoAnswer) && nameservers.iter().all(|n| n.error.is_some()) {
         return Err(DnssecError::NoneAnswered);
@@ -515,7 +520,11 @@ fn span(secs: u32) -> String {
 fn tags(keys: &[Dnskey]) -> String {
     match keys {
         [] => "no keys".into(),
-        keys => format!("key{} {}", if keys.len() == 1 { "" } else { "s" }, keys.iter().map(|k| k.key_tag.to_string()).collect::<Vec<_>>().join(", ")),
+        keys => format!(
+            "key{} {}",
+            if keys.len() == 1 { "" } else { "s" },
+            keys.iter().map(|k| k.key_tag.to_string()).collect::<Vec<_>>().join(", ")
+        ),
     }
 }
 
@@ -523,7 +532,9 @@ fn tags(keys: &[Dnskey]) -> String {
 pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
     let mut out = vec![];
     let answered: Vec<&NameserverView> = r.nameservers.iter().filter(|n| n.error.is_none()).collect();
-    let resolvers = |s: ResolverStatus| r.resolvers.iter().filter(|v| v.status == s).map(|v| v.resolver.as_str()).collect::<Vec<_>>();
+    let resolvers = |s: ResolverStatus| {
+        r.resolvers.iter().filter(|v| v.status == s).map(|v| v.resolver.as_str()).collect::<Vec<_>>()
+    };
     let (bogus, secure) = (resolvers(ResolverStatus::Bogus), resolvers(ResolverStatus::Secure));
 
     let any_keys = answered.iter().any(|n| !n.dnskeys.is_empty());
@@ -531,7 +542,8 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
     let ds_mismatch = !r.ds.is_empty() && any_keys && r.ds.iter().all(|d| !d.matched);
 
     let now = UNIX_EPOCH + Duration::from_secs(r.checked_at);
-    let windows: Vec<(&str, SigWindow)> = answered.iter().filter_map(|n| n.soa_rrsig.as_ref().map(|s| (n.name.as_str(), s.window(now)))).collect();
+    let windows: Vec<(&str, SigWindow)> =
+        answered.iter().filter_map(|n| n.soa_rrsig.as_ref().map(|s| (n.name.as_str(), s.window(now)))).collect();
     let expired: Vec<String> = windows
         .iter()
         .filter_map(|(n, w)| match w {
@@ -546,7 +558,9 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         .iter()
         .filter_map(|n| n.soa_rrsig.as_ref().map(|s| (n, s, s.expiration.wrapping_sub(s.inception))))
         .filter_map(|(n, s, lifetime)| match s.window(now) {
-            SigWindow::Valid { expires_in } if expires_in < EXPIRING_SOON_SECS.min(lifetime / 4) => Some(format!("{} (expires in {})", n.name, span(expires_in))),
+            SigWindow::Valid { expires_in } if expires_in < EXPIRING_SOON_SECS.min(lifetime / 4) => {
+                Some(format!("{} (expires in {})", n.name, span(expires_in)))
+            }
             _ => None,
         })
         .collect();
@@ -592,7 +606,11 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
     }
     if ds_mismatch {
         let ds: Vec<String> = r.ds.iter().map(|d| format!("{} ({})", d.ds.key_tag, d.ds.digest_type)).collect();
-        let served: Vec<String> = answered.iter().flat_map(|n| n.dnskeys.iter().filter(|k| k.is_ksk())).map(|k| k.key_tag.to_string()).collect();
+        let served: Vec<String> = answered
+            .iter()
+            .flat_map(|n| n.dnskeys.iter().filter(|k| k.is_ksk()))
+            .map(|k| k.key_tag.to_string())
+            .collect();
         let served: std::collections::BTreeSet<String> = served.into_iter().collect();
         out.push(Finding {
             code: "dnssec_ds_mismatch",
@@ -624,14 +642,13 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
             recommendation: Some("Check that the zone is being re-signed. If it is not, validating resolvers will reject the domain when the signature expires.".into()),
         });
     }
-    let deprecated: std::collections::BTreeMap<u8, Algorithm> = r
-        .ds
-        .iter()
-        .map(|d| d.ds.algorithm)
-        .chain(answered.iter().flat_map(|n| n.dnskeys.iter().map(|k| k.algorithm)))
-        .filter(|a| a.deprecated())
-        .map(|a| (a.number(), a))
-        .collect();
+    let deprecated: std::collections::BTreeMap<u8, Algorithm> =
+        r.ds.iter()
+            .map(|d| d.ds.algorithm)
+            .chain(answered.iter().flat_map(|n| n.dnskeys.iter().map(|k| k.algorithm)))
+            .filter(|a| a.deprecated())
+            .map(|a| (a.number(), a))
+            .collect();
     if !deprecated.is_empty() {
         out.push(Finding {
             code: "dnssec_algorithm_deprecated",
@@ -644,8 +661,10 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
             recommendation: Some("Ask the DNS provider to switch the zone to a modern algorithm such as ECDSAP256SHA256 (13).".into()),
         });
     }
-    let key_sets: Vec<std::collections::BTreeSet<(u16, u8, &[u8])>> =
-        answered.iter().map(|n| n.dnskeys.iter().map(|k| (k.flags, k.algorithm.number(), k.public_key.as_slice())).collect()).collect();
+    let key_sets: Vec<std::collections::BTreeSet<(u16, u8, &[u8])>> = answered
+        .iter()
+        .map(|n| n.dnskeys.iter().map(|k| (k.flags, k.algorithm.number(), k.public_key.as_slice())).collect())
+        .collect();
     if key_sets.windows(2).any(|w| w[0] != w[1]) {
         let each: Vec<String> = answered.iter().map(|n| format!("{} serves {}", n.name, tags(&n.dnskeys))).collect();
         out.push(Finding {
@@ -679,7 +698,10 @@ pub fn dnssec_findings(r: &DnssecResult) -> Vec<Finding> {
         }
     }
     if out.is_empty() && !secure.is_empty() && r.ds.iter().any(|d| d.matched) {
-        let left = windows.iter().filter_map(|(_, w)| if let SigWindow::Valid { expires_in } = w { Some(*expires_in) } else { None }).min();
+        let left = windows
+            .iter()
+            .filter_map(|(_, w)| if let SigWindow::Valid { expires_in } = w { Some(*expires_in) } else { None })
+            .min();
         out.push(Finding {
             code: "dnssec_secure",
             severity: Severity::Ok,
@@ -741,7 +763,15 @@ async fn verdict(v: Vantage, apex: Name, limit: Duration) -> ResolverVerdict {
 }
 
 async fn nameserver_view(v: Vantage, apex: Name, now: SystemTime, limit: Duration) -> NameserverView {
-    let ask = |t| exchange_with(v.address, &apex, t, QueryFlags { recursion_desired: false, dnssec_ok: true, checking_disabled: false }, limit);
+    let ask = |t| {
+        exchange_with(
+            v.address,
+            &apex,
+            t,
+            QueryFlags { recursion_desired: false, dnssec_ok: true, checking_disabled: false },
+            limit,
+        )
+    };
     let (keys, soa) = tokio::join!(ask(RecordType::DNSKEY), ask(RecordType::SOA));
     let mut view = NameserverView {
         name: v.name,
@@ -753,7 +783,9 @@ async fn nameserver_view(v: Vantage, apex: Name, now: SystemTime, limit: Duratio
     };
     match keys {
         Err(e) => view.error = Some(e.to_string()),
-        Ok(m) if m.metadata.response_code != ResponseCode::NoError => view.error = Some(m.metadata.response_code.to_str().into()),
+        Ok(m) if m.metadata.response_code != ResponseCode::NoError => {
+            view.error = Some(m.metadata.response_code.to_str().into())
+        }
         Ok(m) => {
             view.authoritative = m.metadata.authoritative;
             view.recursion_available = m.metadata.recursion_available;
@@ -789,12 +821,18 @@ async fn lookup(bootstrap: &[SocketAddr], name: &Name, t: RecordType, limit: Dur
 
 /// The zone `target` is in: walks up from the target (never above its
 /// registrable domain) until a name has NS records.
-async fn find_zone(bootstrap: &[SocketAddr], target: &str, limit: Duration) -> Result<(String, Vec<Name>), DiscoverError> {
+async fn find_zone(
+    bootstrap: &[SocketAddr],
+    target: &str,
+    limit: Duration,
+) -> Result<(String, Vec<Name>), DiscoverError> {
     let floor = psl::domain_str(target).unwrap_or(target).to_string();
     let mut zone = target.to_string();
     loop {
         let name = Name::from_ascii(&zone).map_err(|_| DiscoverError::NoNameservers(target.into()))?;
-        let m = lookup(bootstrap, &name, RecordType::NS, limit).await.ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
+        let m = lookup(bootstrap, &name, RecordType::NS, limit)
+            .await
+            .ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
         let ns: Vec<Name> = m
             .answers
             .iter()

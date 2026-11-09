@@ -74,7 +74,11 @@ async fn records_the_redirect_chain_with_relative_locations() {
         _ => Resp::ok("home").secure(),
     })
     .await;
-    let seen: Vec<(String, u16, Option<&str>)> = r.chain.iter().map(|h| (h.url.rsplit_once('/').map(|x| x.1).unwrap_or("").to_string(), h.status, h.location.as_deref())).collect();
+    let seen: Vec<(String, u16, Option<&str>)> = r
+        .chain
+        .iter()
+        .map(|h| (h.url.rsplit_once('/').map(|x| x.1).unwrap_or("").to_string(), h.status, h.location.as_deref()))
+        .collect();
     assert_eq!(seen, [("".into(), 302, Some("/en/")), ("".into(), 301, Some("home")), ("home".into(), 200, None)]);
     assert!(r.final_url.as_deref().unwrap().ends_with("/en/home"), "{:?}", r.final_url);
     assert_eq!(sev(&fs, "website_inspection_healthy"), Some(Severity::Ok));
@@ -127,7 +131,12 @@ async fn never_follows_a_redirect_to_another_scheme() {
 #[tokio::test]
 async fn unreachable_when_nothing_listens() {
     let (dns, port) = (empty_dns().await, closed_port().await);
-    let opts = WebOptions { ports: Ports { http: port, https: closed_port().await }, resolver: Some(dns.addr), pin: Some(LOCAL.parse().unwrap()), ..WebOptions::default() };
+    let opts = WebOptions {
+        ports: Ports { http: port, https: closed_port().await },
+        resolver: Some(dns.addr),
+        pin: Some(LOCAL.parse().unwrap()),
+        ..WebOptions::default()
+    };
     let r = check_web("example.com", "/", &opts).await;
     let fs = web_findings("example.com", &r);
     assert!(r.error.is_some() && r.status.is_none());
@@ -168,7 +177,9 @@ async fn server_and_client_errors() {
 #[tokio::test]
 async fn missing_headers_with_frame_ancestors_standing_in_for_x_frame_options() {
     let (r, fs) = inspect(|_| {
-        Resp::ok("ok").header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'").header("X-Content-Type-Options", "nosniff")
+        Resp::ok("ok")
+            .header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+            .header("X-Content-Type-Options", "nosniff")
     })
     .await;
     let xfo = &r.headers["X-Frame-Options"];
@@ -176,7 +187,13 @@ async fn missing_headers_with_frame_ancestors_standing_in_for_x_frame_options() 
     assert!(!r.headers["Strict-Transport-Security"].present);
     let m = get(&fs, "website_inspection_missing_headers");
     assert_eq!((m.severity, m.title.as_ref()), (Severity::Info, "Missing 2 security headers"));
-    assert!(m.message.contains("Referrer-Policy") && m.message.contains("Permissions-Policy") && !m.message.contains("X-Frame-Options"), "{}", m.message);
+    assert!(
+        m.message.contains("Referrer-Policy")
+            && m.message.contains("Permissions-Policy")
+            && !m.message.contains("X-Frame-Options"),
+        "{}",
+        m.message
+    );
 }
 
 #[tokio::test]
@@ -192,7 +209,13 @@ async fn detects_wordpress_and_its_failure_pages() {
     let (r, fs) = inspect(move |_| Resp::new(500, page.clone()).secure()).await;
     assert!(r.wordpress.critical_error && r.wordpress.detected);
     // The specific finding replaces the generic 5xx one.
-    assert_eq!(codes(&fs).iter().filter(|c| c.starts_with("website_inspection_wp") || **c == "website_inspection_server_error").collect::<Vec<_>>(), [&"website_inspection_wp_critical_error"]);
+    assert_eq!(
+        codes(&fs)
+            .iter()
+            .filter(|c| c.starts_with("website_inspection_wp") || **c == "website_inspection_server_error")
+            .collect::<Vec<_>>(),
+        [&"website_inspection_wp_critical_error"]
+    );
 
     let page = fixture("wordpress_maintenance.html");
     let (r, fs) = inspect(move |_| Resp::new(503, page.clone()).secure()).await;
@@ -210,7 +233,10 @@ async fn slow_response_is_flagged() {
 
 #[tokio::test]
 async fn a_stalled_body_cannot_hold_the_check_past_its_deadline() {
-    let (site, dns) = (FakeSite::start(|_| Resp { stall_after_body: true, ..Resp::ok("<html>partial").secure() }).await, empty_dns().await);
+    let (site, dns) = (
+        FakeSite::start(|_| Resp { stall_after_body: true, ..Resp::ok("<html>partial").secure() }).await,
+        empty_dns().await,
+    );
     let opts = WebOptions { timeout: Duration::from_secs(2), ..options(&site, &dns).await };
     let started = std::time::Instant::now();
     let r = check_web("example.com", "/", &opts).await;
@@ -222,7 +248,8 @@ async fn a_stalled_body_cannot_hold_the_check_past_its_deadline() {
 
 #[tokio::test]
 async fn a_server_that_never_answers_times_out_as_unreachable() {
-    let (site, dns) = (FakeSite::start(|_| Resp { delay: Duration::from_secs(20), ..Resp::ok("late") }).await, empty_dns().await);
+    let (site, dns) =
+        (FakeSite::start(|_| Resp { delay: Duration::from_secs(20), ..Resp::ok("late") }).await, empty_dns().await);
     let opts = WebOptions { timeout: Duration::from_millis(800), ..options(&site, &dns).await };
     let started = std::time::Instant::now();
     let r = check_web("example.com", "/", &opts).await;
@@ -258,19 +285,35 @@ async fn oversized_and_numerous_headers_are_capped() {
 
 #[tokio::test]
 async fn control_characters_in_headers_never_reach_the_result() {
-    let (r, _) = inspect(|_| Resp::ok("ok").header("Server", "ngi\tnx").header("Content-Security-Policy", "default-src 'self'")).await;
+    let (r, _) =
+        inspect(|_| Resp::ok("ok").header("Server", "ngi\tnx").header("Content-Security-Policy", "default-src 'self'"))
+            .await;
     assert_eq!(r.server.as_deref(), Some("ngi\u{fffd}nx"));
 }
 
 #[tokio::test]
 async fn sends_a_plain_user_agent_and_no_cookies() {
-    let (site, dns) = (FakeSite::start(|q| if q.path == "/" { Resp::redirect(302, "/next").header("Set-Cookie", "sid=abc; Path=/") } else { Resp::ok("ok") }).await, empty_dns().await);
+    let (site, dns) = (
+        FakeSite::start(|q| {
+            if q.path == "/" {
+                Resp::redirect(302, "/next").header("Set-Cookie", "sid=abc; Path=/")
+            } else {
+                Resp::ok("ok")
+            }
+        })
+        .await,
+        empty_dns().await,
+    );
     let r = check_web("example.com", "/", &options(&site, &dns).await).await;
     assert_eq!(r.chain.len(), 2);
     let seen = site.requests();
     assert!(seen.len() >= 2);
     for q in &seen {
-        assert!(q.header("user-agent").is_some_and(|u| u.starts_with("zombo/") && !u.contains("Mozilla")), "{:?}", q.header("user-agent"));
+        assert!(
+            q.header("user-agent").is_some_and(|u| u.starts_with("zombo/") && !u.contains("Mozilla")),
+            "{:?}",
+            q.header("user-agent")
+        );
         assert!(q.header("cookie").is_none() && q.header("authorization").is_none(), "{:?}", q.headers);
         assert_eq!(q.header("host"), Some(format!("example.com:{}", site.addr.port()).as_str()));
     }
@@ -287,13 +330,19 @@ async fn the_path_of_a_url_is_inspected() {
 // Origin versus CDN
 
 /// A CDN-facing site on 127.0.0.1 and an origin on 127.0.0.2, both on one port.
-async fn pair(cdn: impl Fn(&Req) -> Resp + Send + Sync + 'static, origin: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> (FakeSite, FakeSite) {
+async fn pair(
+    cdn: impl Fn(&Req) -> Resp + Send + Sync + 'static,
+    origin: impl Fn(&Req) -> Resp + Send + Sync + 'static,
+) -> (FakeSite, FakeSite) {
     let public = FakeSite::start(cdn).await;
     let origin = FakeSite::start_on("127.0.0.2", public.addr.port(), origin).await;
     (public, origin)
 }
 
-async fn compare(cdn: impl Fn(&Req) -> Resp + Send + Sync + 'static, origin: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> (WebResult, Vec<Finding>, FakeSite) {
+async fn compare(
+    cdn: impl Fn(&Req) -> Resp + Send + Sync + 'static,
+    origin: impl Fn(&Req) -> Resp + Send + Sync + 'static,
+) -> (WebResult, Vec<Finding>, FakeSite) {
     let (public, origin_site) = pair(cdn, origin).await;
     let dns = empty_dns().await;
     let opts = WebOptions { origin: Some("127.0.0.2".parse().unwrap()), ..options(&public, &dns).await };
@@ -311,10 +360,18 @@ async fn origin_asked_with_the_real_host_header() {
 
 #[tokio::test]
 async fn a_healthy_origin_behind_a_failing_cdn_blames_the_cdn() {
-    let (r, fs, _) = compare(|_| Resp::new(503, "").header("Server", "cloudflare").header("CF-RAY", "8a1b-LHR"), |_| Resp::ok("fine").header("Server", "nginx")).await;
+    let (r, fs, _) = compare(
+        |_| Resp::new(503, "").header("Server", "cloudflare").header("CF-RAY", "8a1b-LHR"),
+        |_| Resp::ok("fine").header("Server", "nginx"),
+    )
+    .await;
     let f = get(&fs, "website_origin_status_differs");
     assert_eq!(f.severity, Severity::Warning);
-    assert!(f.message.contains("HTTP 503") && f.message.contains("HTTP 200") && f.message.contains("origin is healthy"), "{}", f.message);
+    assert!(
+        f.message.contains("HTTP 503") && f.message.contains("HTTP 200") && f.message.contains("origin is healthy"),
+        "{}",
+        f.message
+    );
     assert_eq!(r.origin.as_ref().unwrap().answer.status, Some(200));
     let h = get(&fs, "website_origin_headers_differ");
     assert!(h.message.contains("Server: \"cloudflare\" at the CDN, \"nginx\" at the origin"), "{}", h.message);
@@ -344,7 +401,8 @@ async fn redirects_that_differ_are_reported() {
 
 #[tokio::test]
 async fn an_origin_that_answers_alike_is_ok_and_header_changes_are_info() {
-    let (_, fs, _) = compare(|_| Resp::ok("same").secure(), |_| Resp::ok("same").header("X-Content-Type-Options", "nosniff")).await;
+    let (_, fs, _) =
+        compare(|_| Resp::ok("same").secure(), |_| Resp::ok("same").header("X-Content-Type-Options", "nosniff")).await;
     assert_eq!(sev(&fs, "website_origin_matches"), Some(Severity::Ok));
     let h = get(&fs, "website_origin_headers_differ");
     assert_eq!(h.severity, Severity::Info);
@@ -371,7 +429,10 @@ async fn provider_comes_from_headers_cname_and_asn_together() {
     let h = detect_hosting("www.example.com", &headers, dns.addr, Duration::from_secs(2)).await;
     assert_eq!(h.cname_chain, ["d111.cloudfront.net"]);
     assert_eq!(h.addresses, ["192.0.2.10".parse::<IpAddr>().unwrap()]);
-    assert_eq!((h.asns[0].asn, h.asns[0].name.as_deref(), h.asns[0].country.as_deref(), h.asns[0].prefix.as_deref()), (16509, Some("AMAZON-02, US"), Some("US"), Some("192.0.2.0/24")));
+    assert_eq!(
+        (h.asns[0].asn, h.asns[0].name.as_deref(), h.asns[0].country.as_deref(), h.asns[0].prefix.as_deref()),
+        (16509, Some("AMAZON-02, US"), Some("US"), Some("192.0.2.0/24"))
+    );
     let cf = h.detections.iter().find(|d| d.provider == "Amazon CloudFront").unwrap();
     assert_eq!(cf.evidence.len(), 2, "{:?}", cf.evidence);
     assert!(h.detections.iter().any(|d| d.provider == "Amazon Web Services"));
@@ -382,11 +443,19 @@ async fn provider_comes_from_headers_cname_and_asn_together() {
 async fn provider_findings_name_each_provider_and_the_asn() {
     let dns = FakeDns::start(&zone("../web/cdn")).await;
     let site = FakeSite::start(|_| Resp::ok("ok").secure().header("X-Amz-Cf-Id", "abc")).await;
-    let opts = WebOptions { resolver: Some(dns.addr), ports: Ports { http: site.addr.port(), https: closed_port().await }, pin: Some(LOCAL.parse().unwrap()), ..WebOptions::default() };
+    let opts = WebOptions {
+        resolver: Some(dns.addr),
+        ports: Ports { http: site.addr.port(), https: closed_port().await },
+        pin: Some(LOCAL.parse().unwrap()),
+        ..WebOptions::default()
+    };
     let r = check_web("www.example.com", "/", &opts).await;
     let fs = web_findings("www.example.com", &r);
     assert_eq!(get(&fs, "website_cdn_detected").title, "Served through Amazon CloudFront");
-    assert!(get(&fs, "website_cdn_detected").message.contains("header x-amz-cf-id") && get(&fs, "website_cdn_detected").message.contains("CNAME d111.cloudfront.net"));
+    assert!(
+        get(&fs, "website_cdn_detected").message.contains("header x-amz-cf-id")
+            && get(&fs, "website_cdn_detected").message.contains("CNAME d111.cloudfront.net")
+    );
     assert_eq!(get(&fs, "website_host_detected").title, "Hosted on Amazon Web Services");
     let asn = get(&fs, "website_asn");
     assert!(asn.message == "www.example.com is announced by AS16509 AMAZON-02, US (192.0.2.10).", "{}", asn.message);
@@ -415,7 +484,8 @@ async fn dns_failure_keeps_the_header_evidence() {
 
 #[tokio::test]
 async fn a_cname_loop_is_an_error_not_a_hang() {
-    let dns = FakeDns::start("a.example.com. 60 IN CNAME b.example.com.\nb.example.com. 60 IN CNAME a.example.com.\n").await;
+    let dns =
+        FakeDns::start("a.example.com. 60 IN CNAME b.example.com.\nb.example.com. 60 IN CNAME a.example.com.\n").await;
     let h = detect_hosting("a.example.com", &[], dns.addr, Duration::from_secs(2)).await;
     assert!(h.dns_error.as_deref().is_some_and(|e| e.contains("CNAME loop")), "{:?}", h.dns_error);
 }
@@ -424,10 +494,17 @@ async fn a_cname_loop_is_an_error_not_a_hang() {
 // two Go scenarios (HSTS only counts over HTTPS; HTTP that never reaches HTTPS) are pure.
 
 fn https_result(missing: &[&str]) -> WebResult {
-    let mut r = WebResult { url: "https://example.com/".into(), final_url: Some("https://example.com/".into()), status: Some(200), time_ms: 40, ..WebResult::default() };
+    let mut r = WebResult {
+        url: "https://example.com/".into(),
+        final_url: Some("https://example.com/".into()),
+        status: Some(200),
+        time_ms: 40,
+        ..WebResult::default()
+    };
     for name in zombo_core::web::SECURITY_HEADERS {
         let present = !missing.contains(&name);
-        r.headers.insert(name, HeaderState { present, value: if present { "x".into() } else { String::new() }, via: None });
+        r.headers
+            .insert(name, HeaderState { present, value: if present { "x".into() } else { String::new() }, via: None });
     }
     r
 }
@@ -446,7 +523,10 @@ fn plain_http_that_never_reaches_https_is_flagged() {
     r.http_to_https = Some(false);
     let fs = web_findings("example.com", &r);
     assert_eq!(sev(&fs, "website_inspection_https_not_enforced"), Some(Severity::Warning));
-    assert_eq!(get(&fs, "website_inspection_https_not_enforced").message, "http://example.com/ does not redirect to HTTPS.");
+    assert_eq!(
+        get(&fs, "website_inspection_https_not_enforced").message,
+        "http://example.com/ does not redirect to HTTPS."
+    );
     r.http_to_https = Some(true);
     assert!(!codes(&web_findings("example.com", &r)).contains(&"website_inspection_https_not_enforced"));
 }

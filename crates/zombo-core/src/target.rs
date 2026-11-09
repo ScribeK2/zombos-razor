@@ -133,7 +133,9 @@ mod tests {
 
     #[test]
     fn rejects_garbage() {
-        for bad in ["", "   ", "com", "co.uk", "-a.example.com", "a..example.com", "exa mple.com", "@example.com", "http://"] {
+        for bad in
+            ["", "   ", "com", "co.uk", "-a.example.com", "a..example.com", "exa mple.com", "@example.com", "http://"]
+        {
             assert!(parse_target(bad).is_err(), "{bad:?} should be rejected");
         }
     }

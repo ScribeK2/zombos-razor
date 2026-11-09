@@ -76,7 +76,13 @@ impl Watches {
     /// A run of the Check finished. `records` is `None` when it failed or timed out: that
     /// counts as a run, so a failing Check is retried at the interval and not every tick,
     /// but it never counts as a change. A change stops the Watch and returns why.
-    pub fn finished(&mut self, target: &str, section: Section, records: Option<&[String]>, now: Instant) -> Option<Stopped> {
+    pub fn finished(
+        &mut self,
+        target: &str,
+        section: Section,
+        records: Option<&[String]>,
+        now: Instant,
+    ) -> Option<Stopped> {
         let at = self.list.iter().position(|w| w.target == target && w.section == section)?;
         let w = &mut self.list[at];
         w.last_run = Some(now);
@@ -150,7 +156,8 @@ mod tests {
     fn an_unchanged_answer_keeps_the_watch_going() {
         let t0 = Instant::now();
         let mut w = watching(t0, &["A: 1.1.1.1", "A: 2.2.2.2"]);
-        let stopped = w.finished("example.com", Section::Dns, Some(&lines(&["A: 2.2.2.2", "A: 1.1.1.1"])), secs(t0, 60));
+        let stopped =
+            w.finished("example.com", Section::Dns, Some(&lines(&["A: 2.2.2.2", "A: 1.1.1.1"])), secs(t0, 60));
         assert_eq!(stopped, None);
         assert!(w.is_watching("example.com", Section::Dns));
     }
@@ -188,8 +195,13 @@ mod tests {
         let t0 = Instant::now();
         let mut w = Watches::default();
         w.start("example.com", Section::Registration, None, t0);
-        assert_eq!(w.finished("example.com", Section::Registration, Some(&lines(&["Registrar: a"])), secs(t0, 60)), None);
-        assert!(w.finished("example.com", Section::Registration, Some(&lines(&["Registrar: b"])), secs(t0, 120)).is_some());
+        assert_eq!(
+            w.finished("example.com", Section::Registration, Some(&lines(&["Registrar: a"])), secs(t0, 60)),
+            None
+        );
+        assert!(
+            w.finished("example.com", Section::Registration, Some(&lines(&["Registrar: b"])), secs(t0, 120)).is_some()
+        );
     }
 
     #[test]
@@ -217,7 +229,10 @@ mod tests {
         let mut w = watching(t0, &["A: 1"]);
         assert_eq!(w.status_lines(t0), ["Watching example.com DNS \u{b7} not run yet \u{b7} stops on change"]);
         w.finished("example.com", Section::Dns, Some(&lines(&["A: 1"])), secs(t0, 60));
-        assert_eq!(w.status_lines(secs(t0, 72)), ["Watching example.com DNS \u{b7} last run 12 s ago \u{b7} stops on change"]);
+        assert_eq!(
+            w.status_lines(secs(t0, 72)),
+            ["Watching example.com DNS \u{b7} last run 12 s ago \u{b7} stops on change"]
+        );
     }
 
     #[test]

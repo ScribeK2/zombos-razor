@@ -230,10 +230,19 @@ mod tests {
 
     #[test]
     fn findings_settle_worst_first_and_count_problems() {
-        let f = |sev, code: &'static str| Finding { code, severity: sev, title: code.into(), message: String::new(), recommendation: None };
+        let f = |sev, code: &'static str| Finding {
+            code,
+            severity: sev,
+            title: code.into(),
+            message: String::new(),
+            recommendation: None,
+        };
         let mut r = Run::new();
         r.apply(CheckEvent::Started);
-        r.apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f(Severity::Ok, "o"), f(Severity::Critical, "c")], ..Outcome::default() }))));
+        r.apply(CheckEvent::Finished(Box::new(Ok(Outcome {
+            findings: vec![f(Severity::Ok, "o"), f(Severity::Critical, "c")],
+            ..Outcome::default()
+        }))));
         assert_eq!(r.outcome.findings[0].code, "c");
         assert_eq!(r.state, CheckState::Done { problems: 1 });
     }

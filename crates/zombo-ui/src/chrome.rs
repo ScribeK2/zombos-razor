@@ -121,7 +121,8 @@ fn read_compositor_shadow() -> bool {
 mod tests {
     use super::*;
 
-    const FLOATING: WindowState = WindowState { client_decorated: true, tiled: false, maximized: false, fullscreen: false };
+    const FLOATING: WindowState =
+        WindowState { client_decorated: true, tiled: false, maximized: false, fullscreen: false };
 
     #[test]
     fn a_floating_window_without_a_compositor_shadow_draws_its_own() {

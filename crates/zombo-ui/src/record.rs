@@ -12,7 +12,8 @@ pub enum RecordKind {
 }
 
 impl RecordKind {
-    pub const ALL: [RecordKind; 6] = [RecordKind::A, RecordKind::Aaaa, RecordKind::Mx, RecordKind::Ns, RecordKind::Txt, RecordKind::Cname];
+    pub const ALL: [RecordKind; 6] =
+        [RecordKind::A, RecordKind::Aaaa, RecordKind::Mx, RecordKind::Ns, RecordKind::Txt, RecordKind::Cname];
 
     pub fn code(self) -> &'static str {
         match self {

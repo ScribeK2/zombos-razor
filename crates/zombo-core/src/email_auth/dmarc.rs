@@ -99,7 +99,9 @@ mod tests {
 
     #[test]
     fn a_full_record() {
-        let d = parse_dmarc("v=DMARC1; p=reject; sp=quarantine; adkim=s; aspf=r; pct=30; rua=mailto:a@x.test,mailto:b@x.test; ruf=mailto:f@x.test");
+        let d = parse_dmarc(
+            "v=DMARC1; p=reject; sp=quarantine; adkim=s; aspf=r; pct=30; rua=mailto:a@x.test,mailto:b@x.test; ruf=mailto:f@x.test",
+        );
         assert_eq!(d.policy, Some(Policy::Reject));
         assert_eq!(d.subdomain_policy, Some(Policy::Quarantine));
         assert_eq!((d.adkim, d.aspf, d.pct), (Alignment::Strict, Alignment::Relaxed, 30));
@@ -145,7 +147,14 @@ mod tests {
 
     #[test]
     fn hostile_records_do_not_panic() {
-        for junk in ["", ";;;", "=", "v=DMARC1;p", &format!("v=DMARC1; rua={}", "a,".repeat(40_000)), "p=\u{0}\u{1b}é;sp=\u{85}"] {
+        for junk in [
+            "",
+            ";;;",
+            "=",
+            "v=DMARC1;p",
+            &format!("v=DMARC1; rua={}", "a,".repeat(40_000)),
+            "p=\u{0}\u{1b}é;sp=\u{85}",
+        ] {
             let _ = parse_dmarc(junk);
         }
     }

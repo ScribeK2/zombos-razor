@@ -215,7 +215,8 @@ pub fn cymru_origin_name(ip: IpAddr) -> String {
             format!("{}.{}.{}.{}.origin.asn.cymru.com", o[3], o[2], o[1], o[0])
         }
         IpAddr::V6(a) => {
-            let nibbles: Vec<String> = a.octets().iter().flat_map(|b| [b >> 4, b & 0xf]).rev().map(|n| format!("{n:x}")).collect();
+            let nibbles: Vec<String> =
+                a.octets().iter().flat_map(|b| [b >> 4, b & 0xf]).rev().map(|n| format!("{n:x}")).collect();
             format!("{}.origin6.asn.cymru.com", nibbles.join("."))
         }
     }
@@ -230,7 +231,8 @@ fn clean_field(s: &str) -> Option<String> {
 /// separated by spaces), the prefix and the country. Anything else is ignored.
 pub fn parse_cymru_origin(txt: &str) -> Vec<(u32, Option<String>, Option<String>)> {
     let mut f = txt.split('|');
-    let asns: Vec<u32> = f.next().unwrap_or_default().split_whitespace().filter_map(|a| a.parse().ok()).take(MAX_ASNS_PER_IP).collect();
+    let asns: Vec<u32> =
+        f.next().unwrap_or_default().split_whitespace().filter_map(|a| a.parse().ok()).take(MAX_ASNS_PER_IP).collect();
     let (prefix, country) = (f.next().and_then(clean_field), f.next().and_then(clean_field));
     asns.into_iter().map(|a| (a, prefix.clone(), country.clone())).collect()
 }
@@ -244,13 +246,21 @@ fn txt_strings(m: &hickory_proto::op::Message) -> Vec<String> {
     m.answers
         .iter()
         .filter_map(|a| match &a.data {
-            RData::TXT(t) => Some(String::from_utf8_lossy(&t.txt_data.iter().flat_map(|p| p.iter().copied()).collect::<Vec<u8>>()).into_owned()),
+            RData::TXT(t) => Some(
+                String::from_utf8_lossy(&t.txt_data.iter().flat_map(|p| p.iter().copied()).collect::<Vec<u8>>())
+                    .into_owned(),
+            ),
             _ => None,
         })
         .collect()
 }
 
-async fn ask(server: SocketAddr, name: &str, rtype: RecordType, limit: Duration) -> Result<hickory_proto::op::Message, String> {
+async fn ask(
+    server: SocketAddr,
+    name: &str,
+    rtype: RecordType,
+    limit: Duration,
+) -> Result<hickory_proto::op::Message, String> {
     let parsed = Name::from_ascii(name).map_err(|_| format!("{:?} is not a valid DNS name", clip(name)))?;
     let m = exchange(server, &parsed, rtype, true, limit).await.map_err(|e| e.to_string())?;
     match m.metadata.response_code {
@@ -298,7 +308,9 @@ async fn resolve(server: SocketAddr, host: &str, limit: Duration) -> Result<(Vec
 
 async fn asns_of(server: SocketAddr, ip: IpAddr, limit: Duration) -> Vec<AsnInfo> {
     let Ok(m) = ask(server, &cymru_origin_name(ip), RecordType::TXT, limit).await else { return vec![] };
-    let Some(found) = txt_strings(&m).iter().map(|t| parse_cymru_origin(t)).find(|v| !v.is_empty()) else { return vec![] };
+    let Some(found) = txt_strings(&m).iter().map(|t| parse_cymru_origin(t)).find(|v| !v.is_empty()) else {
+        return vec![];
+    };
     let mut out = vec![];
     for (asn, prefix, country) in found {
         let name = match ask(server, &format!("AS{asn}.asn.cymru.com"), RecordType::TXT, limit).await {
@@ -312,7 +324,12 @@ async fn asns_of(server: SocketAddr, ip: IpAddr, limit: Duration) -> Vec<AsnInfo
 
 /// Work out who serves `host`: the headers of its response, its CNAME chain, and
 /// the AS of its addresses. DNS failures land in `dns_error`; the header evidence stays.
-pub async fn detect_hosting(host: &str, headers: &[(String, String)], resolver: SocketAddr, limit: Duration) -> Hosting {
+pub async fn detect_hosting(
+    host: &str,
+    headers: &[(String, String)],
+    resolver: SocketAddr,
+    limit: Duration,
+) -> Hosting {
     let mut h = Hosting { host: host.to_string(), ..Hosting::default() };
     provider_from_header(headers, &mut h);
     match resolve(resolver, host, limit).await {
@@ -365,7 +382,10 @@ mod tests {
 
     #[test]
     fn cymru_replies_parse_defensively() {
-        assert_eq!(parse_cymru_origin("15169 | 8.8.8.0/24 | US | arin | 1992-12-01"), vec![(15169, Some("8.8.8.0/24".into()), Some("US".into()))]);
+        assert_eq!(
+            parse_cymru_origin("15169 | 8.8.8.0/24 | US | arin | 1992-12-01"),
+            vec![(15169, Some("8.8.8.0/24".into()), Some("US".into()))]
+        );
         assert_eq!(parse_cymru_origin("13335 13336 | 1.1.1.0/24 | AU").len(), 2);
         assert!(parse_cymru_origin("garbage").is_empty());
         assert!(parse_cymru_origin("").is_empty());

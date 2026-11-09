@@ -96,7 +96,11 @@ impl Shell {
         }
         let Some(state) = self.pastes.get(&id) else { return };
         let text = state.read(cx).value().to_string();
-        let notice = if text.trim().is_empty() { Some("Paste some text first.".to_string()) } else { ev::check_size(text.len()).err() };
+        let notice = if text.trim().is_empty() {
+            Some("Paste some text first.".to_string())
+        } else {
+            ev::check_size(text.len()).err()
+        };
         if let (Some(n), Some(tab)) = (notice, self.ws.evidence_mut_for(id)) {
             tab.notice = Some(n);
             return;
@@ -110,7 +114,9 @@ impl Shell {
             let result = match tokio::time::timeout(ANALYSIS_DEADLINE, job).await {
                 Ok(Ok(r)) => r,
                 Ok(Err(_)) => Err("The analysis stopped unexpectedly. Try a smaller part of the text.".to_string()),
-                Err(_) => Err("The analysis took too long and was given up. Try a smaller part of the text.".to_string()),
+                Err(_) => {
+                    Err("The analysis took too long and was given up. Try a smaller part of the text.".to_string())
+                }
             };
             let _ = tx.send(result);
         });
@@ -122,7 +128,13 @@ impl Shell {
         .detach();
     }
 
-    fn finish_analysis(&mut self, id: u64, result: Result<ev::Report, String>, window: &mut Window, cx: &mut Context<Self>) {
+    fn finish_analysis(
+        &mut self,
+        id: u64,
+        result: Result<ev::Report, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(tab) = self.ws.evidence_mut_for(id) else { return };
         match result {
             Ok(report) => {
@@ -197,7 +209,14 @@ impl Shell {
                 }))
                 .child(glyph(mark.glyph, 16.))
                 .child(div().flex_1().child(section.label()))
-                .child(div().max_w(px(132.)).truncate().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(mark.label))
+                .child(
+                    div()
+                        .max_w(px(132.))
+                        .truncate()
+                        .text_size(px(t::TEXT_CAPTION))
+                        .text_color(color(t::GRAY_900))
+                        .child(mark.label),
+                )
         });
         div()
             .id("ev-rail")
@@ -210,7 +229,15 @@ impl Shell {
             .bg(color(t::BG_200))
             .role(Role::TabList)
             .aria_label("Evidence sections")
-            .child(div().px(px(8.)).pt(px(4.)).pb(px(4.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(tab.kind.label().to_uppercase()))
+            .child(
+                div()
+                    .px(px(8.))
+                    .pt(px(4.))
+                    .pb(px(4.))
+                    .text_size(px(t::TEXT_CAPTION))
+                    .text_color(color(t::GRAY_800))
+                    .child(tab.kind.label().to_uppercase()),
+            )
             .children(items)
     }
 
@@ -273,55 +300,68 @@ impl Shell {
             (Some(s), _) => format!("This looks like {}. You chose {}.", s.noun(), tab.kind.noun()),
             (None, _) => "I cannot tell what this is. Choose a kind below.".to_string(),
         };
-        let kinds = div().id("ev-kinds").flex().gap(px(4.)).role(Role::TabList).aria_label("Kind of evidence").children(Kind::ALL.iter().enumerate().map(|(i, &kind)| {
-            let on = kind == tab.kind;
-            div()
-                .id(("ev-kind", i))
-                .h(px(28.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .rounded(px(t::RADIUS_SMALL))
-                .border_1()
-                .border_color(color(if on { t::ACCENT } else { t::GRAY_400 }))
-                .bg(color(if on { t::GRAY_300 } else { t::GRAY_100 }))
-                .text_color(color(if on { t::GRAY_1000 } else { t::GRAY_900 }))
-                .text_size(px(t::TEXT_LABEL))
-                .cursor_pointer()
-                .hover(|s| s.bg(color(t::GRAY_200)))
-                .focus_visible(focus_ring)
-                .role(Role::Tab)
-                .aria_selected(on)
-                .aria_label(format!("Analyse as {}", kind.noun()))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(tab) = this.ws.evidence_mut_for(id) {
-                        tab.choose(kind);
-                    }
-                    cx.notify();
-                }))
-                .child(kind.label())
-        }));
+        let kinds =
+            div().id("ev-kinds").flex().gap(px(4.)).role(Role::TabList).aria_label("Kind of evidence").children(
+                Kind::ALL.iter().enumerate().map(|(i, &kind)| {
+                    let on = kind == tab.kind;
+                    div()
+                        .id(("ev-kind", i))
+                        .h(px(28.))
+                        .px(px(10.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(t::RADIUS_SMALL))
+                        .border_1()
+                        .border_color(color(if on { t::ACCENT } else { t::GRAY_400 }))
+                        .bg(color(if on { t::GRAY_300 } else { t::GRAY_100 }))
+                        .text_color(color(if on { t::GRAY_1000 } else { t::GRAY_900 }))
+                        .text_size(px(t::TEXT_LABEL))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(color(t::GRAY_200)))
+                        .focus_visible(focus_ring)
+                        .role(Role::Tab)
+                        .aria_selected(on)
+                        .aria_label(format!("Analyse as {}", kind.noun()))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(tab) = this.ws.evidence_mut_for(id) {
+                                tab.choose(kind);
+                            }
+                            cx.notify();
+                        }))
+                        .child(kind.label())
+                }),
+            );
         div()
             .w_full()
             .max_w(px(900.))
             .flex()
             .flex_col()
             .gap(px(12.))
-            .child(div().text_size(px(t::TEXT_VERDICT)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(format!("Analyse pasted {}", tab.kind.label().to_lowercase())))
+            .child(
+                div()
+                    .text_size(px(t::TEXT_VERDICT))
+                    .line_height(px(36.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("Analyse pasted {}", tab.kind.label().to_lowercase())),
+            )
             .child(
                 div()
                     .text_size(px(t::TEXT_BODY))
                     .text_color(color(t::GRAY_900))
                     .child("The text stays in memory. It is never saved and is dropped when you close this tab."),
             )
+            .child(div().w_full().font_family(t::FONT_MONO).text_size(px(t::TEXT_LABEL)).child(
+                Textarea::new(state).h(px(PASTE_HEIGHT)).aria_label("Pasted text to analyse").on_paste(on_paste),
+            ))
             .child(
                 div()
-                    .w_full()
-                    .font_family(t::FONT_MONO)
+                    .id("ev-hint")
+                    .role(Role::Status)
+                    .aria_label(hint.clone())
                     .text_size(px(t::TEXT_LABEL))
-                    .child(Textarea::new(state).h(px(PASTE_HEIGHT)).aria_label("Pasted text to analyse").on_paste(on_paste)),
+                    .text_color(color(t::GRAY_900))
+                    .child(hint),
             )
-            .child(div().id("ev-hint").role(Role::Status).aria_label(hint.clone()).text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child(hint))
             .when_some(tab.notice.clone(), |s, n| {
                 s.child(
                     div()
@@ -344,18 +384,27 @@ impl Shell {
                     .items_center()
                     .gap(px(12.))
                     .child(kinds)
-                    .child(button("ev-analyse", if analysing { "Analysing" } else { "Analyse" }, Some("Ctrl Enter"), true).on_click(cx.listener(|this, _, window, cx| {
-                        this.analyse_pasted(window, cx);
-                        cx.notify();
-                    })))
-                    .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(format!("{} KiB of 1 MiB", bytes.div_ceil(1024)))),
+                    .child(
+                        button("ev-analyse", if analysing { "Analysing" } else { "Analyse" }, Some("Ctrl Enter"), true)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.analyse_pasted(window, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(t::TEXT_CAPTION))
+                            .text_color(color(t::GRAY_800))
+                            .child(format!("{} KiB of 1 MiB", bytes.div_ceil(1024))),
+                    ),
             )
     }
 
     fn evidence_results(&self, tab: &ev::EvidenceTab, report: &ev::Report, cx: &mut Context<Self>) -> Div {
         let section = tab.section;
         let v = ev::view(report, section);
-        let finding_views = v.findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, None, cx)).collect::<Vec<_>>();
+        let finding_views =
+            v.findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, None, cx)).collect::<Vec<_>>();
         let copy = |id: &'static str, label: &'static str, hint: &'static str, all: bool, cx: &mut Context<Self>| {
             button(id, label, Some(hint), false).on_click(cx.listener(move |this, _, _, cx| {
                 this.copy_evidence(all, cx);
@@ -387,8 +436,25 @@ impl Shell {
                             .min_w(px(280.))
                             .flex()
                             .flex_col()
-                            .child(div().flex().items_center().gap(px(12.)).text_size(px(t::TEXT_VERDICT)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(glyph(v.glyph, 24.)).child(v.word.clone()))
-                            .child(div().max_w(px(640.)).text_size(px(t::TEXT_BODY)).line_height(px(20.)).text_color(color(t::GRAY_900)).child(v.why.clone())),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(12.))
+                                    .text_size(px(t::TEXT_VERDICT))
+                                    .line_height(px(36.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(glyph(v.glyph, 24.))
+                                    .child(v.word.clone()),
+                            )
+                            .child(
+                                div()
+                                    .max_w(px(640.))
+                                    .text_size(px(t::TEXT_BODY))
+                                    .line_height(px(20.))
+                                    .text_color(color(t::GRAY_900))
+                                    .child(v.why.clone()),
+                            ),
                     )
                     .child(
                         div()
@@ -400,15 +466,35 @@ impl Shell {
                     ),
             )
             .when(!v.findings.is_empty(), |s| {
-                s.child(div().id("ev-findings").w_full().min_w_0().flex().flex_col().gap(px(t::FINDING_GAP)).role(Role::List).aria_label("Findings").children(finding_views))
+                s.child(
+                    div()
+                        .id("ev-findings")
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(t::FINDING_GAP))
+                        .role(Role::List)
+                        .aria_label("Findings")
+                        .children(finding_views),
+                )
             })
             .when(!v.rows.is_empty(), |s| {
-                s.child(self.evidence_rows("ev-table", &format!("{} data", section.label()), &v.rows, cx).bg(color(t::GRAY_100)))
+                s.child(
+                    self.evidence_rows("ev-table", &format!("{} data", section.label()), &v.rows, cx)
+                        .bg(color(t::GRAY_100)),
+                )
             })
             .children(v.disclosures.iter().map(|d| self.evidence_disclosure(d, cx)))
     }
 
-    fn evidence_rows(&self, id: &'static str, title: &str, rows: &[zombo_ui::outcome::Fact], cx: &mut Context<Self>) -> Stateful<Div> {
+    fn evidence_rows(
+        &self,
+        id: &'static str,
+        title: &str,
+        rows: &[zombo_ui::outcome::Fact],
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         div()
             .id(id)
             .w_full()
@@ -442,7 +528,14 @@ impl Shell {
                         cx.notify();
                     }))
                     .child(div().w(px(KEY_WIDTH)).flex_none().text_color(color(t::GRAY_900)).child(f.key.clone()))
-                    .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(value_color(&f.key, &f.value))).child(f.value.clone()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_family(t::FONT_MONO)
+                            .text_color(color(value_color(&f.key, &f.value)))
+                            .child(f.value.clone()),
+                    )
             }))
     }
 
@@ -481,7 +574,9 @@ impl Shell {
                         }
                         cx.notify();
                     }))
-                    .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+                    .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| {
+                        s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))
+                    }))
                     .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(d.title.clone()))
                     .child(div().text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child(summary)),
             )

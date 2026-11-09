@@ -9,13 +9,18 @@ mod query;
 mod records;
 mod spf;
 
-pub use dkim::{DKIM_COMMON_SELECTORS, DkimAudit, DkimFlags, DkimKey, DkimKeyError, KeyType, parse_dkim_key, parse_selectors};
+pub use dkim::{
+    DKIM_COMMON_SELECTORS, DkimAudit, DkimFlags, DkimKey, DkimKeyError, KeyType, parse_dkim_key, parse_selectors,
+};
 pub use dmarc::{Alignment, DmarcAudit, DmarcRecord, Policy, parse_dmarc};
-pub use findings::{bimi_findings, dkim_findings, dmarc_findings, email_findings, mta_sts_findings, spf_findings, spf_missing_provider, tls_rpt_findings};
+pub use findings::{
+    bimi_findings, dkim_findings, dmarc_findings, email_findings, mta_sts_findings, spf_findings, spf_missing_provider,
+    tls_rpt_findings,
+};
 pub use records::{Bimi, MtaSts, TlsRpt, parse_bimi, parse_mta_sts, parse_tls_rpt};
 pub use spf::{
-    EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfAudit, SpfError, SpfNode, SpfTerm, effective_all, parse_spf,
-    spf_records,
+    EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfAudit, SpfError,
+    SpfNode, SpfTerm, effective_all, parse_spf, spf_records,
 };
 
 use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
@@ -42,13 +47,20 @@ impl EmailAuthResult {
     /// False when the resolver gave no answer to the SPF, DMARC or any DKIM
     /// question: the other fields then say nothing about the domain.
     pub fn answered(&self) -> bool {
-        self.spf.lookup_error.is_none() || self.dmarc.lookup_error.is_none() || self.dkim.failed.len() < self.dkim.checked.len()
+        self.spf.lookup_error.is_none()
+            || self.dmarc.lookup_error.is_none()
+            || self.dkim.failed.len() < self.dkim.checked.len()
     }
 }
 
 /// Audit one domain's email authentication through one resolver. `limit`
 /// bounds each DNS question, not the whole audit.
-pub async fn email_auth(resolver: SocketAddr, domain: &str, dkim_selectors: &[String], limit: Duration) -> EmailAuthResult {
+pub async fn email_auth(
+    resolver: SocketAddr,
+    domain: &str,
+    dkim_selectors: &[String],
+    limit: Duration,
+) -> EmailAuthResult {
     let dns = Dns { server: resolver, limit };
     let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
     let (spf, dkim, dmarc, tls_rpt, bimi, mta_sts, mx_hosts) = tokio::join!(

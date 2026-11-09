@@ -12,10 +12,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::{io::AsyncWriteExt, net::{TcpListener, TcpStream}};
+use tokio::{
+    io::AsyncWriteExt,
+    net::{TcpListener, TcpStream},
+};
 use zombo_core::{
     Finding, Severity,
-    ports::{FULL, PortProbe, PortState, PortsResult, QUICK, ServicePort, Timing, ports_findings, probe_with, resolve_target, select_addresses, service_for},
+    ports::{
+        FULL, PortProbe, PortState, PortsResult, QUICK, ServicePort, Timing, ports_findings, probe_with,
+        resolve_target, select_addresses, service_for,
+    },
 };
 
 const V4: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
@@ -63,7 +69,16 @@ impl FakeHost {
 
 async fn run(host: &Arc<FakeHost>, addrs: &[IpAddr], ports: &[ServicePort]) -> PortsResult {
     let host = host.clone();
-    probe_with(move |a| { let h = host.clone(); async move { h.dial(a).await } }, addrs, ports, fast()).await
+    probe_with(
+        move |a| {
+            let h = host.clone();
+            async move { h.dial(a).await }
+        },
+        addrs,
+        ports,
+        fast(),
+    )
+    .await
 }
 
 fn port(r: &PortsResult, n: u16) -> &PortProbe {
@@ -74,7 +89,12 @@ fn codes(fs: &[Finding]) -> Vec<&'static str> {
     fs.iter().map(|f| f.code).collect()
 }
 
-const WEB_AND_MAIL: &[(u16, &[u8])] = &[(80, b""), (443, b""), (25, b"220 mx.example.com ESMTP Postfix\r\n250 more\r\n"), (22, b"SSH-2.0-OpenSSH_9.6\r\n")];
+const WEB_AND_MAIL: &[(u16, &[u8])] = &[
+    (80, b""),
+    (443, b""),
+    (25, b"220 mx.example.com ESMTP Postfix\r\n250 more\r\n"),
+    (22, b"SSH-2.0-OpenSSH_9.6\r\n"),
+];
 
 #[tokio::test]
 async fn the_quick_sweep_classifies_each_port() {
@@ -97,7 +117,10 @@ async fn the_full_table_has_the_hosting_ports() {
     let r = run(&host, &[V4], FULL).await;
     assert_eq!(port(&r, 2083).state, PortState::Open);
     let fs = ports_findings("example.com", &r);
-    assert_eq!(fs.iter().find(|f| f.code == "hosting_reachability_database_exposed").map(|f| f.severity), Some(Severity::Warning));
+    assert_eq!(
+        fs.iter().find(|f| f.code == "hosting_reachability_database_exposed").map(|f| f.severity),
+        Some(Severity::Warning)
+    );
 }
 
 #[tokio::test]
@@ -108,7 +131,8 @@ async fn a_port_that_never_answers_is_filtered_within_the_dial_timeout() {
 
 #[tokio::test]
 async fn an_unroutable_address_is_no_route_not_filtered() {
-    let r = probe_with(|_| async { Err(io::Error::from(io::ErrorKind::NetworkUnreachable)) }, &[V4], QUICK, fast()).await;
+    let r =
+        probe_with(|_| async { Err(io::Error::from(io::ErrorKind::NetworkUnreachable)) }, &[V4], QUICK, fast()).await;
     assert!(r.ports.iter().all(|p| p.state == PortState::NoRoute));
     let fs = ports_findings("example.com", &r);
     assert_eq!(codes(&fs), ["hosting_reachability_unreachable"]);
@@ -177,14 +201,28 @@ fn only_the_first_address_of_each_family_is_probed() {
 #[tokio::test]
 async fn an_ip_target_is_probed_as_it_is_and_localhost_resolves() {
     assert_eq!(resolve_target("192.0.2.10", Duration::from_secs(1)).await.unwrap(), [V4]);
-    assert_eq!(resolve_target("[2001:db8::10]", Duration::from_secs(1)).await.unwrap(), [V6.parse::<IpAddr>().unwrap()]);
-    assert!(resolve_target("localhost", Duration::from_secs(2)).await.unwrap().contains(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    assert_eq!(
+        resolve_target("[2001:db8::10]", Duration::from_secs(1)).await.unwrap(),
+        [V6.parse::<IpAddr>().unwrap()]
+    );
+    assert!(
+        resolve_target("localhost", Duration::from_secs(2)).await.unwrap().contains(&IpAddr::V4(Ipv4Addr::LOCALHOST))
+    );
 }
 
 fn result(addrs: &[&str], probes: &[(&str, u16, &'static str, PortState)]) -> PortsResult {
     PortsResult {
         addresses: addrs.iter().map(|a| a.parse().unwrap()).collect(),
-        ports: probes.iter().map(|&(a, port, service, state)| PortProbe { address: a.parse().unwrap(), port, service, state, banner: None }).collect(),
+        ports: probes
+            .iter()
+            .map(|&(a, port, service, state)| PortProbe {
+                address: a.parse().unwrap(),
+                port,
+                service,
+                state,
+                banner: None,
+            })
+            .collect(),
     }
 }
 
@@ -207,36 +245,91 @@ fn nothing_open_is_unreachable_and_says_why() {
     assert_eq!(fs[0].severity, Severity::Critical);
     assert!(fs[0].message.contains("every one actively refused"));
     let mixed = result(&[v4], &[(v4, 80, "HTTP", Closed), (v4, 443, "HTTPS", Filtered), (v4, 25, "SMTP", NoRoute)]);
-    assert!(ports_findings("example.com", &mixed)[0].message.contains("(1 refused, 1 got no answer, 1 had no route from this network)."));
+    assert!(
+        ports_findings("example.com", &mixed)[0]
+            .message
+            .contains("(1 refused, 1 got no answer, 1 had no route from this network).")
+    );
 }
 
 #[test]
 fn web_mail_and_database_findings() {
     let v4 = "192.0.2.10";
-    let fs = ports_findings("example.com", &result(&[v4], &[(v4, 22, "SSH", Open), (v4, 3306, "MySQL", Open), (v4, 80, "HTTP", Closed), (v4, 443, "HTTPS", Closed)]));
+    let fs = ports_findings(
+        "example.com",
+        &result(
+            &[v4],
+            &[(v4, 22, "SSH", Open), (v4, 3306, "MySQL", Open), (v4, 80, "HTTP", Closed), (v4, 443, "HTTPS", Closed)],
+        ),
+    );
     let sev = |c: &str| fs.iter().find(|f| f.code == c).map(|f| f.severity);
     assert_eq!(sev("hosting_reachability_web_closed"), Some(Severity::Warning));
     assert_eq!(sev("hosting_reachability_smtp_closed"), Some(Severity::Info));
     assert_eq!(sev("hosting_reachability_database_exposed"), Some(Severity::Warning));
     assert_eq!(sev("hosting_reachability_reachable"), Some(Severity::Ok));
-    assert!(fs.iter().find(|f| f.code == "hosting_reachability_database_exposed").unwrap().message.starts_with("MySQL (3306) accepts"));
+    assert!(
+        fs.iter()
+            .find(|f| f.code == "hosting_reachability_database_exposed")
+            .unwrap()
+            .message
+            .starts_with("MySQL (3306) accepts")
+    );
 
-    let fs = ports_findings("example.com", &result(&[v4], &[(v4, 80, "HTTP", Open), (v4, 443, "HTTPS", Closed), (v4, 25, "SMTP", Open)]));
-    assert_eq!(fs.iter().find(|f| f.code == "hosting_reachability_no_https").map(|f| f.severity), Some(Severity::Warning));
+    let fs = ports_findings(
+        "example.com",
+        &result(&[v4], &[(v4, 80, "HTTP", Open), (v4, 443, "HTTPS", Closed), (v4, 25, "SMTP", Open)]),
+    );
+    assert_eq!(
+        fs.iter().find(|f| f.code == "hosting_reachability_no_https").map(|f| f.severity),
+        Some(Severity::Warning)
+    );
     assert!(!codes(&fs).contains(&"hosting_reachability_web_closed"));
-    let fs = ports_findings("example.com", &result(&[v4], &[(v4, 80, "HTTP", Open), (v4, 443, "HTTPS", Open), (v4, 25, "SMTP", Closed), (v4, 587, "Submission", Open)]));
-    assert!(fs.iter().find(|f| f.code == "hosting_reachability_smtp_closed").unwrap().message.ends_with("Mail submission is open, so the server does run mail."));
+    let fs = ports_findings(
+        "example.com",
+        &result(
+            &[v4],
+            &[
+                (v4, 80, "HTTP", Open),
+                (v4, 443, "HTTPS", Open),
+                (v4, 25, "SMTP", Closed),
+                (v4, 587, "Submission", Open),
+            ],
+        ),
+    );
+    assert!(
+        fs.iter()
+            .find(|f| f.code == "hosting_reachability_smtp_closed")
+            .unwrap()
+            .message
+            .ends_with("Mail submission is open, so the server does run mail.")
+    );
 }
 
 #[test]
 fn each_address_is_judged_on_its_own() {
     // HTTPS open over IPv4 must not hide that IPv6 lacks it.
     let (v4, v6) = ("192.0.2.10", V6);
-    let r = result(&[v4, v6], &[(v4, 80, "HTTP", Open), (v4, 443, "HTTPS", Open), (v4, 25, "SMTP", Open), (v6, 80, "HTTP", NoRoute), (v6, 443, "HTTPS", NoRoute), (v6, 25, "SMTP", NoRoute)]);
+    let r = result(
+        &[v4, v6],
+        &[
+            (v4, 80, "HTTP", Open),
+            (v4, 443, "HTTPS", Open),
+            (v4, 25, "SMTP", Open),
+            (v6, 80, "HTTP", NoRoute),
+            (v6, 443, "HTTPS", NoRoute),
+            (v6, 25, "SMTP", NoRoute),
+        ],
+    );
     let fs = ports_findings("dual.example.com", &r);
     let web = fs.iter().find(|f| f.code == "hosting_reachability_web_closed").expect("web_closed");
     assert!(web.message.contains(V6) && !web.message.contains(v4), "{}", web.message);
-    assert!(fs.iter().find(|f| f.code == "hosting_reachability_reachable").unwrap().message.starts_with("192.0.2.10 and 2001:db8::10 answers on"));
+    assert!(
+        fs.iter()
+            .find(|f| f.code == "hosting_reachability_reachable")
+            .unwrap()
+            .message
+            .starts_with("192.0.2.10 and 2001:db8::10 answers on")
+    );
 }
 
 #[test]

@@ -158,11 +158,8 @@ pub async fn check_delegation(
     }
     let referral = referral.ok_or_else(|| DelegationError::NoReferral(apex.clone()))?;
     let parent_ns = ns_set(&referral, &apex);
-    let glue: BTreeMap<String, BTreeSet<IpAddr>> = parent_ns
-        .iter()
-        .map(|n| (n.clone(), addrs(&referral, Some(n))))
-        .filter(|(_, a)| !a.is_empty())
-        .collect();
+    let glue: BTreeMap<String, BTreeSet<IpAddr>> =
+        parent_ns.iter().map(|n| (n.clone(), addrs(&referral, Some(n)))).filter(|(_, a)| !a.is_empty()).collect();
 
     let (mut servers, mut unresolvable, mut cnames) = (vec![], vec![], vec![]);
     let want_v6 = ipv6_available();
@@ -183,7 +180,12 @@ pub async fn check_delegation(
             if ips.is_empty() {
                 unresolvable.push(ns.clone());
             }
-            servers.push(DelegatedServer { name: ns.clone(), address: None, state: ServerState::Unreachable, child_ns: None });
+            servers.push(DelegatedServer {
+                name: ns.clone(),
+                address: None,
+                state: ServerState::Unreachable,
+                child_ns: None,
+            });
             continue;
         };
         let addr = SocketAddr::new(ip, ports.nameserver);
@@ -208,7 +210,12 @@ pub async fn check_delegation(
     Ok(DelegationResult { apex, parent, parent_ns, glue, servers, glue_served, unresolvable, cnames })
 }
 
-async fn ask_server(addr: SocketAddr, apex_name: &Name, apex: &str, limit: Duration) -> (ServerState, Option<BTreeSet<String>>) {
+async fn ask_server(
+    addr: SocketAddr,
+    apex_name: &Name,
+    apex: &str,
+    limit: Duration,
+) -> (ServerState, Option<BTreeSet<String>>) {
     let soa = match exchange(addr, apex_name, RecordType::SOA, false, limit).await {
         Ok(m) => m,
         Err(_) => return (ServerState::Unreachable, None),
@@ -231,7 +238,14 @@ async fn ask_server(addr: SocketAddr, apex_name: &Name, apex: &str, limit: Durat
     (state, child_ns)
 }
 
-fn add(out: &mut Vec<Finding>, code: &'static str, severity: Severity, title: &'static str, message: String, recommendation: Option<&'static str>) {
+fn add(
+    out: &mut Vec<Finding>,
+    code: &'static str,
+    severity: Severity,
+    title: &'static str,
+    message: String,
+    recommendation: Option<&'static str>,
+) {
     out.push(Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) });
 }
 
@@ -240,17 +254,24 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
     let list = |v: &mut dyn Iterator<Item = &String>| v.cloned().collect::<Vec<_>>().join(", ");
 
     if r.parent_ns.len() < 2 {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_delegation_single_ns",
             Severity::Warning,
             "Only one nameserver",
-            format!("{} delegates to {} nameserver, so one outage takes the domain offline.", r.parent, r.parent_ns.len()),
+            format!(
+                "{} delegates to {} nameserver, so one outage takes the domain offline.",
+                r.parent,
+                r.parent_ns.len()
+            ),
             Some("List at least two nameservers on different networks (RFC 2182)."),
         );
     }
-    let down: Vec<&String> = r.servers.iter().filter(|s| s.state == ServerState::Unreachable).map(|s| &s.name).collect();
+    let down: Vec<&String> =
+        r.servers.iter().filter(|s| s.state == ServerState::Unreachable).map(|s| &s.name).collect();
     if !down.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_delegation_unreachable",
             Severity::Warning,
             "A delegated nameserver didn't answer",
@@ -270,12 +291,14 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
     // the network is answering, not the nameservers.
     let answering: Vec<&DelegatedServer> = r.servers.iter().filter(|s| s.state != ServerState::Unreachable).collect();
     let distinct: BTreeSet<SocketAddr> = answering.iter().filter_map(|s| s.address).collect();
-    let intercepted = distinct.len() >= 2 && answering.iter().all(|s| matches!(s.state, ServerState::Lame { recursive: true, .. }));
+    let intercepted =
+        distinct.len() >= 2 && answering.iter().all(|s| matches!(s.state, ServerState::Lame { recursive: true, .. }));
     if intercepted {
         let names: Vec<&str> = answering.iter().map(|s| s.name.as_str()).collect();
         out.push(crate::dns::interception_finding(&names));
     } else if !lame.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_delegation_lame",
             Severity::Critical,
             "Delegated to a server that doesn't serve the zone",
@@ -302,11 +325,15 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         if !only_child.is_empty() {
             parts.push(format!("{} only in the zone itself", list(&mut only_child.iter())));
         }
-        add(&mut out,
+        add(
+            &mut out,
             "dns_delegation_mismatch",
             Severity::Warning,
             "Parent and zone disagree about the nameservers",
-            format!("Nameservers listed {}. Resolvers that cache one side see a different set from those that cache the other.", parts.join(", and ")),
+            format!(
+                "Nameservers listed {}. Resolvers that cache one side see a different set from those that cache the other.",
+                parts.join(", and ")
+            ),
             Some("Make the NS records in the zone match the delegation at the registrar."),
         );
     }
@@ -319,10 +346,13 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
             Some(g) => {
                 let served = r.glue_served.get(ns).filter(|s| !s.is_empty());
                 if let Some(s) = served {
-                    let fam = |set: &BTreeSet<IpAddr>, v4: bool| set.iter().filter(|i| i.is_ipv4() == v4).copied().collect::<BTreeSet<_>>();
+                    let fam = |set: &BTreeSet<IpAddr>, v4: bool| {
+                        set.iter().filter(|i| i.is_ipv4() == v4).copied().collect::<BTreeSet<_>>()
+                    };
                     // IPv4 always; IPv6 only if the parent gave any (a missing AAAA glue is not a break).
                     if fam(g, true) != fam(s, true) || (!fam(g, false).is_empty() && fam(g, false) != fam(s, false)) {
-                        let show = |set: &BTreeSet<IpAddr>| set.iter().map(ToString::to_string).collect::<Vec<_>>().join("/");
+                        let show =
+                            |set: &BTreeSet<IpAddr>| set.iter().map(ToString::to_string).collect::<Vec<_>>().join("/");
                         wrong.push(format!("{ns}: parent says {}, the zone says {}", show(g), show(s)));
                     }
                 }
@@ -330,16 +360,25 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         }
     }
     if !missing.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_glue_missing",
             Severity::Critical,
             "Missing glue",
-            format!("{} {} inside {} but the parent gave no address for {}, so resolvers cannot find {} (a circular dependency).", list(&mut missing.iter()), if missing.len() == 1 { "is" } else { "are" }, r.apex, if missing.len() == 1 { "it" } else { "them" }, if missing.len() == 1 { "it" } else { "them" }),
+            format!(
+                "{} {} inside {} but the parent gave no address for {}, so resolvers cannot find {} (a circular dependency).",
+                list(&mut missing.iter()),
+                if missing.len() == 1 { "is" } else { "are" },
+                r.apex,
+                if missing.len() == 1 { "it" } else { "them" },
+                if missing.len() == 1 { "it" } else { "them" }
+            ),
             Some("Add glue records for these nameservers at the registrar."),
         );
     }
     if !wrong.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_glue_mismatch",
             Severity::Critical,
             "Glue doesn't match the zone",
@@ -348,7 +387,8 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if !r.unresolvable.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_ns_unresolvable",
             Severity::Critical,
             "A nameserver name doesn't resolve",
@@ -357,7 +397,8 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if !r.cnames.is_empty() {
-        add(&mut out,
+        add(
+            &mut out,
             "dns_ns_is_cname",
             Severity::Critical,
             "A nameserver name is an alias",

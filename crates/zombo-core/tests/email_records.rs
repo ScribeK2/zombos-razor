@@ -32,7 +32,11 @@ async fn published_records_are_ok_and_say_where_reports_go() {
     assert_eq!((b.code, b.severity), ("email_bimi_ok", Severity::Ok));
     assert_eq!((m.code, m.severity), ("email_mtasts_ok", Severity::Ok));
     assert!(t.message.contains("mailto:tls@example.com"), "{}", t.message);
-    assert!(b.message.contains("https://example.com/logo.svg") && b.message.contains("evidence document"), "{}", b.message);
+    assert!(
+        b.message.contains("https://example.com/logo.svg") && b.message.contains("evidence document"),
+        "{}",
+        b.message
+    );
     // The record is all that was checked, and the finding says so.
     assert!(m.message.contains("20240101T000000") && m.message.contains("not fetched"), "{}", m.message);
 }
@@ -40,7 +44,11 @@ async fn published_records_are_ok_and_say_where_reports_go() {
 #[tokio::test]
 async fn absent_records_are_info_not_a_problem() {
     let fs = findings_of("example.com. 60 IN A 192.0.2.1\n").await;
-    for (prefix, code) in [("email_tlsrpt_", "email_tlsrpt_missing"), ("email_bimi_", "email_bimi_missing"), ("email_mtasts_", "email_mtasts_missing")] {
+    for (prefix, code) in [
+        ("email_tlsrpt_", "email_tlsrpt_missing"),
+        ("email_bimi_", "email_bimi_missing"),
+        ("email_mtasts_", "email_mtasts_missing"),
+    ] {
         let f = only(&fs, prefix);
         assert_eq!((f.code, f.severity), (code, Severity::Info));
         assert!(f.recommendation.as_deref().is_some_and(|r| r.starts_with("Optional.")), "{f:?}");
@@ -62,7 +70,12 @@ async fn a_tls_rpt_record_must_have_a_mailto_or_https_address() {
 
 #[tokio::test]
 async fn bimi_needs_an_https_logo() {
-    for rec in ["v=BIMI1; a=https://x.test/vmc.pem", "v=BIMI1; l=http://x.test/l.svg", "v=BIMI1; l=https://x.test/l.svg; a=http://x.test/v.pem", "v=BIMI1; l=data:image/svg+xml;base64,AAAA"] {
+    for rec in [
+        "v=BIMI1; a=https://x.test/vmc.pem",
+        "v=BIMI1; l=http://x.test/l.svg",
+        "v=BIMI1; l=https://x.test/l.svg; a=http://x.test/v.pem",
+        "v=BIMI1; l=data:image/svg+xml;base64,AAAA",
+    ] {
         let fs = findings_of(&format!("default._bimi.example.com. 60 IN TXT \"{rec}\"\n")).await;
         let f = only(&fs, "email_bimi_");
         assert_eq!((f.code, f.severity), ("email_bimi_invalid", Severity::Warning), "{rec}");
@@ -102,7 +115,11 @@ async fn two_records_are_a_warning_for_each_kind() {
              default._bimi.example.com. 60 IN TXT \"v=BIMI1; l=https://x.test/a.svg\"\ndefault._bimi.example.com. 60 IN TXT \"v=BIMI1; l=https://x.test/b.svg\"\n\
              _mta-sts.example.com. 60 IN TXT \"v=STSv1; id=1\"\n_mta-sts.example.com. 60 IN TXT \"v=STSv1; id=2\"\n";
     let fs = findings_of(z).await;
-    for (prefix, code) in [("email_tlsrpt_", "email_tlsrpt_multiple"), ("email_bimi_", "email_bimi_multiple"), ("email_mtasts_", "email_mtasts_multiple")] {
+    for (prefix, code) in [
+        ("email_tlsrpt_", "email_tlsrpt_multiple"),
+        ("email_bimi_", "email_bimi_multiple"),
+        ("email_mtasts_", "email_mtasts_multiple"),
+    ] {
         let f = only(&fs, prefix);
         assert_eq!((f.code, f.severity), (code, Severity::Warning));
         assert!(f.message.contains("2 "), "{}", f.message);
@@ -123,7 +140,11 @@ async fn a_failed_lookup_is_a_warning_not_a_missing_record() {
     let s = FakeDns::start(&zone("email_optional")).await.refuse(RecordType::TXT);
     let r = email_auth(s.addr, "example.com", &[], T).await;
     let fs = email_findings("example.com", &r);
-    for (prefix, code) in [("email_tlsrpt_", "email_tlsrpt_lookup_failed"), ("email_bimi_", "email_bimi_lookup_failed"), ("email_mtasts_", "email_mtasts_lookup_failed")] {
+    for (prefix, code) in [
+        ("email_tlsrpt_", "email_tlsrpt_lookup_failed"),
+        ("email_bimi_", "email_bimi_lookup_failed"),
+        ("email_mtasts_", "email_mtasts_lookup_failed"),
+    ] {
         let f = only(&fs, prefix);
         assert_eq!((f.code, f.severity), (code, Severity::Warning));
     }
@@ -131,7 +152,11 @@ async fn a_failed_lookup_is_a_warning_not_a_missing_record() {
 
 #[tokio::test]
 async fn these_findings_are_never_critical() {
-    for z in [zone("email_optional"), "example.com. 60 IN A 192.0.2.1\n".into(), "_smtp._tls.example.com. 60 IN TXT \"v=TLSRPTv1; rua=bad\"\n".into()] {
+    for z in [
+        zone("email_optional"),
+        "example.com. 60 IN A 192.0.2.1\n".into(),
+        "_smtp._tls.example.com. 60 IN TXT \"v=TLSRPTv1; rua=bad\"\n".into(),
+    ] {
         for f in findings_of(&z).await.iter().filter(|f| f.code.starts_with("email_")) {
             assert!(f.severity != Severity::Critical, "{f:?}");
         }

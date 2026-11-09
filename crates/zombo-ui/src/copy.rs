@@ -24,12 +24,22 @@ struct Doc {
 
 fn doc(tab: &Tab, section: Section) -> Doc {
     let v = tab.verdict(section);
-    let mut d = Doc { word: v.word, why: v.why, findings: tab.findings(section), rows: vec![], details_title: String::new(), details: vec![] };
+    let mut d = Doc {
+        word: v.word,
+        why: v.why,
+        findings: tab.findings(section),
+        rows: vec![],
+        details_title: String::new(),
+        details: vec![],
+    };
     if section == Section::Dns {
         for kind in RecordKind::ALL {
             for r in tab.propagation.view(kind).into_iter().filter(|r| r.answer != "no record") {
                 let ttl = r.ttl.map(|t| format!(", TTL {t}")).unwrap_or_default();
-                d.rows.push(Fact::new(format!("{} at {}", kind.code(), r.resolver), format!("{}{ttl}, {}", r.answer, r.status.label())));
+                d.rows.push(Fact::new(
+                    format!("{} at {}", kind.code(), r.resolver),
+                    format!("{}{ttl}, {}", r.answer, r.status.label()),
+                ));
             }
         }
     } else if let Some(run) = tab.runs.get(&section) {
@@ -55,7 +65,12 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
     let findings: Vec<_> = d
         .findings
         .iter()
-        .map(|f| zombo_core::Finding { title: flat(&f.title).into(), message: flat(&f.message), recommendation: f.recommendation.as_deref().map(|r| flat(r).into()), ..f.clone() })
+        .map(|f| zombo_core::Finding {
+            title: flat(&f.title).into(),
+            message: flat(&f.message),
+            recommendation: f.recommendation.as_deref().map(|r| flat(r).into()),
+            ..f.clone()
+        })
         .collect();
     finding_lines(&mut out, &findings);
     if !findings.is_empty() && !d.rows.is_empty() {
@@ -103,7 +118,10 @@ pub fn diagnosis_markdown(tab: &Tab) -> String {
         }
     }
     if !not_run.is_empty() {
-        out.push_str(&format!("## Not run\n\n{}\n", not_run.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")));
+        out.push_str(&format!(
+            "## Not run\n\n{}\n",
+            not_run.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")
+        ));
     }
     out
 }
@@ -138,8 +156,19 @@ mod tests {
 
     fn tab_with_web() -> Tab {
         let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
-        let f = Finding { code: "web_x", severity: Severity::Warning, title: "No HSTS".into(), message: "Add the header.\u{1b}[31m".into(), recommendation: Some("Set it.".into()) };
-        let o = Outcome { findings: vec![f], facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`b")], details_title: "Redirect chain", details: vec![Fact::new("Hop 1", "301 http://example.com")] };
+        let f = Finding {
+            code: "web_x",
+            severity: Severity::Warning,
+            title: "No HSTS".into(),
+            message: "Add the header.\u{1b}[31m".into(),
+            recommendation: Some("Set it.".into()),
+        };
+        let o = Outcome {
+            findings: vec![f],
+            facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`b")],
+            details_title: "Redirect chain",
+            details: vec![Fact::new("Hop 1", "301 http://example.com")],
+        };
         t.run_mut(Section::Web).apply(CheckEvent::Started);
         t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
         t

@@ -5,7 +5,8 @@ use std::time::Duration;
 use common::{FakeDns, zone};
 use hickory_proto::rr::RecordType;
 use zombo_core::email_auth::{
-    Alignment, DKIM_COMMON_SELECTORS, DkimKeyError, EffectiveAll, EmailAuthResult, KeyType, Mechanism, NodeError, Policy, Qualifier, SpfAudit, SpfNode, email_auth,
+    Alignment, DKIM_COMMON_SELECTORS, DkimKeyError, EffectiveAll, EmailAuthResult, KeyType, Mechanism, NodeError,
+    Policy, Qualifier, SpfAudit, SpfNode, email_auth,
 };
 
 const T: Duration = Duration::from_millis(500);
@@ -51,7 +52,12 @@ async fn lookups_are_counted_through_includes() {
 async fn permerrors_are_found_in_the_record_and_its_includes() {
     let a = spf(&zone("email_spf_permerrors")).await;
     let errs = errors(&a).join("\n");
-    for want in ["gone.test has no SPF record", "loops back to example.com", r#"bad address "ip4:300.1.1.1""#, r#"unknown mechanism "bogus""#] {
+    for want in [
+        "gone.test has no SPF record",
+        "loops back to example.com",
+        r#"bad address "ip4:300.1.1.1""#,
+        r#"unknown mechanism "bogus""#,
+    ] {
         assert!(errs.contains(want), "errors missing {want:?}: {errs}");
     }
     assert_eq!(a.all, EffectiveAll::All(Qualifier::SoftFail));
@@ -151,14 +157,18 @@ async fn a_diamond_include_is_legal_and_counted_each_time() {
 
 #[tokio::test]
 async fn a_loop_through_a_redirect_is_named_as_one() {
-    let a = spf("example.com. 60 IN TXT \"v=spf1 redirect=a.test\"\na.test. 60 IN TXT \"v=spf1 redirect=example.com\"\n").await;
+    let a =
+        spf("example.com. 60 IN TXT \"v=spf1 redirect=a.test\"\na.test. 60 IN TXT \"v=spf1 redirect=example.com\"\n")
+            .await;
     assert_eq!(errors(&a), ["redirect loops back to example.com"]);
     assert_eq!(a.all, EffectiveAll::Unknown);
 }
 
 #[tokio::test]
 async fn a_chain_of_a_hundred_includes_stops_at_the_cap() {
-    let zone: String = (0..100).map(|i| format!("c{i}.test. 60 IN TXT \"v=spf1 include:c{}.test\"\n", i + 1)).collect::<String>() + "example.com. 60 IN TXT \"v=spf1 include:c0.test\"\n";
+    let zone: String =
+        (0..100).map(|i| format!("c{i}.test. 60 IN TXT \"v=spf1 include:c{}.test\"\n", i + 1)).collect::<String>()
+            + "example.com. 60 IN TXT \"v=spf1 include:c0.test\"\n";
     let a = spf(&zone).await;
     assert!(a.truncated);
     assert!(a.lookups > 30);
@@ -202,7 +212,11 @@ async fn a_refused_txt_lookup_is_a_failed_lookup_for_the_domain() {
 
 #[tokio::test]
 async fn a_failed_nested_lookup_is_listed_in_failed() {
-    let s = FakeDns::start("example.com. 60 IN TXT \"v=spf1 a:h.test include:i.test -all\"\ni.test. 60 IN TXT \"v=spf1 -all\"\n").await.refuse(RecordType::A);
+    let s = FakeDns::start(
+        "example.com. 60 IN TXT \"v=spf1 a:h.test include:i.test -all\"\ni.test. 60 IN TXT \"v=spf1 -all\"\n",
+    )
+    .await
+    .refuse(RecordType::A);
     let a = email_auth(s.addr, "example.com", &[], T).await.spf;
     assert_eq!(a.failed.len(), 1, "{:?}", a.failed);
     assert!(a.failed[0].starts_with("a:h.test: "), "{:?}", a.failed);
@@ -229,14 +243,19 @@ async fn a_healthy_domain_has_one_dkim_key_behind_a_cname() {
     assert_eq!(k[0].cname.as_deref(), Some("selector1-example._domainkey.provider.test"));
     assert!(r.dkim.failed.is_empty());
     let d = r.dmarc.parsed.expect("a DMARC record");
-    assert_eq!((d.policy, d.subdomain_policy, d.pct, d.adkim, d.aspf), (Some(Policy::Reject), Some(Policy::Quarantine), 100, Alignment::Strict, Alignment::Relaxed));
+    assert_eq!(
+        (d.policy, d.subdomain_policy, d.pct, d.adkim, d.aspf),
+        (Some(Policy::Reject), Some(Policy::Quarantine), 100, Alignment::Strict, Alignment::Relaxed)
+    );
     assert_eq!(d.rua, ["mailto:dmarc@example.com"]);
 }
 
 #[tokio::test]
 async fn a_domain_with_no_mail_records_has_none_of_them() {
     let r = run(&zone("email_missing")).await;
-    assert!(r.spf.records.is_empty() && r.dkim.keys.is_empty() && r.dmarc.records.is_empty() && r.dmarc.parsed.is_none());
+    assert!(
+        r.spf.records.is_empty() && r.dkim.keys.is_empty() && r.dmarc.records.is_empty() && r.dmarc.parsed.is_none()
+    );
     assert!(r.dkim.checked.contains(&"google".to_string()));
     assert_eq!(r.dkim.checked.len(), DKIM_COMMON_SELECTORS.len());
     assert!(r.answered());

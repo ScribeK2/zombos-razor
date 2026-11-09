@@ -74,12 +74,18 @@ mod tests {
         assert_eq!(line(Section::Email, 1, &[Severity::Warning, Severity::Ok]), "done \u{b7} 1 warning");
         assert_eq!(line(Section::Email, 2, &[Severity::Warning, Severity::Warning]), "done \u{b7} 2 warnings");
         assert_eq!(line(Section::Tls, 1, &[Severity::Critical]), "done \u{b7} 1 critical");
-        assert_eq!(line(Section::Tls, 3, &[Severity::Critical, Severity::Warning, Severity::Warning]), "done \u{b7} 3 problems");
+        assert_eq!(
+            line(Section::Tls, 3, &[Severity::Critical, Severity::Warning, Severity::Warning]),
+            "done \u{b7} 3 problems"
+        );
     }
 
     #[test]
     fn problems_win_over_notes() {
-        assert_eq!(line(Section::Web, 1, &[Severity::Warning, Severity::Info, Severity::Info]), "done \u{b7} 1 warning");
+        assert_eq!(
+            line(Section::Web, 1, &[Severity::Warning, Severity::Info, Severity::Info]),
+            "done \u{b7} 1 warning"
+        );
     }
 
     #[test]
@@ -102,7 +108,12 @@ mod tests {
 
     #[test]
     fn a_check_that_did_not_finish_keeps_its_own_label() {
-        for state in [CheckState::NotRun, CheckState::Running, CheckState::TimedOut, CheckState::Failed { reason: "no answer".into() }] {
+        for state in [
+            CheckState::NotRun,
+            CheckState::Running,
+            CheckState::TimedOut,
+            CheckState::Failed { reason: "no answer".into() },
+        ] {
             assert_eq!(count_line(Section::Dns, &state, &[f(Severity::Warning)]), state.label());
         }
     }

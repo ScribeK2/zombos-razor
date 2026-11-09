@@ -77,7 +77,13 @@ impl Answer {
     }
 }
 
-fn find(code: &'static str, severity: Severity, title: &'static str, message: String, rec: Option<&'static str>) -> Finding {
+fn find(
+    code: &'static str,
+    severity: Severity,
+    title: &'static str,
+    message: String,
+    rec: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: rec.map(Into::into) }
 }
 
@@ -90,8 +96,12 @@ pub(crate) fn origin_findings(ip: IpAddr, public: &Answer, origin: &Answer) -> V
             "website_origin_cert_rejected",
             Severity::Warning,
             "Origin certificate rejected",
-            format!("For the origin {ip}: the origin answered but its certificate was rejected: {reason}, try --insecure-origin. The public site answers {p}."),
-            Some("The origin may present a certificate for another name, a self-signed one or an expired one. Fix it, or rerun with --insecure-origin to compare the answers anyway."),
+            format!(
+                "For the origin {ip}: the origin answered but its certificate was rejected: {reason}, try --insecure-origin. The public site answers {p}."
+            ),
+            Some(
+                "The origin may present a certificate for another name, a self-signed one or an expired one. Fix it, or rerun with --insecure-origin to compare the answers anyway.",
+            ),
         )];
     }
     if public.status.is_none() && origin.status.is_none() {
@@ -100,7 +110,9 @@ pub(crate) fn origin_findings(ip: IpAddr, public: &Answer, origin: &Answer) -> V
             Severity::Warning,
             "Neither the site nor the origin answered",
             format!("The public name gave {p}, and the origin {ip} gave {o}."),
-            Some("The origin itself is down or unreachable. Check the server and its firewall before looking at the CDN."),
+            Some(
+                "The origin itself is down or unreachable. Check the server and its firewall before looking at the CDN.",
+            ),
         )];
     }
     if origin.status.is_none() {
@@ -109,7 +121,9 @@ pub(crate) fn origin_findings(ip: IpAddr, public: &Answer, origin: &Answer) -> V
             Severity::Warning,
             "Origin did not answer directly",
             format!("The public site answers {p}, but the origin {ip} gave {o}."),
-            Some("The origin may accept only the CDN's addresses, or its certificate may not match the site name. Ask it from the CDN's side, or check its firewall and certificate."),
+            Some(
+                "The origin may accept only the CDN's addresses, or its certificate may not match the site name. Ask it from the CDN's side, or check its firewall and certificate.",
+            ),
         )];
     }
     let mut out = vec![];
@@ -117,8 +131,12 @@ pub(crate) fn origin_findings(ip: IpAddr, public: &Answer, origin: &Answer) -> V
     if public.status != origin.status {
         differs = true;
         let who = match (public.good(), origin.good()) {
-            (false, true) => "The origin is healthy, so the fault is in front of it: the CDN, its configuration, or DNS.",
-            (true, false) => "The CDN is serving a good page (possibly a cached copy) while the origin fails: the origin is broken and the CDN is masking it.",
+            (false, true) => {
+                "The origin is healthy, so the fault is in front of it: the CDN, its configuration, or DNS."
+            }
+            (true, false) => {
+                "The CDN is serving a good page (possibly a cached copy) while the origin fails: the origin is broken and the CDN is masking it."
+            }
             _ => "Both answers are failures or redirects that differ: compare the two redirect chains.",
         };
         out.push(find(
@@ -176,8 +194,12 @@ fn chain_text(chain: &[Hop]) -> String {
 
 fn header_differences(public: &Answer, origin: &Answer) -> Vec<String> {
     let mut out = vec![];
-    let same = |a: &Option<String>, b: &Option<String>| a.as_deref().map(str::to_ascii_lowercase) == b.as_deref().map(str::to_ascii_lowercase);
-    for (name, a, b) in [("Server", &public.server, &origin.server), ("Content-Type", &public.content_type, &origin.content_type)] {
+    let same = |a: &Option<String>, b: &Option<String>| {
+        a.as_deref().map(str::to_ascii_lowercase) == b.as_deref().map(str::to_ascii_lowercase)
+    };
+    for (name, a, b) in
+        [("Server", &public.server, &origin.server), ("Content-Type", &public.content_type, &origin.content_type)]
+    {
         if !same(a, b) {
             let show = |v: &Option<String>| v.as_deref().map_or("none".to_string(), |v| format!("{v:?}"));
             out.push(format!("{name}: {} at the CDN, {} at the origin", show(a), show(b)));

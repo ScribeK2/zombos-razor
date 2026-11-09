@@ -46,7 +46,8 @@ pub async fn check_caa(resolvers: &[SocketAddr], name: &str, query_timeout: Dura
     for _ in 0..MAX_LABELS {
         match resolver.ask(at, RecordType::CAA).await {
             Err(e) => {
-                out.error = Some(format!("the CAA question for {} failed: {}", printable(&clip(at)), printable(&clip(&e))));
+                out.error =
+                    Some(format!("the CAA question for {} failed: {}", printable(&clip(at)), printable(&clip(&e))));
                 return out;
             }
             Ok(m) => {
@@ -54,7 +55,11 @@ pub async fn check_caa(resolvers: &[SocketAddr], name: &str, query_timeout: Dura
                     .answers
                     .iter()
                     .filter_map(|a| match &a.data {
-                        RData::CAA(c) => Some(CaaRecord { critical: c.issuer_critical, tag: printable(&clip(&c.tag.to_ascii_lowercase())), value: printable(&clip(&String::from_utf8_lossy(&c.value))) }),
+                        RData::CAA(c) => Some(CaaRecord {
+                            critical: c.issuer_critical,
+                            tag: printable(&clip(&c.tag.to_ascii_lowercase())),
+                            value: printable(&clip(&String::from_utf8_lossy(&c.value))),
+                        }),
                         _ => None,
                     })
                     .take(MAX_RECORDS)
@@ -97,17 +102,40 @@ struct KnownCa {
     domains: &'static [&'static str],
 }
 
-const LETS_ENCRYPT_CNS: &[&str] = &["r3", "r4", "r10", "r11", "r12", "r13", "r14", "e1", "e5", "e6", "e7", "e8", "e9", "ye1", "ye2", "ye3", "yr1", "yr2", "yr3"];
+const LETS_ENCRYPT_CNS: &[&str] = &[
+    "r3", "r4", "r10", "r11", "r12", "r13", "r14", "e1", "e5", "e6", "e7", "e8", "e9", "ye1", "ye2", "ye3", "yr1",
+    "yr2", "yr3",
+];
 const GOOGLE_CNS: &[&str] = &["wr1", "wr2", "wr3", "wr4", "wr5", "we1", "we2", "we3", "we4"];
 
 const KNOWN_CAS: &[KnownCa] = &[
-    KnownCa { contains: &["let's encrypt", "letsencrypt", "isrg"], exact: LETS_ENCRYPT_CNS, domains: &["letsencrypt.org"] },
-    KnownCa { contains: &["digicert", "geotrust", "rapidssl", "thawte", "symantec"], exact: &[], domains: &["digicert.com", "geotrust.com", "rapidssl.com", "thawte.com", "symantec.com"] },
-    KnownCa { contains: &["sectigo", "comodo", "usertrust", "zerossl"], exact: &[], domains: &["sectigo.com", "comodoca.com", "usertrust.com", "trust-provider.com", "zerossl.com"] },
+    KnownCa {
+        contains: &["let's encrypt", "letsencrypt", "isrg"],
+        exact: LETS_ENCRYPT_CNS,
+        domains: &["letsencrypt.org"],
+    },
+    KnownCa {
+        contains: &["digicert", "geotrust", "rapidssl", "thawte", "symantec"],
+        exact: &[],
+        domains: &["digicert.com", "geotrust.com", "rapidssl.com", "thawte.com", "symantec.com"],
+    },
+    KnownCa {
+        contains: &["sectigo", "comodo", "usertrust", "zerossl"],
+        exact: &[],
+        domains: &["sectigo.com", "comodoca.com", "usertrust.com", "trust-provider.com", "zerossl.com"],
+    },
     KnownCa { contains: &["google trust", "gts "], exact: GOOGLE_CNS, domains: &["pki.goog"] },
-    KnownCa { contains: &["amazon"], exact: &[], domains: &["amazon.com", "amazontrust.com", "awstrust.com", "amazonaws.com"] },
+    KnownCa {
+        contains: &["amazon"],
+        exact: &[],
+        domains: &["amazon.com", "amazontrust.com", "awstrust.com", "amazonaws.com"],
+    },
     KnownCa { contains: &["globalsign"], exact: &[], domains: &["globalsign.com"] },
-    KnownCa { contains: &["go daddy", "godaddy", "starfield"], exact: &[], domains: &["godaddy.com", "starfieldtech.com"] },
+    KnownCa {
+        contains: &["go daddy", "godaddy", "starfield"],
+        exact: &[],
+        domains: &["godaddy.com", "starfieldtech.com"],
+    },
     KnownCa { contains: &["entrust"], exact: &[], domains: &["entrust.net"] },
     KnownCa { contains: &["ssl.com"], exact: &[], domains: &["ssl.com"] },
     KnownCa { contains: &["buypass"], exact: &[], domains: &["buypass.com"] },
@@ -121,10 +149,19 @@ const KNOWN_CAS: &[KnownCa] = &[
 /// The CAA identifiers of the CA behind an issuer name, or none when the name is not in the table.
 pub fn ca_identifiers(issuer: &str) -> Option<&'static [&'static str]> {
     let cn = issuer.to_ascii_lowercase();
-    KNOWN_CAS.iter().find(|c| c.exact.contains(&cn.as_str()) || c.contains.iter().any(|n| cn.contains(n))).map(|c| c.domains)
+    KNOWN_CAS
+        .iter()
+        .find(|c| c.exact.contains(&cn.as_str()) || c.contains.iter().any(|n| cn.contains(n)))
+        .map(|c| c.domains)
 }
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Cow::Borrowed) }
 }
 
@@ -145,7 +182,9 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             "caa_none",
             Severity::Info,
             "No CAA record",
-            format!("{name} and its parent names have no CAA record, so any certificate authority may issue certificates for it."),
+            format!(
+                "{name} and its parent names have no CAA record, so any certificate authority may issue certificates for it."
+            ),
             Some("Add a CAA record naming the CA you use, for example: 0 issue \"letsencrypt.org\"."),
         )];
     };
@@ -173,7 +212,9 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             "caa_forbids_all",
             Severity::Warning,
             "CAA forbids all issuance",
-            format!("{place} has a CAA {tag} record with no CA in it, so no CA may issue or renew certificates for it."),
+            format!(
+                "{place} has a CAA {tag} record with no CA in it, so no CA may issue or renew certificates for it."
+            ),
             Some("Name the CA you use in the CAA record before the certificate has to be renewed."),
         )),
         Some(list) => {
@@ -202,7 +243,11 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
     }
 
     if let Some(list) = &issuewild {
-        let msg = if list.is_empty() { format!("{place} forbids wildcard certificates.") } else { format!("{place} allows wildcard certificates only from {}.", list.join(", ")) };
+        let msg = if list.is_empty() {
+            format!("{place} forbids wildcard certificates.")
+        } else {
+            format!("{place} allows wildcard certificates only from {}.", list.join(", "))
+        };
         out.push(finding("caa_issuewild", Severity::Info, "CAA has a wildcard rule", msg, None));
     }
     out
@@ -212,13 +257,23 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
 /// response is not fetched or checked here.
 pub fn ocsp_findings(host: &str, port: u16, r: &TlsResult) -> Vec<Finding> {
     if r.ocsp_stapled {
-        vec![finding("tls_ocsp_stapled", Severity::Ok, "OCSP response stapled", format!("{host}:{port} sent an OCSP response with its certificate, so clients need not ask the CA about revocation."), None)]
+        vec![finding(
+            "tls_ocsp_stapled",
+            Severity::Ok,
+            "OCSP response stapled",
+            format!(
+                "{host}:{port} sent an OCSP response with its certificate, so clients need not ask the CA about revocation."
+            ),
+            None,
+        )]
     } else {
         vec![finding(
             "tls_no_ocsp_staple",
             Severity::Info,
             "No OCSP stapling",
-            format!("{host}:{port} did not staple an OCSP response. Stapling is optional, and a server whose CA no longer runs OCSP has nothing to staple."),
+            format!(
+                "{host}:{port} did not staple an OCSP response. Stapling is optional, and a server whose CA no longer runs OCSP has nothing to staple."
+            ),
             None,
         )]
     }
@@ -234,7 +289,11 @@ mod tests {
 
     #[test]
     fn values_are_split_from_their_parameters_and_empty_means_forbidden() {
-        let r = [rec("issue", "LetsEncrypt.org; accounturi=https://x"), rec("issue", "digicert.com"), rec("issuewild", ";")];
+        let r = [
+            rec("issue", "LetsEncrypt.org; accounturi=https://x"),
+            rec("issue", "digicert.com"),
+            rec("issuewild", ";"),
+        ];
         assert_eq!(allowed(&r, "issue").unwrap(), ["letsencrypt.org", "digicert.com"]);
         assert_eq!(allowed(&r, "issuewild").unwrap(), Vec::<String>::new());
         assert_eq!(allowed(&r, "iodef"), None);

@@ -35,15 +35,17 @@ pub fn current(window: &Window) -> Chrome {
         Decorations::Client { tiling } => (true, tiling.is_tiled()),
         Decorations::Server => (false, false),
     };
-    let state = WindowState { client_decorated, tiled, maximized: window.is_maximized(), fullscreen: window.is_fullscreen() };
+    let state =
+        WindowState { client_decorated, tiled, maximized: window.is_maximized(), fullscreen: window.is_fullscreen() };
     Chrome::decide(state, chrome::detect_compositor_shadow())
 }
 
 fn strip(id: &'static str, e: Edge, band: f32) -> Stateful<Div> {
-    let s = div().id(id).absolute().occlude().cursor(cursor(e)).on_mouse_down(MouseButton::Left, move |_, window, cx| {
-        cx.stop_propagation();
-        window.start_window_resize(resize_edge(e));
-    });
+    let s =
+        div().id(id).absolute().occlude().cursor(cursor(e)).on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            cx.stop_propagation();
+            window.start_window_resize(resize_edge(e));
+        });
     let b = px(band);
     match e {
         Edge::Top => s.top_0().left(b).right(b).h(b),
@@ -58,7 +60,8 @@ fn strip(id: &'static str, e: Edge, band: f32) -> Stateful<Div> {
 }
 
 pub fn frame(window: &mut Window, content: impl IntoElement) -> impl IntoElement {
-    let c = current(window);    window.set_client_inset(px(c.margin));
+    let c = current(window);
+    window.set_client_inset(px(c.margin));
     let shadow = vec![BoxShadow {
         color: hsla(0., 0., 0., 0.45),
         offset: point(px(0.), px(2.)),
@@ -82,22 +85,17 @@ pub fn frame(window: &mut Window, content: impl IntoElement) -> impl IntoElement
             .size(px(chrome::GRIP_SIZE - 4.))
             .text_color(rgb(t::GRAY_600))
     });
-    div()
-        .relative()
-        .size_full()
-        .p(px(c.margin))
-        .child(inner.children(grip))
-        .when(c.band > 0.0, |s| {
-            let band = c.band;
-            s.children([
-                strip("rz-top", Edge::Top, band),
-                strip("rz-bottom", Edge::Bottom, band),
-                strip("rz-left", Edge::Left, band),
-                strip("rz-right", Edge::Right, band),
-                strip("rz-tl", Edge::TopLeft, band),
-                strip("rz-tr", Edge::TopRight, band),
-                strip("rz-bl", Edge::BottomLeft, band),
-                strip("rz-br", Edge::BottomRight, band.max(chrome::GRIP_SIZE)),
-            ])
-        })
+    div().relative().size_full().p(px(c.margin)).child(inner.children(grip)).when(c.band > 0.0, |s| {
+        let band = c.band;
+        s.children([
+            strip("rz-top", Edge::Top, band),
+            strip("rz-bottom", Edge::Bottom, band),
+            strip("rz-left", Edge::Left, band),
+            strip("rz-right", Edge::Right, band),
+            strip("rz-tl", Edge::TopLeft, band),
+            strip("rz-tr", Edge::TopRight, band),
+            strip("rz-bl", Edge::BottomLeft, band),
+            strip("rz-br", Edge::BottomRight, band.max(chrome::GRIP_SIZE)),
+        ])
+    })
 }

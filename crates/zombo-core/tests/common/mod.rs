@@ -74,7 +74,9 @@ fn dnssec_record(line: &str) -> Option<Record> {
     let (name, ttl, _, rtype) = (f.next()?, f.next()?, f.next()?, f.next()?);
     let rest: Vec<&str> = f.collect();
     let num = |s: &str| s.parse::<u64>().unwrap_or_else(|_| panic!("bad number in {line:?}"));
-    let b64 = |s: &[&str]| data_encoding::BASE64.decode(s.concat().as_bytes()).unwrap_or_else(|e| panic!("bad base64 in {line:?}: {e}"));
+    let b64 = |s: &[&str]| {
+        data_encoding::BASE64.decode(s.concat().as_bytes()).unwrap_or_else(|e| panic!("bad base64 in {line:?}: {e}"))
+    };
     let mut rd = vec![];
     let code = match rtype {
         "DNSKEY" => {
@@ -86,7 +88,11 @@ fn dnssec_record(line: &str) -> Option<Record> {
         "DS" => {
             rd.extend((num(rest[0]) as u16).to_be_bytes());
             rd.extend([num(rest[1]) as u8, num(rest[2]) as u8]);
-            rd.extend(data_encoding::HEXLOWER_PERMISSIVE.decode(rest[3..].concat().as_bytes()).unwrap_or_else(|e| panic!("bad hex in {line:?}: {e}")));
+            rd.extend(
+                data_encoding::HEXLOWER_PERMISSIVE
+                    .decode(rest[3..].concat().as_bytes())
+                    .unwrap_or_else(|e| panic!("bad hex in {line:?}: {e}")),
+            );
             RecordType::DS
         }
         "RRSIG" => {
@@ -272,7 +278,11 @@ fn answer(state: &Mutex<State>, query: &[u8], udp: bool) -> Option<Vec<u8>> {
         for r in st.records.iter().filter(|r| r.record_type() == RecordType::NS && same(&r.name, q.name())) {
             m.add_authority(r.clone());
             if let hickory_proto::rr::RData::NS(ns) = &r.data {
-                for g in st.records.iter().filter(|g| matches!(g.record_type(), RecordType::A | RecordType::AAAA) && same(&g.name, &ns.0)) {
+                for g in st
+                    .records
+                    .iter()
+                    .filter(|g| matches!(g.record_type(), RecordType::A | RecordType::AAAA) && same(&g.name, &ns.0))
+                {
                     m.add_additional(g.clone());
                 }
             }

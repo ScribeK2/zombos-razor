@@ -93,7 +93,10 @@ pub struct Draft {
 
 /// Split a typed list on commas, semicolons and whitespace.
 pub fn split_list(text: &str) -> Vec<String> {
-    text.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).filter(|s| !s.is_empty()).map(String::from).collect()
+    text.split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 fn addr_text(a: &SocketAddr) -> String {
@@ -121,14 +124,19 @@ impl Draft {
         let selectors = selectors(&self.selectors).map_err(|m| fail(Field::Selectors, m)).unwrap_or_default();
         let timeout = timeout(&self.timeout).map_err(|m| fail(Field::Timeout, m)).unwrap_or_default();
         let proxy = proxy(&self.proxy).map_err(|m| fail(Field::Proxy, m)).unwrap_or_default();
-        if errors.is_empty() { Ok(Settings { resolvers, selectors, timeout, proxy, notifications: self.notifications }) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(Settings { resolvers, selectors, timeout, proxy, notifications: self.notifications })
+        } else {
+            Err(errors)
+        }
     }
 }
 
 fn resolvers(items: &[String]) -> Result<Vec<SocketAddr>, String> {
     let mut out: Vec<SocketAddr> = vec![];
     for item in items {
-        let a = parse_addr(item).map_err(|_| format!("{} is not an IP address, with or without a port", shown(item)))?;
+        let a =
+            parse_addr(item).map_err(|_| format!("{} is not an IP address, with or without a port", shown(item)))?;
         if a.port() == 0 {
             return Err(format!("{} uses port 0", shown(item)));
         }
@@ -264,7 +272,11 @@ pub fn budget(section: Section, setting: Option<Duration>) -> Budget {
     let d = default_budget(section);
     let Some(t) = setting else { return d };
     let whole = if section.is_on_demand() { t.max(d.whole) } else { t };
-    let query = if section.is_on_demand() { d.query } else { whole.mul_f64(d.query.as_secs_f64() / d.whole.as_secs_f64()).max(Duration::from_millis(250)) };
+    let query = if section.is_on_demand() {
+        d.query
+    } else {
+        whole.mul_f64(d.query.as_secs_f64() / d.whole.as_secs_f64()).max(Duration::from_millis(250))
+    };
     Budget { whole, query }
 }
 
@@ -314,7 +326,8 @@ mod tests {
     #[test]
     fn the_resolver_addresses_use_the_cli_parser() {
         let s = parse("resolvers = [\"9.9.9.10\", \"[2001:db8::1]:5353\", \"2001:db8::2\", \"9.9.9.10:53\"]").unwrap();
-        let want: Vec<SocketAddr> = ["9.9.9.10:53", "[2001:db8::1]:5353", "[2001:db8::2]:53"].iter().map(|a| a.parse().unwrap()).collect();
+        let want: Vec<SocketAddr> =
+            ["9.9.9.10:53", "[2001:db8::1]:5353", "[2001:db8::2]:53"].iter().map(|a| a.parse().unwrap()).collect();
         assert_eq!(s.resolvers, want);
     }
 
@@ -386,7 +399,8 @@ mod tests {
         }
         d.proxy = "".into();
         assert_eq!(d.validate().unwrap().proxy, None);
-        for bad in ["proxy.example:3128", "socks5://p:1080", "ftp://p", "http://", "http://bad host", "http://p\u{7}x"] {
+        for bad in ["proxy.example:3128", "socks5://p:1080", "ftp://p", "http://", "http://bad host", "http://p\u{7}x"]
+        {
             d.proxy = bad.into();
             assert_eq!(only(d.clone()).0, Field::Proxy, "{bad:?}");
         }
@@ -396,7 +410,13 @@ mod tests {
 
     #[test]
     fn every_bad_field_is_reported_at_once() {
-        let d = Draft { resolvers: items(&["nope"]), selectors: items(&["a..b"]), timeout: "0".into(), proxy: "x".into(), notifications: true };
+        let d = Draft {
+            resolvers: items(&["nope"]),
+            selectors: items(&["a..b"]),
+            timeout: "0".into(),
+            proxy: "x".into(),
+            notifications: true,
+        };
         let fields: Vec<Field> = d.validate().unwrap_err().iter().map(|e| e.field).collect();
         assert_eq!(fields, [Field::Resolvers, Field::Selectors, Field::Timeout, Field::Proxy]);
     }
@@ -410,14 +430,26 @@ mod tests {
 
     #[test]
     fn a_wrong_type_or_broken_toml_is_a_syntax_error() {
-        for bad in ["timeout_seconds = \"ten\"", "resolvers = \"8.8.8.8\"", "notifications = 1", "resolvers = [", "= = =", "timeout_seconds = 1.5"] {
+        for bad in [
+            "timeout_seconds = \"ten\"",
+            "resolvers = \"8.8.8.8\"",
+            "notifications = 1",
+            "resolvers = [",
+            "= = =",
+            "timeout_seconds = 1.5",
+        ] {
             assert!(matches!(parse(bad), Err(LoadError::Syntax(_))), "{bad}");
         }
     }
 
     #[test]
     fn a_file_value_out_of_range_is_a_field_error_not_a_syntax_error() {
-        for (text, field) in [("timeout_seconds = 0", Field::Timeout), ("timeout_seconds = 121", Field::Timeout), ("timeout_seconds = -1", Field::Timeout), ("resolvers = [\"x\"]", Field::Resolvers)] {
+        for (text, field) in [
+            ("timeout_seconds = 0", Field::Timeout),
+            ("timeout_seconds = 121", Field::Timeout),
+            ("timeout_seconds = -1", Field::Timeout),
+            ("resolvers = [\"x\"]", Field::Resolvers),
+        ] {
             match parse(text) {
                 Err(LoadError::Invalid(e)) => assert_eq!(e[0].field, field, "{text}"),
                 other => panic!("{text}: {other:?}"),

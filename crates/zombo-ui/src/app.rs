@@ -1,19 +1,22 @@
-use std::{collections::{HashMap, HashSet}, time::{Duration, Instant}};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
 
+use crate::settings::{PaneEvent, SettingsPane};
 use gpui_kit::component::input::{Input, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use crate::settings::{PaneEvent, SettingsPane};
+use zombo_core::Severity;
 use zombo_ui::{
     checks,
     config::{self, Config, Dirs},
     copy::Format,
-    diagnosis as dg,
-    evidence_model as ev,
+    diagnosis as dg, evidence_model as ev,
     keys::{self, Action, Mode, Press},
     layout,
-    notice, ondemand,
     motion::{self, Fade, Feedback, Level, Motion},
+    notice, ondemand,
     open_state::OpenState,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
@@ -24,7 +27,6 @@ use zombo_ui::{
     watch::Watches,
     workspace::{Slot, Workspace, relative},
 };
-use zombo_core::Severity;
 
 mod copying;
 mod evidence;
@@ -143,10 +145,16 @@ impl Shell {
         })
         .detach();
         let config = Config::load(Dirs::from_env());
-        let ws = Workspace { recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()), ..Workspace::default() };
+        let ws = Workspace {
+            recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()),
+            ..Workspace::default()
+        };
         let toast = [("config.toml", &config.settings_problem), ("recent.toml", &config.recent_problem)]
             .into_iter()
-            .filter_map(|(file, p)| p.as_ref().map(|p| format!("{file} has an error: {p}. The app runs without it and leaves the file as it is.")))
+            .filter_map(|(file, p)| {
+                p.as_ref()
+                    .map(|p| format!("{file} has an error: {p}. The app runs without it and leaves the file as it is."))
+            })
             .next()
             .map(|text| (text, Instant::now()));
         Shell {
@@ -277,7 +285,16 @@ impl Shell {
     }
 
     fn after_run(&mut self, key: &str, section: Section) {
-        let Some(settled) = self.ws.tabs.iter().filter_map(Slot::diagnosis).find(|t| t.target.value == key).and_then(|t| t.settled(section)) else { return };
+        let Some(settled) = self
+            .ws
+            .tabs
+            .iter()
+            .filter_map(Slot::diagnosis)
+            .find(|t| t.target.value == key)
+            .and_then(|t| t.settled(section))
+        else {
+            return;
+        };
         let now = Instant::now();
         if let Some(stopped) = self.watches.finished(key, section, settled.as_deref(), now) {
             let message = stopped.message();
@@ -290,7 +307,8 @@ impl Shell {
 
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let alive: Vec<String> = self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
+        let alive: Vec<String> =
+            self.ws.tabs.iter().filter_map(Slot::diagnosis).map(|t| t.target.value.clone()).collect();
         self.watches.keep_targets(|t| alive.iter().any(|a| a == t));
         self.tab_open.keep_targets(|t| alive.iter().any(|a| a == t));
         for (target, section) in self.watches.due(now) {
@@ -300,7 +318,10 @@ impl Shell {
             if now.duration_since(at) > TOAST_FOR && self.toast_leave.is_none_or(|l| l < at) {
                 self.toast_leave = Some(now);
             }
-            if self.toast_leave.is_some_and(|l| l >= at && !self.motion.running(now.duration_since(l), motion::TOAST_OUT)) {
+            if self
+                .toast_leave
+                .is_some_and(|l| l >= at && !self.motion.running(now.duration_since(l), motion::TOAST_OUT))
+            {
                 self.toast = None;
                 self.toast_leave = None;
             }
@@ -354,17 +375,16 @@ impl Shell {
                 }
             }
             Action::Palette => self.palette = if self.palette.is_some() { None } else { Some(0) },
-            Action::Rerun => {
-                match self.ws.current().map(|t| t.section) {
-                    Some(Section::Summary) => self.start_automatic(cx),
-                    Some(section) => self.start_section(section, cx),
-                    None => {}
-                }
-            }
+            Action::Rerun => match self.ws.current().map(|t| t.section) {
+                Some(Section::Summary) => self.start_automatic(cx),
+                Some(section) => self.start_section(section, cx),
+                None => {}
+            },
             Action::Run(section) => match self.ws.current().map(|t| t.target.kind) {
                 None => self.toast = Some(("Enter a target first, then run this Check.".into(), Instant::now())),
                 Some(kind) if !ondemand::runnable(kind, section) => {
-                    self.toast = Some((format!("The {} Check does not apply to this target.", section.label()), Instant::now()))
+                    self.toast =
+                        Some((format!("The {} Check does not apply to this target.", section.label()), Instant::now()))
                 }
                 Some(_) => {
                     self.ws.jump(section.index());
@@ -451,14 +471,16 @@ impl Shell {
         }
         self.palette = None;
         self.sheet = false;
-        let (current, problem, path) = (self.config.settings.clone(), self.config.settings_problem.clone(), self.config.settings_path());
+        let (current, problem, path) =
+            (self.config.settings.clone(), self.config.settings_problem.clone(), self.config.settings_path());
         let pane = cx.new(|cx| SettingsPane::new(&current, problem, path, window, cx));
         cx.subscribe_in(&pane, window, |this, pane, event: &PaneEvent, window, cx| match event {
             PaneEvent::Close => this.close_settings(window, cx),
             PaneEvent::Save(settings) => match this.config.save_settings(settings.clone()) {
                 Ok(()) => {
                     this.close_settings(window, cx);
-                    this.toast = Some(("Settings saved. They apply to the next run of each Check.".into(), Instant::now()));
+                    this.toast =
+                        Some(("Settings saved. They apply to the next run of each Check.".into(), Instant::now()));
                     cx.notify();
                 }
                 Err(e) => pane.update(cx, |p, cx| p.set_save_error(e, cx)),
@@ -541,7 +563,13 @@ impl Shell {
                                 .font_family(t::FONT_MONO)
                                 .text_size(px(t::TEXT_LABEL))
                                 .text_color(color(t::GRAY_1000))
-                                .child(Input::new(&self.input).appearance(false).bordered(false).focus_bordered(false).aria_label("Target: domain, host, IP or email")),
+                                .child(
+                                    Input::new(&self.input)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .aria_label("Target: domain, host, IP or email"),
+                                ),
                         )
                         .child(kbd("Ctrl L"))
                         .child(kbd("Enter")),
@@ -554,8 +582,13 @@ impl Shell {
                     .justify_end()
                     .gap(px(4.))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(control("min", "icons/minimize.svg", "Minimize").on_click(|_, window, _| window.minimize_window()))
-                    .child(control("max", "icons/maximize.svg", "Maximize").on_click(|_, window, _| window.zoom_window()))
+                    .child(
+                        control("min", "icons/minimize.svg", "Minimize")
+                            .on_click(|_, window, _| window.minimize_window()),
+                    )
+                    .child(
+                        control("max", "icons/maximize.svg", "Maximize").on_click(|_, window, _| window.zoom_window()),
+                    )
                     .child(control("close", "icons/close.svg", "Close").on_click(|_, _, cx| cx.quit())),
             )
     }
@@ -653,66 +686,74 @@ impl Shell {
                     this.perform(Action::Submit, window, cx);
                 }))
                 .child(div().font_family(t::FONT_MONO).text_size(px(t::TEXT_LABEL)).child(r.value.clone()))
-                .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(relative(r.at.elapsed())))
+                .child(
+                    div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(relative(r.at.elapsed())),
+                )
         });
-        let hints = [("Ctrl L", "focus the omnibox"), ("Enter", "run the Diagnosis"), ("Ctrl K", "command palette"), ("?", "shortcut cheat sheet")];
-        div()
-            .flex_1()
-            .flex()
-            .justify_center()
-            .pt(px(72.))
-            .child(
-                div()
-                    .w(px(520.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(24.))
-                    .when_some(self.error.clone(), |s, e| {
-                        s.child(
-                            div()
-                                .id("error")
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .text_size(px(t::TEXT_BODY))
-                                .text_color(color(t::CRITICAL))
-                                .role(Role::Alert)
-                                .aria_label(e.clone())
-                                .child(glyph(Glyph::Octagon, 16.))
-                                .child(e),
-                        )
-                    })
-                    .child(
+        let hints = [
+            ("Ctrl L", "focus the omnibox"),
+            ("Enter", "run the Diagnosis"),
+            ("Ctrl K", "command palette"),
+            ("?", "shortcut cheat sheet"),
+        ];
+        div().flex_1().flex().justify_center().pt(px(72.)).child(
+            div()
+                .w(px(520.))
+                .flex()
+                .flex_col()
+                .gap(px(24.))
+                .when_some(self.error.clone(), |s, e| {
+                    s.child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(
-                                div()
-                                    .pb(px(4.))
-                                    .text_size(px(t::TEXT_CAPTION))
-                                    .text_color(color(t::GRAY_900))
-                                    .child(if self.ws.recent.is_empty() { "NO RECENT TARGETS YET" } else { "RECENT" }),
-                            )
-                            .children(rows),
-                    )
-                    .child(div().flex().flex_col().gap(px(8.)).children(hints.map(|(k, text)| {
-                        div()
+                            .id("error")
                             .flex()
                             .items_center()
-                            .gap(px(12.))
-                            .text_size(px(t::TEXT_LABEL))
-                            .text_color(color(t::GRAY_800))
-                            .child(div().w(px(56.)).child(kbd(k)))
-                            .child(text)
-                    }))),
-            )
+                            .gap(px(8.))
+                            .text_size(px(t::TEXT_BODY))
+                            .text_color(color(t::CRITICAL))
+                            .role(Role::Alert)
+                            .aria_label(e.clone())
+                            .child(glyph(Glyph::Octagon, 16.))
+                            .child(e),
+                    )
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.))
+                        .child(
+                            div()
+                                .pb(px(4.))
+                                .text_size(px(t::TEXT_CAPTION))
+                                .text_color(color(t::GRAY_900))
+                                .child(if self.ws.recent.is_empty() { "NO RECENT TARGETS YET" } else { "RECENT" }),
+                        )
+                        .children(rows),
+                )
+                .child(div().flex().flex_col().gap(px(8.)).children(hints.map(|(k, text)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .text_size(px(t::TEXT_LABEL))
+                        .text_color(color(t::GRAY_800))
+                        .child(div().w(px(56.)).child(kbd(k)))
+                        .child(text)
+                }))),
+        )
     }
 
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(tab) = self.ws.current() else { return div().id("none") };
         let heading = |text: &'static str| {
-            div().px(px(8.)).pt(px(12.)).pb(px(4.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(text)
+            div()
+                .px(px(8.))
+                .pt(px(12.))
+                .pb(px(4.))
+                .text_size(px(t::TEXT_CAPTION))
+                .text_color(color(t::GRAY_800))
+                .child(text)
         };
         let items = Section::ALL.iter().enumerate().map(|(i, &section)| {
             let state = tab.state(section);
@@ -738,7 +779,13 @@ impl Shell {
                 .border_color(color(t::BG_200))
                 .text_size(px(t::TEXT_BODY))
                 .text_color(color(if selected { t::GRAY_1000 } else { t::GRAY_900 }))
-                .map(|s| if selected { s.bg(color(t::GRAY_300)) } else { self.fx(s, ("rail", i), t::BG_200, t::GRAY_200, t::GRAY_300, cx) })
+                .map(|s| {
+                    if selected {
+                        s.bg(color(t::GRAY_300))
+                    } else {
+                        self.fx(s, ("rail", i), t::BG_200, t::GRAY_200, t::GRAY_300, cx)
+                    }
+                })
                 .focus_visible(focus_ring)
                 .cursor_pointer()
                 .role(Role::Tab)
@@ -792,11 +839,17 @@ impl Shell {
         let show_chips = !findings.is_empty();
         let watchable = checks::watchable(section) && state != zombo_ui::status::CheckState::NotRun;
         let watching = self.watches.is_watching(&tab.target.value, section);
-        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, Some(section), cx)).collect::<Vec<_>>();
+        let finding_views =
+            findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, Some(section), cx)).collect::<Vec<_>>();
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
         let brief_open = self.open.contains("brief");
-        let has_result = matches!(state, zombo_ui::status::CheckState::Done { .. } | zombo_ui::status::CheckState::Failed { .. } | zombo_ui::status::CheckState::TimedOut);
+        let has_result = matches!(
+            state,
+            zombo_ui::status::CheckState::Done { .. }
+                | zombo_ui::status::CheckState::Failed { .. }
+                | zombo_ui::status::CheckState::TimedOut
+        );
         let brief_collapsed = ondemand::collapsed(&state, brief_open);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
@@ -806,7 +859,8 @@ impl Shell {
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| window.focus(&this.pane_focus, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 let plain_enter = ev.keystroke.key == "enter" && !ev.keystroke.modifiers.modified();
-                if let Some(section) = this.ws.current().map(|t| t.section).filter(|s| plain_enter && s.is_on_demand()) {
+                if let Some(section) = this.ws.current().map(|t| t.section).filter(|s| plain_enter && s.is_on_demand())
+                {
                     cx.stop_propagation();
                     this.perform(Action::Run(section), window, cx);
                 }
@@ -860,26 +914,34 @@ impl Shell {
                                     .child(verdict.why.clone()),
                             ),
                     )
-                    .child(div().flex().flex_none().items_center().gap(px(8.)).when(watchable, |s| s.child(self.watch_button(watching, cx))).when(show_chips, |s| {
-                        s.child(div().flex().flex_none().gap(px(8.)).children(counts.map(|(sev, n)| {
-                            div()
-                                .id(("chip", dg::severity_rank(sev) as usize))
-                                .flex()
-                                .items_center()
-                                .gap(px(6.))
-                                .px(px(10.))
-                                .py(px(2.))
-                                .rounded(px(999.))
-                                .border_1()
-                                .border_color(color(t::GRAY_400))
-                                .bg(color(t::GRAY_100))
-                                .text_size(px(t::TEXT_LABEL))
-                                .aria_label(format!("{n} {}", dg::severity_word(sev).to_lowercase()))
-                                .child(glyph(dg::severity_glyph(sev), 16.))
-                                .child(div().font_weight(FontWeight::SEMIBOLD).child(n.to_string()))
-                                .child(dg::severity_word(sev).to_lowercase())
-                        })))
-                    })),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(8.))
+                            .when(watchable, |s| s.child(self.watch_button(watching, cx)))
+                            .when(show_chips, |s| {
+                                s.child(div().flex().flex_none().gap(px(8.)).children(counts.map(|(sev, n)| {
+                                    div()
+                                        .id(("chip", dg::severity_rank(sev) as usize))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.))
+                                        .px(px(10.))
+                                        .py(px(2.))
+                                        .rounded(px(999.))
+                                        .border_1()
+                                        .border_color(color(t::GRAY_400))
+                                        .bg(color(t::GRAY_100))
+                                        .text_size(px(t::TEXT_LABEL))
+                                        .aria_label(format!("{n} {}", dg::severity_word(sev).to_lowercase()))
+                                        .child(glyph(dg::severity_glyph(sev), 16.))
+                                        .child(div().font_weight(FontWeight::SEMIBOLD).child(n.to_string()))
+                                        .child(dg::severity_word(sev).to_lowercase())
+                                })))
+                            }),
+                    ),
             )
             .when_some(brief, |s, b| {
                 s.child(
@@ -904,10 +966,29 @@ impl Shell {
                                     .flex()
                                     .flex_col()
                                     .gap(px(2.))
-                                    .child(div().text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child("SERVERS IT CONTACTS"))
-                                    .child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(b.contacts)),
+                                    .child(
+                                        div()
+                                            .text_size(px(t::TEXT_CAPTION))
+                                            .text_color(color(t::GRAY_800))
+                                            .child("SERVERS IT CONTACTS"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(t::TEXT_LABEL))
+                                            .line_height(px(18.))
+                                            .text_color(color(t::GRAY_900))
+                                            .child(b.contacts),
+                                    ),
                             )
-                            .when_some(b.note, |s, n| s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(n)))
+                            .when_some(b.note, |s, n| {
+                                s.child(
+                                    div()
+                                        .text_size(px(t::TEXT_LABEL))
+                                        .line_height(px(18.))
+                                        .text_color(color(t::GRAY_800))
+                                        .child(n),
+                                )
+                            })
                         })
                         .when(can_run, |s| {
                             s.child(
@@ -930,8 +1011,14 @@ impl Shell {
                                     .focus_visible(focus_ring)
                                     .role(Role::Button)
                                     .aria_label(run_label.unwrap_or("Run this Check"))
-                                    .on_click(cx.listener(move |this, _, window, cx| this.perform(Action::Run(section), window, cx)))
-                                    .child(if state == zombo_ui::status::CheckState::NotRun { run_label.unwrap_or("Run") } else { "Run again" })
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.perform(Action::Run(section), window, cx)
+                                    }))
+                                    .child(if state == zombo_ui::status::CheckState::NotRun {
+                                        run_label.unwrap_or("Run")
+                                    } else {
+                                        "Run again"
+                                    })
                                     .child(kbd("Enter")),
                             )
                         }),
@@ -982,7 +1069,13 @@ impl Shell {
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
     }
 
-    fn finding_card(&self, i: usize, f: &zombo_core::Finding, current: Option<Section>, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn finding_card(
+        &self,
+        i: usize,
+        f: &zombo_core::Finding,
+        current: Option<Section>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let c = severity_color(f.severity);
         let go = current.and_then(|c| zombo_ui::finding_owner::jump_target(f.code, c));
         let label = dg::finding_label(f);
@@ -1024,12 +1117,30 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().text_size(px(t::TEXT_BODY)).line_height(px(20.)).font_weight(FontWeight::MEDIUM).child(f.title.to_string()))
+                    .child(
+                        div()
+                            .text_size(px(t::TEXT_BODY))
+                            .line_height(px(20.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(f.title.to_string()),
+                    )
                     .when(!f.message.is_empty(), |s| {
-                        s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_900)).child(f.message.clone()))
+                        s.child(
+                            div()
+                                .text_size(px(t::TEXT_LABEL))
+                                .line_height(px(18.))
+                                .text_color(color(t::GRAY_900))
+                                .child(f.message.clone()),
+                        )
                     })
                     .when_some(f.recommendation.clone(), |s, r| {
-                        s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(r.to_string()))
+                        s.child(
+                            div()
+                                .text_size(px(t::TEXT_LABEL))
+                                .line_height(px(18.))
+                                .text_color(color(t::GRAY_800))
+                                .child(r.to_string()),
+                        )
                     }),
             )
             .when_some(go, |s, target| s.child(self.go_button(i, target, cx)))
@@ -1082,7 +1193,9 @@ impl Shell {
             .rounded(px(t::RADIUS_SMALL))
             .text_size(px(t::TEXT_CAPTION))
             .cursor_pointer()
-            .map(|s| self.fx(s, ("watch", 0), if watching { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
+            .map(|s| {
+                self.fx(s, ("watch", 0), if watching { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx)
+            })
             .focus_visible(focus_ring)
             .role(Role::Button)
             .aria_label(if watching { "Stop watching this Check" } else { "Watch this Check until its answer changes" })
@@ -1096,7 +1209,15 @@ impl Shell {
 
     /// Hover and press feedback: the element's background blends between the three colors over
     /// 80 ms, and its mouse events feed `Feedback`.
-    fn fx(&self, el: Stateful<Div>, key: (&'static str, usize), rest: u32, hover: u32, press: u32, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn fx(
+        &self,
+        el: Stateful<Div>,
+        key: (&'static str, usize),
+        rest: u32,
+        hover: u32,
+        press: u32,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let set = move |level: Level| {
             move |this: &mut Self, cx: &mut Context<Self>| {
                 this.fx.set(key, level, Instant::now());
@@ -1120,39 +1241,53 @@ impl Shell {
     }
 
     fn dns_rows(&self, tab: &dg::Tab, cx: &mut Context<Self>) -> Div {
-        let rows = [zombo_ui::dns_data::nameserver_answers(&tab.propagation.rows), zombo_ui::dns_data::all_records(&tab.propagation.rows)];
+        let rows = [
+            zombo_ui::dns_data::nameserver_answers(&tab.propagation.rows),
+            zombo_ui::dns_data::all_records(&tab.propagation.rows),
+        ];
         div().w_full().min_w_0().flex().flex_col().gap(px(8.)).children(rows.into_iter().flatten().map(|c| {
             let lines = c.lines.into_iter().map(|(k, v)| (k, v, t::GRAY_1000)).collect();
             self.disclosure(c.id, c.title.to_string(), c.summary, lines, cx)
         }))
     }
 
-    fn disclosure(&self, id: &'static str, title: String, summary: String, lines: Vec<(String, String, u32)>, cx: &mut Context<Self>) -> Div {
+    fn disclosure(
+        &self,
+        id: &'static str,
+        title: String,
+        summary: String,
+        lines: Vec<(String, String, u32)>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let kw = layout::key_column(lines.iter().map(|l| l.0.as_str()));
         let open = self.ws.current().is_some_and(|t| self.tab_open.is_open(&t.target.value, t.section, id));
         let slot = DISCLOSURES.iter().position(|&d| d == id).unwrap_or(0);
-        let body = lines.into_iter().enumerate().map(|(i, (k, v, c))| {
-            div()
-                .id((id, i))
-                .min_h(px(t::ROW_HEIGHT))
-                .px(px(12.))
-                .py(px(4.))
-                .flex()
-                .gap(px(12.))
-                .border_t_1()
-                .border_color(color(t::GRAY_400))
-                .text_size(px(t::TEXT_LABEL))
-                .role(Role::Row)
-                .aria_label(format!("{k} {v}"))
-                .cursor_pointer()
-                .hover(|s| s.bg(color(t::GRAY_200)))
-                .on_click({
-                    let v = v.clone();
-                    cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
-                })
-                .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(k))
-                .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
-        }).collect::<Vec<_>>();
+        let body = lines
+            .into_iter()
+            .enumerate()
+            .map(|(i, (k, v, c))| {
+                div()
+                    .id((id, i))
+                    .min_h(px(t::ROW_HEIGHT))
+                    .px(px(12.))
+                    .py(px(4.))
+                    .flex()
+                    .gap(px(12.))
+                    .border_t_1()
+                    .border_color(color(t::GRAY_400))
+                    .text_size(px(t::TEXT_LABEL))
+                    .role(Role::Row)
+                    .aria_label(format!("{k} {v}"))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .on_click({
+                        let v = v.clone();
+                        cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                    })
+                    .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(k))
+                    .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
+            })
+            .collect::<Vec<_>>();
         div()
             .w_full()
             .min_w_0()
@@ -1185,7 +1320,9 @@ impl Shell {
                             this.toggle_row(id, cx);
                         }
                     }))
-                    .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+                    .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| {
+                        s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))
+                    }))
                     .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(title))
                     .child(div().text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child(summary)),
             )
@@ -1205,48 +1342,59 @@ impl Shell {
             .flex_col()
             .gap(px(8.))
             .when(!open_rows.is_empty(), |s| {
-                s.child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(format!("{} data", section.label())))
-                    .child(
-                        div()
-                            .id("facts")
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .bg(color(t::GRAY_100))
-                            .border_1()
-                            .border_color(color(t::GRAY_400))
-                            .rounded(px(t::RADIUS_SMALL))
-                            .overflow_hidden()
-                            .role(Role::Table)
-                            .aria_label(format!("{} data", section.label()))
-                            .children(open_rows.into_iter().enumerate().map(|(i, (k, v, c))| {
-                                let shown = if i > 0 && o.facts[i - 1].key == k { String::new() } else { k.clone() };
-                                div()
-                                    .id(("fact", i))
-                                    .min_h(px(t::ROW_HEIGHT))
-                                    .px(px(12.))
-                                    .py(px(4.))
-                                    .flex()
-                                    .gap(px(12.))
-                                    .when(i > 0, |s| s.border_t_1().border_color(color(t::GRAY_400)))
-                                    .text_size(px(t::TEXT_LABEL))
-                                    .role(Role::Row)
-                                    .aria_label(format!("{k}: {v}"))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(color(t::GRAY_200)))
-                                    .on_click({
-                                        let v = v.clone();
-                                        cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
-                                    })
-                                    .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(shown))
-                                    .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
-                            })),
-                    )
+                s.child(
+                    div()
+                        .text_size(px(t::TEXT_LABEL))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("{} data", section.label())),
+                )
+                .child(
+                    div()
+                        .id("facts")
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .bg(color(t::GRAY_100))
+                        .border_1()
+                        .border_color(color(t::GRAY_400))
+                        .rounded(px(t::RADIUS_SMALL))
+                        .overflow_hidden()
+                        .role(Role::Table)
+                        .aria_label(format!("{} data", section.label()))
+                        .children(open_rows.into_iter().enumerate().map(|(i, (k, v, c))| {
+                            let shown = if i > 0 && o.facts[i - 1].key == k { String::new() } else { k.clone() };
+                            div()
+                                .id(("fact", i))
+                                .min_h(px(t::ROW_HEIGHT))
+                                .px(px(12.))
+                                .py(px(4.))
+                                .flex()
+                                .gap(px(12.))
+                                .when(i > 0, |s| s.border_t_1().border_color(color(t::GRAY_400)))
+                                .text_size(px(t::TEXT_LABEL))
+                                .role(Role::Row)
+                                .aria_label(format!("{k}: {v}"))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(color(t::GRAY_200)))
+                                .on_click({
+                                    let v = v.clone();
+                                    cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                                })
+                                .child(div().w(px(kw)).flex_none().text_color(color(t::GRAY_900)).child(shown))
+                                .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
+                        })),
+                )
             })
             .when(!o.details.is_empty(), |s| {
                 let n = o.details.len();
-                s.child(self.disclosure("details", o.details_title.to_string(), format!("{n} {}", if n == 1 { "line" } else { "lines" }), rows(&o.details), cx))
+                s.child(self.disclosure(
+                    "details",
+                    o.details_title.to_string(),
+                    format!("{n} {}", if n == 1 { "line" } else { "lines" }),
+                    rows(&o.details),
+                    cx,
+                ))
             })
     }
 
@@ -1282,45 +1430,49 @@ impl Shell {
             .child(cell(None).child(format!("{} answer", tab.record.code())))
             .child(cell(Some(70.)).child("TTL"))
             .child(cell(Some(100.)).child("Status"));
-        let body = rows.iter().enumerate().map(|(i, r)| {
-            let status_color = match r.status {
-                dg::RowStatus::Truth | dg::RowStatus::Match => t::OK,
-                dg::RowStatus::Stale => t::WARNING,
-                dg::RowStatus::NoAnswer => t::CRITICAL,
-                dg::RowStatus::Answered => t::GRAY_900,
-            };
-            div()
-                .id(("row", i))
-                .w_full()
-                .min_w_0()
-                .h(px(t::ROW_HEIGHT))
-                .flex()
-                .items_center()
-                .border_t_1()
-                .border_color(color(t::GRAY_400))
-                .font_family(t::FONT_MONO)
-                .text_size(px(t::TEXT_LABEL))
-                .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
-                .role(Role::Row)
-                .aria_label(r.label())
-                .cursor_pointer()
-                .hover(|s| s.bg(color(t::GRAY_200)))
-                .on_click({
-                    let answer = r.answer.clone();
-                    cx.listener(move |this, _, _, cx| this.copy_value(&answer, cx))
-                })
-                .child(cell(Some(150.)).child(r.resolver.clone()))
-                .child(cell(Some(140.)).child(r.location.clone()))
-                .child(cell(None).child(r.answer.clone()))
-                .child(cell(Some(70.)).child(r.ttl.map(|t| t.to_string()).unwrap_or_default()))
-                .child(
-                    cell(Some(100.))
-                        .text_size(px(t::TEXT_CAPTION))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(color(status_color))
-                        .child(r.status.label().to_uppercase()),
-                )
-        }).collect::<Vec<_>>();
+        let body = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let status_color = match r.status {
+                    dg::RowStatus::Truth | dg::RowStatus::Match => t::OK,
+                    dg::RowStatus::Stale => t::WARNING,
+                    dg::RowStatus::NoAnswer => t::CRITICAL,
+                    dg::RowStatus::Answered => t::GRAY_900,
+                };
+                div()
+                    .id(("row", i))
+                    .w_full()
+                    .min_w_0()
+                    .h(px(t::ROW_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(color(t::GRAY_400))
+                    .font_family(t::FONT_MONO)
+                    .text_size(px(t::TEXT_LABEL))
+                    .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
+                    .role(Role::Row)
+                    .aria_label(r.label())
+                    .cursor_pointer()
+                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .on_click({
+                        let answer = r.answer.clone();
+                        cx.listener(move |this, _, _, cx| this.copy_value(&answer, cx))
+                    })
+                    .child(cell(Some(150.)).child(r.resolver.clone()))
+                    .child(cell(Some(140.)).child(r.location.clone()))
+                    .child(cell(None).child(r.answer.clone()))
+                    .child(cell(Some(70.)).child(r.ttl.map(|t| t.to_string()).unwrap_or_default()))
+                    .child(
+                        cell(Some(100.))
+                            .text_size(px(t::TEXT_CAPTION))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(color(status_color))
+                            .child(r.status.label().to_uppercase()),
+                    )
+            })
+            .collect::<Vec<_>>();
         let heading = match (&tab.propagation.state, rows.len()) {
             (zombo_ui::status::CheckState::NotRun, _) => "Propagation by resolver: not run".to_string(),
             (_, 0) => "Propagation by resolver: waiting for the first answer".to_string(),
@@ -1348,7 +1500,16 @@ impl Shell {
                     .font_family(t::FONT_MONO)
                     .text_size(px(t::TEXT_LABEL))
                     .cursor_pointer()
-                    .map(|s| self.fx(s, ("rtype", i), if on { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
+                    .map(|s| {
+                        self.fx(
+                            s,
+                            ("rtype", i),
+                            if on { t::GRAY_300 } else { t::GRAY_100 },
+                            t::GRAY_200,
+                            t::GRAY_300,
+                            cx,
+                        )
+                    })
                     .role(Role::Tab)
                     .aria_selected(on)
                     .aria_label(format!("Compare {} records", kind.code()))
@@ -1360,7 +1521,19 @@ impl Shell {
                     }))
                     .child(kind.code())
             }))
-            .child(div().h(px(28.)).flex().items_center().gap(px(6.)).pl(px(8.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(kbd("[")).child(kbd("]")).child("switch"));
+            .child(
+                div()
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .pl(px(8.))
+                    .text_size(px(t::TEXT_CAPTION))
+                    .text_color(color(t::GRAY_800))
+                    .child(kbd("["))
+                    .child(kbd("]"))
+                    .child("switch"),
+            );
         div()
             .w_full()
             .min_w_0()
@@ -1397,9 +1570,8 @@ impl Shell {
             [one] => one.clone(),
             [first, rest @ ..] => format!("{first} (+{} more)", rest.len()),
         };
-        let hint = |k: &'static str, text: &'static str| {
-            div().flex().items_center().gap(px(6.)).child(kbd(k)).child(text)
-        };
+        let hint =
+            |k: &'static str, text: &'static str| div().flex().items_center().gap(px(6.)).child(kbd(k)).child(text);
         div()
             .id("status")
             .h(px(t::STATUS_BAR_HEIGHT))
@@ -1440,10 +1612,12 @@ impl Shell {
                 .aria_label(format!("{}, shortcut {}", e.label, e.shortcut))
                 .when(selected.is_some(), |s| {
                     let action = e.action;
-                    s.cursor_pointer().hover(|s| s.bg(color(t::GRAY_200))).on_click(cx.listener(move |this, _, window, cx| {
-                        this.palette = None;
-                        this.perform(action, window, cx);
-                    }))
+                    s.cursor_pointer().hover(|s| s.bg(color(t::GRAY_200))).on_click(cx.listener(
+                        move |this, _, window, cx| {
+                            this.palette = None;
+                            this.perform(action, window, cx);
+                        },
+                    ))
                 })
                 .child(e.label)
                 .child(kbd(&e.shortcut))
@@ -1456,11 +1630,14 @@ impl Shell {
             .items_start()
             .pt(px(96.))
             .bg(rgba(0x00000066))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                this.palette = None;
-                this.sheet = false;
-                cx.notify();
-            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.palette = None;
+                    this.sheet = false;
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .id("dialog")
@@ -1476,7 +1653,14 @@ impl Shell {
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .role(Role::Dialog)
                     .aria_label(title)
-                    .child(div().px(px(12.)).py(px(6.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_900)).child(title.to_uppercase()))
+                    .child(
+                        div()
+                            .px(px(12.))
+                            .py(px(6.))
+                            .text_size(px(t::TEXT_CAPTION))
+                            .text_color(color(t::GRAY_900))
+                            .child(title.to_uppercase()),
+                    )
                     .children(rows),
             )
     }
@@ -1489,10 +1673,20 @@ impl Render for Shell {
             eprintln!("first render {:?} after main()", self.started.elapsed());
         }
         let now = Instant::now();
-        if let Some((key, word)) = self.ws.current().map(|t| (t.target.value.clone(), (t.section, t.state(t.section).word()))) {
+        if let Some((key, word)) =
+            self.ws.current().map(|t| (t.target.value.clone(), (t.section, t.state(t.section).word())))
+        {
             self.pane_opacity = self.fade.opacity((key, word.0, word.1), now, self.motion);
         }
-        if self.fx.animating(now, self.motion) || self.fade.animating(now, self.motion) || self.toast.as_ref().is_some_and(|&(_, at)| self.motion.running(now.saturating_duration_since(at), motion::TOAST_IN) || self.toast_leave.is_some_and(|l| l >= at && self.motion.running(now.saturating_duration_since(l), motion::TOAST_OUT))) {
+        if self.fx.animating(now, self.motion)
+            || self.fade.animating(now, self.motion)
+            || self.toast.as_ref().is_some_and(|&(_, at)| {
+                self.motion.running(now.saturating_duration_since(at), motion::TOAST_IN)
+                    || self.toast_leave.is_some_and(|l| {
+                        l >= at && self.motion.running(now.saturating_duration_since(l), motion::TOAST_OUT)
+                    })
+            })
+        {
             window.request_animation_frame();
         }
         let body = if self.ws.is_empty_state() {
@@ -1520,39 +1714,42 @@ impl Render for Shell {
             .when(!self.ws.tabs.is_empty(), |s| s.child(self.tab_strip(cx)))
             .child(body)
             .child(self.status_bar())
-            .when_some(self.toast.clone().and_then(|(text, at)| {
-                let left = self.toast_leave.filter(|&l| l >= at).map(|l| now.saturating_duration_since(l));
-                motion::toast_frame(self.motion, now.saturating_duration_since(at), left).map(|(o, y)| (text, o, y))
-            }), |s, (text, opacity, drop)| {
-                s.child(
-                    div()
-                        .id("toast")
-                        .absolute()
-                        .opacity(opacity)
-                        .bottom(px(t::STATUS_BAR_HEIGHT + 12. - drop))
-                        .right(px(16.))
-                        .w(px(420.))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .px(px(12.))
-                        .py(px(8.))
-                        .bg(color(t::GRAY_100))
-                        .border_1()
-                        .border_color(color(t::GRAY_500))
-                        .rounded(px(t::RADIUS_LARGE))
-                        .text_size(px(t::TEXT_LABEL))
-                        .cursor_pointer()
-                        .role(Role::Alert)
-                        .aria_label(text.clone())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.toast_leave = Some(Instant::now());
-                            cx.notify();
-                        }))
-                        .child(glyph(Glyph::Info, 16.))
-                        .child(div().flex_1().min_w_0().child(text)),
-                )
-            })
+            .when_some(
+                self.toast.clone().and_then(|(text, at)| {
+                    let left = self.toast_leave.filter(|&l| l >= at).map(|l| now.saturating_duration_since(l));
+                    motion::toast_frame(self.motion, now.saturating_duration_since(at), left).map(|(o, y)| (text, o, y))
+                }),
+                |s, (text, opacity, drop)| {
+                    s.child(
+                        div()
+                            .id("toast")
+                            .absolute()
+                            .opacity(opacity)
+                            .bottom(px(t::STATUS_BAR_HEIGHT + 12. - drop))
+                            .right(px(16.))
+                            .w(px(420.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .px(px(12.))
+                            .py(px(8.))
+                            .bg(color(t::GRAY_100))
+                            .border_1()
+                            .border_color(color(t::GRAY_500))
+                            .rounded(px(t::RADIUS_LARGE))
+                            .text_size(px(t::TEXT_LABEL))
+                            .cursor_pointer()
+                            .role(Role::Alert)
+                            .aria_label(text.clone())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toast_leave = Some(Instant::now());
+                                cx.notify();
+                            }))
+                            .child(glyph(Glyph::Info, 16.))
+                            .child(div().flex_1().min_w_0().child(text)),
+                    )
+                },
+            )
             .when(self.palette.is_some(), |s| s.child(self.overlay("Command palette", self.palette, cx)))
             .when(self.sheet, |s| s.child(self.overlay("Keyboard shortcuts", None, cx)))
             .when_some(self.settings.clone(), |s, pane| s.child(pane));

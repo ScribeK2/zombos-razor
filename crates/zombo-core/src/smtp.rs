@@ -13,12 +13,16 @@ use std::{io, net::IpAddr, time::Duration};
 use rustls::RootCertStore;
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::{io::{AsyncRead, AsyncWrite}, net::TcpStream, time::timeout};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+    time::timeout,
+};
 
 use crate::tls::{TlsResult, inspect_stream_keep, public_roots};
 pub use findings::{smtp_findings, smtp_findings_at};
-pub use reply::{Extensions, MAX_LINE, MAX_REPLY_LINES, Reply, ReplyError, banner_host};
 use reply::Conn;
+pub use reply::{Extensions, MAX_LINE, MAX_REPLY_LINES, Reply, ReplyError, banner_host};
 
 /// How the TLS starts: after a STARTTLS command (ports 25 and 587) or at once (port 465).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -65,7 +69,9 @@ impl SmtpOptions {
 
 /// A host name or address literal made of characters that cannot break the command line.
 pub fn valid_ehlo_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 255 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '[' | ']' | ':'))
+    !s.is_empty()
+        && s.len() <= 255
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '[' | ']' | ':'))
 }
 
 /// What happened at the TCP level.
@@ -119,7 +125,10 @@ pub enum Starttls {
     /// The dialogue ended before STARTTLS could be tried.
     NotAttempted,
     NotOffered,
-    Refused { code: u16, text: String },
+    Refused {
+        code: u16,
+        text: String,
+    },
     /// The server said go ahead and the handshake failed.
     HandshakeFailed(String),
     Upgraded,
@@ -201,13 +210,23 @@ pub async fn check_smtp_via(
         if r.reach == Reach::NoAnswer {
             r.fail(Stage::Connect, "no answer in time");
         } else {
-            r.fail(Stage::Overall, format!("the Check stopped after {} s: the server was too slow", o.timing.overall.as_secs().max(1)));
+            r.fail(
+                Stage::Overall,
+                format!("the Check stopped after {} s: the server was too slow", o.timing.overall.as_secs().max(1)),
+            );
         }
     }
     r
 }
 
-async fn session(r: &mut SmtpResult, addr: impl tokio::net::ToSocketAddrs, host: &str, o: &SmtpOptions, roots: &RootCertStore, now: OffsetDateTime) {
+async fn session(
+    r: &mut SmtpResult,
+    addr: impl tokio::net::ToSocketAddrs,
+    host: &str,
+    o: &SmtpOptions,
+    roots: &RootCertStore,
+    now: OffsetDateTime,
+) {
     let t = o.timing;
     let tcp = match timeout(t.connect, TcpStream::connect(addr)).await {
         Err(_) => return r.fail(Stage::Connect, "no answer in time"),
@@ -256,7 +275,12 @@ async fn session(r: &mut SmtpResult, addr: impl tokio::net::ToSocketAddrs, host:
     }
     let tcp = match c.into_stream() {
         Ok(s) => s,
-        Err(n) => return r.fail(Stage::Starttls, format!("the server sent {n} bytes after its STARTTLS reply and before the handshake")),
+        Err(n) => {
+            return r.fail(
+                Stage::Starttls,
+                format!("the server sent {n} bytes after its STARTTLS reply and before the handshake"),
+            );
+        }
     };
     let (tls, result) = match inspect_stream_keep(tcp, host, roots, now, t.step).await {
         Ok(ok) => ok,
@@ -301,7 +325,10 @@ async fn greet<S: AsyncRead + AsyncWrite + Unpin>(c: &mut Conn<S>, r: &mut SmtpR
             true
         }
         Ok(rep) => {
-            r.fail(Stage::Ehlo, format!("the server answered EHLO with {} {}", rep.code, rep.lines.first().map_or("", String::as_str)));
+            r.fail(
+                Stage::Ehlo,
+                format!("the server answered EHLO with {} {}", rep.code, rep.lines.first().map_or("", String::as_str)),
+            );
             false
         }
         Err(e) => {

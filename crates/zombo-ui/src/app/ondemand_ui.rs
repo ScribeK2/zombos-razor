@@ -49,7 +49,19 @@ impl Shell {
                     }))
                     .child(label(port))
             }))
-            .child(div().h(px(28.)).flex().items_center().gap(px(6.)).pl(px(8.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(kbd("[")).child(kbd("]")).child("switch"))
+            .child(
+                div()
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .pl(px(8.))
+                    .text_size(px(t::TEXT_CAPTION))
+                    .text_color(color(t::GRAY_800))
+                    .child(kbd("["))
+                    .child(kbd("]"))
+                    .child("switch"),
+            )
     }
 
     /// An on-demand pane takes the keyboard when it is selected, so Enter runs its Check.
@@ -60,8 +72,22 @@ impl Shell {
     }
 
     /// The card's first line. With a result it is a disclosure that opens the rest of the card.
-    pub(super) fn brief_line(&self, what: String, has_result: bool, open: bool, cx: &mut Context<Self>) -> Stateful<Div> {
-        let line = div().id("brief-line").w_full().min_w_0().flex().items_center().gap(px(8.)).text_size(px(t::TEXT_BODY)).line_height(px(20.));
+    pub(super) fn brief_line(
+        &self,
+        what: String,
+        has_result: bool,
+        open: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let line = div()
+            .id("brief-line")
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .text_size(px(t::TEXT_BODY))
+            .line_height(px(20.));
         if !has_result {
             return line.child(div().flex_1().min_w_0().child(what));
         }
@@ -77,7 +103,11 @@ impl Shell {
                 }
                 cx.notify();
             }))
-            .child(icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+            .child(
+                icon("icons/chevron.svg", 12., t::GRAY_800).when(open, |s| {
+                    s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))
+                }),
+            )
             .child(div().flex_1().min_w_0().when(!open, |s| s.truncate()).text_color(color(t::GRAY_900)).child(what))
     }
 }

@@ -66,7 +66,19 @@ pub(crate) fn clean(s: &str) -> Cow<'_, str> {
     if !s.chars().any(char::is_control) {
         return Cow::Borrowed(s);
     }
-    Cow::Owned(s.chars().map(|c| if c == '\t' { ' ' } else if c.is_control() { '\u{fffd}' } else { c }).collect())
+    Cow::Owned(
+        s.chars()
+            .map(|c| {
+                if c == '\t' {
+                    ' '
+                } else if c.is_control() {
+                    '\u{fffd}'
+                } else {
+                    c
+                }
+            })
+            .collect(),
+    )
 }
 
 pub(crate) fn re(pattern: &str) -> Regex {

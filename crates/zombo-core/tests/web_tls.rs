@@ -57,7 +57,11 @@ async fn serve(ip: &str, port: u16, leaf: Leaf, body: &'static str) -> (SocketAd
     let signing = provider.key_provider.load_private_key(PrivateKeyDer::Pkcs8(leaf.key)).unwrap();
     let (sni, hosts) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(vec![])));
     let resolver = Resolver { key: Arc::new(CertifiedKey::new(vec![leaf.der], signing)), sni: sni.clone() };
-    let cfg = ServerConfig::builder_with_provider(provider).with_safe_default_protocol_versions().unwrap().with_no_client_auth().with_cert_resolver(Arc::new(resolver));
+    let cfg = ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(resolver));
     let acceptor = TlsAcceptor::from(Arc::new(cfg));
     let listener = TcpListener::bind((ip, port)).await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -79,7 +83,8 @@ async fn serve(ip: &str, port: u16, leaf: Leaf, body: &'static str) -> (SocketAd
                 if let Some(h) = text.lines().find_map(|l| l.strip_prefix("host:")) {
                     seen.lock().unwrap().push(h.trim().to_string());
                 }
-                let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let reply =
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                 let _ = s.write_all(reply.as_bytes()).await;
                 let _ = s.shutdown().await;
             });
@@ -120,7 +125,8 @@ fn get<'a>(fs: &'a [Finding], code: &str) -> Option<&'a Finding> {
 async fn a_rejected_origin_certificate_is_not_reported_as_silence() {
     let (r, fs, _) = compare(CertCheck::Verify).await;
     assert_eq!(r.status, Some(200), "{:?}", r.error);
-    let f = get(&fs, "website_origin_cert_rejected").unwrap_or_else(|| panic!("{:?}", fs.iter().map(|f| f.code).collect::<Vec<_>>()));
+    let f = get(&fs, "website_origin_cert_rejected")
+        .unwrap_or_else(|| panic!("{:?}", fs.iter().map(|f| f.code).collect::<Vec<_>>()));
     assert!(f.message.contains("the origin answered but its certificate was rejected: it is "), "{}", f.message);
     assert!(f.message.contains(", try --insecure-origin."), "{}", f.message);
     assert!(get(&fs, "website_origin_unreachable").is_none());
@@ -139,5 +145,9 @@ async fn insecure_origin_compares_anyway_and_says_what_it_skipped() {
     assert!(f.message.contains("example.com") && f.message.contains("valid until"), "{}", f.message);
     // Both the fetch and the certificate read sent the real name.
     assert!(origin.sni.lock().unwrap().iter().all(|s| s == "example.com"));
-    assert!(origin.hosts.lock().unwrap().iter().any(|h| h.starts_with("example.com")), "{:?}", origin.hosts.lock().unwrap());
+    assert!(
+        origin.hosts.lock().unwrap().iter().any(|h| h.starts_with("example.com")),
+        "{:?}",
+        origin.hosts.lock().unwrap()
+    );
 }

@@ -23,11 +23,20 @@ use fetch::{Fetch, TlsMode, fetch_chain};
 pub use fetch::{CertCheck, Hop, MAX_REDIRECTS, Pin};
 pub use findings::web_findings;
 pub use origin::Answer;
-pub use providers::{AsnInfo, Detection, Hosting, ProviderKind, cymru_origin_name, detect_hosting, parse_cymru_name, parse_cymru_origin, system_resolver};
+pub use providers::{
+    AsnInfo, Detection, Hosting, ProviderKind, cymru_origin_name, detect_hosting, parse_cymru_name, parse_cymru_origin,
+    system_resolver,
+};
 
 /// Evaluated on the final response, in display order.
-pub const SECURITY_HEADERS: [&str; 6] =
-    ["Strict-Transport-Security", "Content-Security-Policy", "X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy"];
+pub const SECURITY_HEADERS: [&str; 6] = [
+    "Strict-Transport-Security",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "Permissions-Policy",
+];
 
 /// Two fetches (HTTPS, then the HTTP fallback or probe) must fit in the overall timeout.
 const FETCH_LIMIT: Duration = Duration::from_secs(6);
@@ -86,7 +95,15 @@ pub struct WebOptions {
 
 impl Default for WebOptions {
     fn default() -> Self {
-        WebOptions { timeout: Duration::from_secs(10), origin: None, resolver: None, ports: Ports::default(), pin: None, origin_cert: CertCheck::Verify, trusted_roots: vec![] }
+        WebOptions {
+            timeout: Duration::from_secs(10),
+            origin: None,
+            resolver: None,
+            ports: Ports::default(),
+            pin: None,
+            origin_cert: CertCheck::Verify,
+            trusted_roots: vec![],
+        }
     }
 }
 
@@ -170,10 +187,12 @@ pub struct Downgrade {
 /// The first hop whose URL is https and whose next URL (the next hop, or the last
 /// hop's Location) is http.
 pub fn redirect_downgrade(chain: &[Hop]) -> Option<Downgrade> {
-    let next = chain.iter().skip(1).map(|h| Some(h.url.as_str())).chain([chain.last().and_then(|h| h.location.as_deref())]);
+    let next =
+        chain.iter().skip(1).map(|h| Some(h.url.as_str())).chain([chain.last().and_then(|h| h.location.as_deref())]);
     chain.iter().zip(next).find_map(|(h, to)| {
         let to = to?;
-        (h.url.starts_with("https://") && to.starts_with("http://")).then(|| Downgrade { from: h.url.clone(), to: to.to_string() })
+        (h.url.starts_with("https://") && to.starts_with("http://"))
+            .then(|| Downgrade { from: h.url.clone(), to: to.to_string() })
     })
 }
 
@@ -182,7 +201,8 @@ pub fn redirect_downgrade(chain: &[Hop]) -> Option<Downgrade> {
 pub fn parse_web_target(raw: &str) -> Result<(String, String), WebError> {
     let raw = raw.trim();
     let bad = || WebError::BadTarget(raw.chars().take(100).collect());
-    let u = url::Url::parse(&if raw.contains("://") { raw.to_string() } else { format!("https://{raw}") }).map_err(|_| bad())?;
+    let u = url::Url::parse(&if raw.contains("://") { raw.to_string() } else { format!("https://{raw}") })
+        .map_err(|_| bad())?;
     if u.port().is_some() {
         return Err(WebError::PortGiven);
     }
@@ -207,21 +227,39 @@ pub async fn check_web(host: &str, path: &str, opts: &WebOptions) -> WebResult {
     let started = Instant::now();
     let deadline = started + opts.timeout;
     let pin = opts.pin.map(|ip| Pin { host: host.to_string(), ip });
-    let (https_url, http_url) = (site_url("https", host, opts.ports.https, path), site_url("http", host, opts.ports.http, path));
+    let (https_url, http_url) =
+        (site_url("https", host, opts.ports.https, path), site_url("http", host, opts.ports.http, path));
     let public_tls = TlsMode { check: CertCheck::Verify, roots: opts.trusted_roots.clone() };
     let fetch = {
         let pin = pin.clone();
-        move |url: &str| fetch_chain(url, pin.as_ref(), deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT), &public_tls)
+        move |url: &str| {
+            fetch_chain(
+                url,
+                pin.as_ref(),
+                deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT),
+                &public_tls,
+            )
+        }
     };
     let (public_urls, public_fetch) = ((https_url.clone(), http_url.clone()), fetch.clone());
     let site = tokio::task::spawn_blocking(move || inspect_with(&public_urls.0, &public_urls.1, &public_fetch));
     let mut res = site.await.unwrap_or_else(|e| failed(&https_url, e.to_string()));
 
-    let dns_host = res.final_url.as_deref().and_then(|u| url::Url::parse(u).ok()).and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| host.to_string());
+    let dns_host = res
+        .final_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| host.to_string());
     let resolver = opts.resolver.unwrap_or_else(system_resolver);
     let hosting = async {
         let left = deadline.saturating_duration_since(Instant::now());
-        match tokio::time::timeout(left, detect_hosting(&dns_host, &res.response_headers, resolver, DNS_LIMIT.min(left))).await {
+        match tokio::time::timeout(
+            left,
+            detect_hosting(&dns_host, &res.response_headers, resolver, DNS_LIMIT.min(left)),
+        )
+        .await
+        {
             Ok(h) => h,
             Err(_) => Hosting { host: dns_host.clone(), dns_error: Some("timed out".into()), ..Hosting::default() },
         }
@@ -248,7 +286,10 @@ pub async fn check_web(host: &str, path: &str, opts: &WebOptions) -> WebResult {
 async fn origin_cert(url: &str, ip: IpAddr, host: &str, deadline: Instant) -> Option<OriginCert> {
     let port = url::Url::parse(url).ok()?.port_or_known_default()?;
     let left = deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT);
-    let r = crate::tls::check_tls_via((ip, port), host, &crate::tls::public_roots(), time::OffsetDateTime::now_utc(), left).await.ok()?;
+    let r =
+        crate::tls::check_tls_via((ip, port), host, &crate::tls::public_roots(), time::OffsetDateTime::now_utc(), left)
+            .await
+            .ok()?;
     let c = r.chain.first()?;
     let not_after = c.not_after.format(&time::format_description::well_known::Rfc3339).ok()?;
     Some(OriginCert { subject: c.subject.clone(), issuer: c.issuer.clone(), not_after, would_fail: r.verify_error })
@@ -314,7 +355,8 @@ pub(crate) fn security_headers(f: &Fetch) -> BTreeMap<&'static str, HeaderState>
         .collect()
 }
 
-const WP_CRITICAL: [&str; 2] = ["There has been a critical error on this website", "There has been a critical error on your website"];
+const WP_CRITICAL: [&str; 2] =
+    ["There has been a critical error on this website", "There has been a critical error on your website"];
 const WP_MAINTENANCE: &str = "Briefly unavailable for scheduled maintenance";
 
 /// The WordPress markers in a page, as the Go Check read them.
@@ -351,10 +393,18 @@ fn generator_version(body: &str) -> Option<String> {
         let end = lower[start..].find('>').map_or(lower.len(), |e| start + e);
         let tag = &lower[start..end];
         from = end.max(start + 5);
-        let Some(n) = ["name=\"generator\"", "name='generator'"].iter().find_map(|k| tag.find(k).map(|p| p + k.len())) else { continue };
+        let Some(n) = ["name=\"generator\"", "name='generator'"].iter().find_map(|k| tag.find(k).map(|p| p + k.len()))
+        else {
+            continue;
+        };
         let rest = &tag[n..];
-        let Some(c) = ["content=\"wordpress", "content='wordpress"].iter().find_map(|k| rest.find(k).map(|p| p + k.len())) else { continue };
-        let version: String = rest[c..].trim_start().chars().take_while(|ch| ch.is_ascii_digit() || *ch == '.').collect();
+        let Some(c) =
+            ["content=\"wordpress", "content='wordpress"].iter().find_map(|k| rest.find(k).map(|p| p + k.len()))
+        else {
+            continue;
+        };
+        let version: String =
+            rest[c..].trim_start().chars().take_while(|ch| ch.is_ascii_digit() || *ch == '.').collect();
         return Some(printable(&version));
     }
     None
@@ -366,7 +416,10 @@ mod tests {
 
     #[test]
     fn generator_version_reads_both_quote_styles_and_survives_junk() {
-        assert_eq!(generator_version(r#"<meta name="generator" content="WordPress 6.5.2" />"#).as_deref(), Some("6.5.2"));
+        assert_eq!(
+            generator_version(r#"<meta name="generator" content="WordPress 6.5.2" />"#).as_deref(),
+            Some("6.5.2")
+        );
         assert_eq!(generator_version("<META NAME='generator' CONTENT='WordPress'>").as_deref(), Some(""));
         assert_eq!(generator_version(r#"<meta name="generator" content="Hugo 0.1">"#), None);
         assert_eq!(generator_version("<meta <meta <meta"), None);
@@ -403,10 +456,17 @@ mod tests {
         let asked = std::cell::RefCell::new(vec![]);
         let fetch = |u: &str| {
             asked.borrow_mut().push(u.to_string());
-            if u.starts_with("https") { Fetch { error: Some("refused".into()), ..Fetch::default() } } else { page(u, 200) }
+            if u.starts_with("https") {
+                Fetch { error: Some("refused".into()), ..Fetch::default() }
+            } else {
+                page(u, 200)
+            }
         };
         let r = inspect_with("https://x.test/", "http://x.test/", &fetch);
-        assert_eq!((r.https_error.as_deref(), r.url.as_str(), r.status, r.http_to_https), (Some("refused"), "http://x.test/", Some(200), None));
+        assert_eq!(
+            (r.https_error.as_deref(), r.url.as_str(), r.status, r.http_to_https),
+            (Some("refused"), "http://x.test/", Some(200), None)
+        );
         assert_eq!(*asked.borrow(), ["https://x.test/", "http://x.test/"]);
         // A failure after a hop (the redirect target is down) is not a connection failure: no fallback.
         let mut broken = page("https://x.test/", 302);
@@ -426,7 +486,10 @@ mod tests {
     #[test]
     fn a_redirect_from_https_to_http_is_found_and_the_reverse_is_not() {
         let down = [hop("https://x.test/", 301, Some("http://x.test/a")), hop("http://x.test/a", 200, None)];
-        assert_eq!(redirect_downgrade(&down), Some(Downgrade { from: "https://x.test/".into(), to: "http://x.test/a".into() }));
+        assert_eq!(
+            redirect_downgrade(&down),
+            Some(Downgrade { from: "https://x.test/".into(), to: "http://x.test/a".into() })
+        );
         let up = [hop("http://x.test/", 301, Some("https://x.test/")), hop("https://x.test/", 200, None)];
         assert_eq!(redirect_downgrade(&up), None);
         assert_eq!(redirect_downgrade(&[hop("https://x.test/", 200, None)]), None);
@@ -434,21 +497,34 @@ mod tests {
         // The target failed, so only the Location of the last hop shows the downgrade.
         assert!(redirect_downgrade(&[hop("https://x.test/", 302, Some("http://x.test/"))]).is_some());
         // Downgrade in the middle of a longer chain.
-        let mid = [hop("http://x.test/", 301, Some("https://x.test/")), hop("https://x.test/", 301, Some("http://y.test/")), hop("http://y.test/", 200, None)];
+        let mid = [
+            hop("http://x.test/", 301, Some("https://x.test/")),
+            hop("https://x.test/", 301, Some("http://y.test/")),
+            hop("http://y.test/", 200, None),
+        ];
         assert_eq!(redirect_downgrade(&mid).unwrap().to, "http://y.test/");
     }
 
     #[test]
     fn the_downgrade_finding_names_both_urls() {
         use crate::finding::Severity;
-        let r = WebResult { status: Some(200), final_url: Some("http://y.test/".into()), downgrade: Some(Downgrade { from: "https://x.test/".into(), to: "http://y.test/".into() }), ..WebResult::default() };
+        let r = WebResult {
+            status: Some(200),
+            final_url: Some("http://y.test/".into()),
+            downgrade: Some(Downgrade { from: "https://x.test/".into(), to: "http://y.test/".into() }),
+            ..WebResult::default()
+        };
         let fs = web_findings("x.test", &r);
         let f = fs.iter().find(|f| f.code == "web_redirect_downgrade").unwrap();
         assert_eq!(f.severity, Severity::Warning);
         assert!(f.title.contains("https://x.test/") && f.title.contains("http://y.test/"), "{}", f.title);
         assert!(f.message.contains("https://x.test/") && f.message.contains("http://y.test/"));
         assert!(f.recommendation.as_deref().is_some_and(|r| r.contains("https")));
-        assert!(!web_findings("x.test", &WebResult { status: Some(200), ..WebResult::default() }).iter().any(|f| f.code == "web_redirect_downgrade"));
+        assert!(
+            !web_findings("x.test", &WebResult { status: Some(200), ..WebResult::default() })
+                .iter()
+                .any(|f| f.code == "web_redirect_downgrade")
+        );
     }
 
     #[test]
@@ -456,7 +532,9 @@ mod tests {
         let mut f = page("https://x.test/", 301);
         f.chain[0].location = Some("http://x.test/".into());
         f.chain.push(Hop { url: "http://x.test/".into(), status: 200, location: None });
-        let r = inspect_with("https://x.test/", "http://x.test/", &|u| if u.starts_with("https") { Fetch { chain: f.chain.clone(), ..Fetch::default() } } else { page(u, 200) });
+        let r = inspect_with("https://x.test/", "http://x.test/", &|u| {
+            if u.starts_with("https") { Fetch { chain: f.chain.clone(), ..Fetch::default() } } else { page(u, 200) }
+        });
         assert_eq!(r.downgrade.unwrap().to, "http://x.test/");
         assert_eq!(r.chain.len(), 2);
     }
@@ -464,7 +542,10 @@ mod tests {
     #[test]
     fn target_parsing_keeps_the_path_and_refuses_a_port() {
         assert_eq!(parse_web_target("Example.COM").unwrap(), ("example.com".into(), "/".into()));
-        assert_eq!(parse_web_target("http://example.com/a/b?x=1#frag").unwrap(), ("example.com".into(), "/a/b?x=1".into()));
+        assert_eq!(
+            parse_web_target("http://example.com/a/b?x=1#frag").unwrap(),
+            ("example.com".into(), "/a/b?x=1".into())
+        );
         assert!(matches!(parse_web_target("example.com:8443"), Err(WebError::PortGiven)));
         assert!(parse_web_target("192.0.2.1").is_err());
         assert!(parse_web_target("localhost").is_err());

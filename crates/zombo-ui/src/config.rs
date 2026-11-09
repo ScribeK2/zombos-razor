@@ -62,7 +62,9 @@ fn read_capped(path: &Path) -> Result<Option<String>, String> {
         return Err(settings_model::LoadError::TooLarge.to_string());
     }
     let mut bytes = vec![];
-    File::open(path).and_then(|f| f.take(MAX_FILE_BYTES as u64 + 1).read_to_end(&mut bytes)).map_err(|e| e.to_string())?;
+    File::open(path)
+        .and_then(|f| f.take(MAX_FILE_BYTES as u64 + 1).read_to_end(&mut bytes))
+        .map_err(|e| e.to_string())?;
     if bytes.len() > MAX_FILE_BYTES {
         return Err(settings_model::LoadError::TooLarge.to_string());
     }
@@ -73,7 +75,11 @@ fn read_capped(path: &Path) -> Result<Option<String>, String> {
 /// A new directory gets mode 0700. A reader sees the old file or the new one, never half of one.
 fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     let dir = path.parent().ok_or("the file has no directory")?;
-    DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let name = path.file_name().and_then(|n| n.to_str()).ok_or("the file has no name")?;
     let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
     let _ = fs::remove_file(&tmp);
@@ -115,7 +121,12 @@ pub fn parse_recent(text: &str) -> Result<Vec<RecentEntry>, String> {
     for e in &f.recent {
         match parse_target(&e.name) {
             Ok(t) if t.value == e.name => {}
-            _ => return Err(format!("{:?} is not a target name", e.name.chars().filter(|c| !c.is_control()).take(40).collect::<String>())),
+            _ => {
+                return Err(format!(
+                    "{:?} is not a target name",
+                    e.name.chars().filter(|c| !c.is_control()).take(40).collect::<String>()
+                ));
+            }
         }
         if e.at < 0 {
             return Err("a time is before 1970".into());
@@ -144,7 +155,13 @@ pub fn to_recent(entries: &[RecentEntry], now_unix: i64, now: Instant) -> Vec<Re
 }
 
 pub fn from_recent(recent: &[Recent], now_unix: i64, now: Instant) -> Vec<RecentEntry> {
-    recent.iter().map(|r| RecentEntry { name: r.value.clone(), at: now_unix.saturating_sub(now.saturating_duration_since(r.at).as_secs() as i64) }).collect()
+    recent
+        .iter()
+        .map(|r| RecentEntry {
+            name: r.value.clone(),
+            at: now_unix.saturating_sub(now.saturating_duration_since(r.at).as_secs() as i64),
+        })
+        .collect()
 }
 
 /// What is on disk, as this run sees it. A file that is present but broken is never written
@@ -160,9 +177,17 @@ pub struct Config {
 
 impl Config {
     pub fn load(dirs: Option<Dirs>) -> Config {
-        let mut c = Config { dirs: dirs.clone(), settings: Settings::default(), settings_problem: None, recent: vec![], recent_problem: None };
+        let mut c = Config {
+            dirs: dirs.clone(),
+            settings: Settings::default(),
+            settings_problem: None,
+            recent: vec![],
+            recent_problem: None,
+        };
         let Some(dirs) = dirs else { return c };
-        match read_capped(&dirs.settings_file()).and_then(|t| t.map(|t| settings_model::parse(&t).map_err(|e| e.to_string())).transpose()) {
+        match read_capped(&dirs.settings_file())
+            .and_then(|t| t.map(|t| settings_model::parse(&t).map_err(|e| e.to_string())).transpose())
+        {
             Ok(s) => c.settings = s.unwrap_or_default(),
             Err(e) => c.settings_problem = Some(e),
         }
@@ -218,7 +243,12 @@ mod tests {
             Tmp(p)
         }
         fn dirs(&self) -> Dirs {
-            Dirs::from_vars(Some(self.0.join("cfg").to_str().unwrap()), Some(self.0.join("state").to_str().unwrap()), None).unwrap()
+            Dirs::from_vars(
+                Some(self.0.join("cfg").to_str().unwrap()),
+                Some(self.0.join("state").to_str().unwrap()),
+                None,
+            )
+            .unwrap()
         }
     }
     impl Drop for Tmp {
@@ -238,9 +268,15 @@ mod tests {
     #[test]
     fn xdg_variables_win_when_absolute_and_home_is_the_fallback() {
         let d = Dirs::from_vars(Some("/x/cfg"), Some("/x/state"), Some("/home/u")).unwrap();
-        assert_eq!((d.settings_file(), d.recent_file()), ("/x/cfg/zombo-razor/config.toml".into(), "/x/state/zombo-razor/recent.toml".into()));
+        assert_eq!(
+            (d.settings_file(), d.recent_file()),
+            ("/x/cfg/zombo-razor/config.toml".into(), "/x/state/zombo-razor/recent.toml".into())
+        );
         let d = Dirs::from_vars(None, None, Some("/home/u")).unwrap();
-        assert_eq!((d.settings_file(), d.recent_file()), ("/home/u/.config/zombo-razor/config.toml".into(), "/home/u/.local/state/zombo-razor/recent.toml".into()));
+        assert_eq!(
+            (d.settings_file(), d.recent_file()),
+            ("/home/u/.config/zombo-razor/config.toml".into(), "/home/u/.local/state/zombo-razor/recent.toml".into())
+        );
         let d = Dirs::from_vars(Some("relative/cfg"), Some(""), Some("/home/u")).unwrap();
         assert_eq!(d.settings_file(), PathBuf::from("/home/u/.config/zombo-razor/config.toml"));
         assert_eq!(Dirs::from_vars(None, None, None), None);
@@ -251,7 +287,10 @@ mod tests {
     fn a_missing_file_means_defaults_and_no_problem() {
         let t = Tmp::new("missing");
         let c = Config::load(Some(t.dirs()));
-        assert_eq!((c.settings, c.settings_problem, c.recent, c.recent_problem), (Settings::default(), None, vec![], None));
+        assert_eq!(
+            (c.settings, c.settings_problem, c.recent, c.recent_problem),
+            (Settings::default(), None, vec![], None)
+        );
         assert!(!t.dirs().config.exists(), "loading creates nothing");
     }
 
@@ -276,7 +315,11 @@ mod tests {
         let before = fs::metadata(t.dirs().settings_file()).unwrap();
         c.save_settings(Settings { timeout: Some(Duration::from_secs(60)), ..sample() }).unwrap();
         use std::os::unix::fs::MetadataExt;
-        assert_ne!(before.ino(), fs::metadata(t.dirs().settings_file()).unwrap().ino(), "a new inode means the file was swapped, not rewritten in place");
+        assert_ne!(
+            before.ino(),
+            fs::metadata(t.dirs().settings_file()).unwrap().ino(),
+            "a new inode means the file was swapped, not rewritten in place"
+        );
         assert_eq!(mode(&t.dirs().settings_file()), 0o600);
     }
 
@@ -323,14 +366,20 @@ mod tests {
     fn recent_targets_hold_only_a_name_and_a_time_and_round_trip() {
         let t = Tmp::new("recent");
         let mut c = Config::load(Some(t.dirs()));
-        let entries: Vec<RecentEntry> = (0..8).map(|i| RecentEntry { name: format!("site{i}.example.com"), at: 1_700_000_000 + i }).collect();
+        let entries: Vec<RecentEntry> =
+            (0..8).map(|i| RecentEntry { name: format!("site{i}.example.com"), at: 1_700_000_000 + i }).collect();
         c.save_recent(entries.clone()).unwrap();
         let file = t.dirs().recent_file();
         assert_eq!(mode(&file), 0o600);
         assert_eq!(mode(&t.dirs().state), 0o700);
         assert_eq!(Config::load(Some(t.dirs())).recent, entries);
         let text = fs::read_to_string(&file).unwrap();
-        assert!(text.lines().filter(|l| !l.is_empty()).all(|l| l.starts_with("name") || l.starts_with("at") || l == "[[recent]]"), "{text}");
+        assert!(
+            text.lines()
+                .filter(|l| !l.is_empty())
+                .all(|l| l.starts_with("name") || l.starts_with("at") || l == "[[recent]]"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -380,7 +429,10 @@ mod tests {
     #[test]
     fn a_recent_list_keeps_its_ages_across_the_conversion() {
         let now = Instant::now();
-        let entries = vec![RecentEntry { name: "a.example.com".into(), at: 1_000 - 90 }, RecentEntry { name: "b.example.com".into(), at: 5_000 }];
+        let entries = vec![
+            RecentEntry { name: "a.example.com".into(), at: 1_000 - 90 },
+            RecentEntry { name: "b.example.com".into(), at: 5_000 },
+        ];
         let recent = to_recent(&entries, 1_000, now);
         assert_eq!(now.duration_since(recent[0].at), Duration::from_secs(90));
         assert_eq!(recent[1].at, now, "a time in the future counts as now");

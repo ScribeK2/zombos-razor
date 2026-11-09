@@ -159,7 +159,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_plan_lists_the_mx_hosts_and_names_the_chosen_one() {
-        let p = Plan { mx: mx(&[(10, "mx1.example.com"), (20, "mx2.example.com")]), host: "mx2.example.com".into(), source: Source::Mx(1), result: result("mx2.example.com", Reach::Answered).await };
+        let p = Plan {
+            mx: mx(&[(10, "mx1.example.com"), (20, "mx2.example.com")]),
+            host: "mx2.example.com".into(),
+            source: Source::Mx(1),
+            result: result("mx2.example.com", Reach::Answered).await,
+        };
         let f = facts(&p);
         assert_eq!(f[0], Fact::new("MX", "10 mx1.example.com"));
         assert_eq!(f[1], Fact::new("MX", "20 mx2.example.com"));
@@ -168,7 +173,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_typed_name_adds_no_lines() {
-        let p = Plan { mx: vec![], host: "mail.example.com".into(), source: Source::Typed, result: result("mail.example.com", Reach::Answered).await };
+        let p = Plan {
+            mx: vec![],
+            host: "mail.example.com".into(),
+            source: Source::Typed,
+            result: result("mail.example.com", Reach::Answered).await,
+        };
         assert!(facts(&p).is_empty());
     }
 
@@ -180,7 +190,10 @@ mod tests {
         assert!(mk(Source::LookupFailed("timed out".into()))[0].value.contains("MX lookup failed (timed out)"));
     }
 
-    fn dial_with(answering: &'static [&'static str], log: std::sync::Arc<Mutex<Vec<String>>>) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = SmtpResult>>> {
+    fn dial_with(
+        answering: &'static [&'static str],
+        log: std::sync::Arc<Mutex<Vec<String>>>,
+    ) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = SmtpResult>>> {
         move |h: String| {
             log.lock().unwrap().push(h.clone());
             let reach = if answering.contains(&h.as_str()) { Reach::Answered } else { Reach::NoAnswer };
@@ -192,14 +205,16 @@ mod tests {
     async fn the_most_preferred_host_that_answers_is_chosen_and_later_hosts_are_not_dialled() {
         let list = mx(&[(10, "mx1.example.com"), (20, "mx2.example.com"), (30, "mx3.example.com")]);
         let log = Default::default();
-        let (source, host, r) = pick(&list, dial_with(&["mx2.example.com", "mx3.example.com"], std::sync::Arc::clone(&log))).await;
+        let (source, host, r) =
+            pick(&list, dial_with(&["mx2.example.com", "mx3.example.com"], std::sync::Arc::clone(&log))).await;
         assert_eq!((source, host.as_str(), r.reach), (Source::Mx(1), "mx2.example.com", Reach::Answered));
         assert_eq!(*log.lock().unwrap(), ["mx1.example.com", "mx2.example.com"]);
     }
 
     #[tokio::test]
     async fn when_no_host_answers_the_report_is_about_the_most_preferred_one() {
-        let list = mx(&[(10, "mx1.example.com"), (20, "mx2.example.com"), (30, "mx3.example.com"), (40, "mx4.example.com")]);
+        let list =
+            mx(&[(10, "mx1.example.com"), (20, "mx2.example.com"), (30, "mx3.example.com"), (40, "mx4.example.com")]);
         let log = Default::default();
         let (source, host, _) = pick(&list, dial_with(&[], std::sync::Arc::clone(&log))).await;
         assert_eq!((source, host.as_str()), (Source::MxSilent, "mx1.example.com"));
@@ -222,7 +237,10 @@ mod tests {
     #[tokio::test]
     async fn a_failed_mx_lookup_falls_back_to_the_name_and_says_so() {
         let resolver = Resolver::new(&[], std::time::Duration::from_millis(10));
-        let plan = run("example.com", Request::new(Kind::Domain, 25), &resolver, |h| async move { result(&h, Reach::NoAnswer).await }).await;
+        let plan = run("example.com", Request::new(Kind::Domain, 25), &resolver, |h| async move {
+            result(&h, Reach::NoAnswer).await
+        })
+        .await;
         assert!(matches!(plan.source, Source::LookupFailed(_)));
         assert_eq!(plan.host, "example.com");
     }

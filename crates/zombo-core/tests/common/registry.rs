@@ -82,7 +82,8 @@ impl FakeHttp {
                     h.fetch_add(1, Ordering::SeqCst);
                     p.lock().unwrap().push(path.clone());
                     let r = handler(&path);
-                    let mut head = format!("HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n", r.status, r.body.len());
+                    let mut head =
+                        format!("HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n", r.status, r.body.len());
                     for (k, v) in &r.headers {
                         head += &format!("{k}: {v}\r\n");
                     }
@@ -99,7 +100,12 @@ impl FakeHttp {
     /// Serve `body` with `status` for /domain/*, and 404 elsewhere.
     pub async fn domain(status: u16, body: impl Into<Vec<u8>>) -> Self {
         let body = body.into();
-        Self::start(move |path| if path.starts_with("/domain/") { Reply::new(status, body.clone()) } else { Reply::new(404, "") }).await
+        Self::start(
+            move |path| {
+                if path.starts_with("/domain/") { Reply::new(status, body.clone()) } else { Reply::new(404, "") }
+            },
+        )
+        .await
     }
 
     pub fn hits(&self) -> usize {

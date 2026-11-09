@@ -43,7 +43,13 @@ pub struct Resp {
 
 impl Resp {
     pub fn new(status: u16, body: impl Into<Vec<u8>>) -> Self {
-        Resp { status, headers: vec![("Content-Type".into(), "text/html; charset=utf-8".into())], body: body.into(), delay: Duration::ZERO, stall_after_body: false }
+        Resp {
+            status,
+            headers: vec![("Content-Type".into(), "text/html; charset=utf-8".into())],
+            body: body.into(),
+            delay: Duration::ZERO,
+            stall_after_body: false,
+        }
     }
     pub fn ok(body: &str) -> Self {
         Self::new(200, body)
@@ -94,13 +100,18 @@ impl FakeSite {
                     let text = String::from_utf8_lossy(&raw).into_owned();
                     let mut lines = text.split("\r\n");
                     let path = lines.next().unwrap_or_default().split(' ').nth(1).unwrap_or("/").to_string();
-                    let headers = lines.take_while(|l| !l.is_empty()).filter_map(|l| l.split_once(':')).map(|(n, v)| (n.trim().to_string(), v.trim().to_string())).collect();
+                    let headers = lines
+                        .take_while(|l| !l.is_empty())
+                        .filter_map(|l| l.split_once(':'))
+                        .map(|(n, v)| (n.trim().to_string(), v.trim().to_string()))
+                        .collect();
                     let req = Req { path, headers };
                     let r = handler(&req);
                     log.lock().unwrap().push(req);
                     tokio::time::sleep(r.delay).await;
                     let promised = if r.stall_after_body { r.body.len() + 1000 } else { r.body.len() };
-                    let mut head = format!("HTTP/1.1 {} X\r\nContent-Length: {promised}\r\nConnection: close\r\n", r.status);
+                    let mut head =
+                        format!("HTTP/1.1 {} X\r\nContent-Length: {promised}\r\nConnection: close\r\n", r.status);
                     for (k, v) in &r.headers {
                         head += &format!("{k}: {v}\r\n");
                     }

@@ -1,25 +1,40 @@
 //! `zombo`: the command-line front end to zombo-core.
 
-use std::{net::SocketAddr, process::ExitCode, time::{Duration, SystemTime}};
+use std::{
+    net::SocketAddr,
+    process::ExitCode,
+    time::{Duration, SystemTime},
+};
 
+use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
+use zombo_core::evidence::{headers, maillog};
+use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
     Finding, Severity,
     delegation::{Ports, ServerState, check_delegation, delegation_findings},
     dnssec::{check_dnssec, dnssec_findings, validating_resolvers},
-    propagation::{Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings, propagation_with},
+    propagation::{
+        Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings,
+        propagation_with,
+    },
     registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
-use zombo_core::{ports::{FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for}, tls::{Trust, check_tls, tls_findings}};
-use zombo_core::{smtp::{Mode, Reach, SmtpOptions, Starttls, check_smtp, smtp_findings, valid_ehlo_name}, tls_extras::{caa_findings, check_caa, ocsp_findings}};
-use zombo_core::evidence::{headers, maillog};
-use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
     blacklist::{Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist},
     rdns::{RdnsResult, check_rdns, rdns_findings},
     resolver::system_resolvers,
 };
-use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
+use zombo_core::{
+    ports::{
+        FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for,
+    },
+    tls::{Trust, check_tls, tls_findings},
+};
+use zombo_core::{
+    smtp::{Mode, Reach, SmtpOptions, Starttls, check_smtp, smtp_findings, valid_ehlo_name},
+    tls_extras::{caa_findings, check_caa, ocsp_findings},
+};
 
 const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
@@ -58,7 +73,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
     }
 }
 
-const EMAIL_USAGE: &str = "usage: zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]";
+const EMAIL_USAGE: &str =
+    "usage: zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]";
 
 async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (mut target, mut json, mut timeout, mut resolver) = (None, false, Duration::from_secs(4), None);
@@ -68,7 +84,8 @@ async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             "--resolver" => resolver = Some(addr(&value("--resolver")?)?),
             "--selector" => selectors.push(value("--selector")?),
@@ -129,7 +146,8 @@ async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     if revoked > 0 {
         keys.push(format!("{revoked} revoked"));
     }
-    let dkim = if keys.is_empty() { format!("none found among {} selectors", r.dkim.checked.len()) } else { keys.join(", ") };
+    let dkim =
+        if keys.is_empty() { format!("none found among {} selectors", r.dkim.checked.len()) } else { keys.join(", ") };
     println!("  {:<8} {dkim}", "DKIM");
     let d = &r.dmarc;
     let dmarc = match &d.parsed {
@@ -137,7 +155,13 @@ async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             let sp = p.subdomain_policy.map_or(String::new(), |sp| format!("; sp={sp}"));
             let policy = p.policy.map_or("no valid policy".to_string(), |p| format!("p={p}"));
             let strict = |a: Alignment| if a == Alignment::Strict { "s" } else { "r" };
-            format!("{policy}{sp}; pct={}; adkim={}; aspf={}; rua={}", p.pct, strict(p.adkim), strict(p.aspf), list(&p.rua))
+            format!(
+                "{policy}{sp}; pct={}; adkim={}; aspf={}; rua={}",
+                p.pct,
+                strict(p.adkim),
+                strict(p.aspf),
+                list(&p.rua)
+            )
         }
         None => records(&d.records, &d.lookup_error),
     };
@@ -176,7 +200,8 @@ async fn delegation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             "--resolver" => bootstrap.push(addr(&value("--resolver")?)?),
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
@@ -225,7 +250,8 @@ async fn dnssec(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             "--resolver" => {
                 let v = value("--resolver")?;
@@ -242,11 +268,14 @@ async fn dnssec(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     // Custom resolvers are both asked for the verdict and used to find the zone; the
     // defaults find the zone through the wide public list and judge by the validating four.
-    let bootstrap: Vec<SocketAddr> = if resolvers.is_empty() { default_resolvers() } else { resolvers.clone() }.iter().map(|r| r.address).collect();
+    let bootstrap: Vec<SocketAddr> =
+        if resolvers.is_empty() { default_resolvers() } else { resolvers.clone() }.iter().map(|r| r.address).collect();
     if resolvers.is_empty() {
         resolvers = validating_resolvers();
     }
-    let r = check_dnssec(&bootstrap, &resolvers, &t.value, 53, SystemTime::now(), timeout).await.map_err(|e| e.to_string())?;
+    let r = check_dnssec(&bootstrap, &resolvers, &t.value, 53, SystemTime::now(), timeout)
+        .await
+        .map_err(|e| e.to_string())?;
     let findings = dnssec_findings(&r);
     if json {
         let out = serde_json::json!({ "result": r, "findings": findings });
@@ -260,7 +289,13 @@ async fn dnssec(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     println!("\nDS records at the parent:");
     for d in &r.ds {
-        println!("  key tag {:<6} {:<24} {:<8} matches a served key: {}", d.ds.key_tag.to_string(), d.ds.algorithm.to_string(), d.ds.digest_type.to_string(), if d.matched { "yes" } else { "NO" });
+        println!(
+            "  key tag {:<6} {:<24} {:<8} matches a served key: {}",
+            d.ds.key_tag.to_string(),
+            d.ds.algorithm.to_string(),
+            d.ds.digest_type.to_string(),
+            if d.matched { "yes" } else { "NO" }
+        );
     }
     if r.ds.is_empty() {
         println!("  none");
@@ -271,7 +306,11 @@ async fn dnssec(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             println!("  {:<32} no answer ({e})", n.name);
             continue;
         }
-        let keys: Vec<String> = n.dnskeys.iter().map(|k| format!("{} {} {}", k.key_tag, if k.is_ksk() { "KSK" } else { "ZSK" }, k.algorithm)).collect();
+        let keys: Vec<String> = n
+            .dnskeys
+            .iter()
+            .map(|k| format!("{} {} {}", k.key_tag, if k.is_ksk() { "KSK" } else { "ZSK" }, k.algorithm))
+            .collect();
         println!("  {:<32} DNSKEY: {}", n.name, if keys.is_empty() { "none".to_string() } else { keys.join(", ") });
         if let Some(s) = &n.soa_rrsig {
             let when = SystemTime::UNIX_EPOCH + Duration::from_secs(r.checked_at);
@@ -292,7 +331,8 @@ async fn propagation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             "--json" => json = true,
             "--scope" => scope = value("--scope")?.parse()?,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             "--no-authoritative" => no_auth = true,
             "--resolver" => {
@@ -337,14 +377,25 @@ async fn propagation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
                 r.location,
                 rcode.unwrap(),
                 a.answers.len(),
-                if a.authoritative == Some(false) && r.kind == VantageKind::Authoritative { "  (NOT authoritative)" } else { "" }
+                if a.authoritative == Some(false) && r.kind == VantageKind::Authoritative {
+                    "  (NOT authoritative)"
+                } else {
+                    ""
+                }
             ),
         }
     };
     if !json {
-        println!("{} ({:?}): {} resolvers, {} authoritative nameservers", t.value, t.kind, resolvers.len(), nameservers.len());
+        println!(
+            "{} ({:?}): {} resolvers, {} authoritative nameservers",
+            t.value,
+            t.kind,
+            resolvers.len(),
+            nameservers.len()
+        );
     }
-    let res = propagation_with(&resolvers, &nameservers, &t.value, scope, timeout, show).await.map_err(|e| e.to_string())?;
+    let res =
+        propagation_with(&resolvers, &nameservers, &t.value, scope, timeout, show).await.map_err(|e| e.to_string())?;
     let findings = propagation_findings(&t.value, &res);
     if json {
         let out = serde_json::json!({ "result": res, "findings": findings });
@@ -382,7 +433,8 @@ async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> 
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
             _ if target.is_none() => target = Some(a),
@@ -425,7 +477,8 @@ async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> 
     Ok(())
 }
 
-const WEB_USAGE: &str = "usage: zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]";
+const WEB_USAGE: &str =
+    "usage: zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]";
 
 async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (mut target, mut json, mut opts) = (None, false, WebOptions::default());
@@ -434,11 +487,13 @@ async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                opts.timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                opts.timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
             "--origin" => {
                 let v = value("--origin")?;
-                opts.origin = Some(v.trim_matches(['[', ']']).parse().map_err(|_| format!("{v:?} is not an IP address"))?);
+                opts.origin =
+                    Some(v.trim_matches(['[', ']']).parse().map_err(|_| format!("{v:?} is not an IP address"))?);
             }
             "--insecure-origin" => opts.origin_cert = CertCheck::SkipVerification,
             "--resolver" => opts.resolver = Some(addr(&value("--resolver")?)?),
@@ -470,34 +525,61 @@ async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         println!("  failed: {e}");
     }
     if let Some(s) = r.status {
-        println!("  HTTP {s} in {} ms{}", r.time_ms, r.server.as_deref().map_or(String::new(), |s| format!(", server {s}")));
+        println!(
+            "  HTTP {s} in {} ms{}",
+            r.time_ms,
+            r.server.as_deref().map_or(String::new(), |s| format!(", server {s}"))
+        );
     }
     if r.hosting.dns_error.is_none() {
-        let cname = if r.hosting.cname_chain.is_empty() { String::new() } else { format!(" via {}", r.hosting.cname_chain.join(" > ")) };
+        let cname = if r.hosting.cname_chain.is_empty() {
+            String::new()
+        } else {
+            format!(" via {}", r.hosting.cname_chain.join(" > "))
+        };
         let ips: Vec<String> = r.hosting.addresses.iter().map(ToString::to_string).collect();
-        println!("  {}{cname}: {}", r.hosting.host, if ips.is_empty() { "no addresses".to_string() } else { ips.join(", ") });
+        println!(
+            "  {}{cname}: {}",
+            r.hosting.host,
+            if ips.is_empty() { "no addresses".to_string() } else { ips.join(", ") }
+        );
     }
     if let Some(o) = &r.origin {
         let a = &o.answer;
-        println!("  origin {}: {}", o.ip, a.status.map_or_else(|| format!("no answer ({})", a.error.as_deref().unwrap_or("unknown")), |s| format!("HTTP {s} in {} ms", a.time_ms)));
+        println!(
+            "  origin {}: {}",
+            o.ip,
+            a.status.map_or_else(
+                || format!("no answer ({})", a.error.as_deref().unwrap_or("unknown")),
+                |s| format!("HTTP {s} in {} ms", a.time_ms)
+            )
+        );
     }
     println!();
     print_findings(&findings);
     Ok(())
 }
 
-const BLACKLIST_USAGE: &str = "usage: zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+const BLACKLIST_USAGE: &str =
+    "usage: zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
 const RDNS_USAGE: &str = "usage: zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]";
 
 /// What `blacklist` and `rdns` share: a target, the resolvers to ask (the machine's own unless
 /// `--resolver` is given), a per-question timeout and the output form.
-fn dns_args(mut it: std::vec::IntoIter<String>, usage: &str, what: &str) -> Result<(zombo_core::target::Target, Vec<SocketAddr>, Duration, bool), String> {
+fn dns_args(
+    mut it: std::vec::IntoIter<String>,
+    usage: &str,
+    what: &str,
+) -> Result<(zombo_core::target::Target, Vec<SocketAddr>, Duration, bool), String> {
     let (mut target, mut json, mut timeout, mut resolvers) = (None, false, Duration::from_secs(3), vec![]);
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
         match a.as_str() {
             "--json" => json = true,
-            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--timeout-ms" => {
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
             "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{usage}")),
             _ if target.is_none() => target = Some(a),
@@ -523,7 +605,12 @@ fn join<T: ToString>(items: &[T]) -> String {
 
 async fn blacklist(it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (t, resolvers, timeout, json) = dns_args(it, BLACKLIST_USAGE, "blacklist")?;
-    let r = check_blacklist(&resolvers, &t.value, BlacklistOptions { query_timeout: timeout, overall: (timeout * 5).max(BlacklistOptions::default().overall) }).await;
+    let r = check_blacklist(
+        &resolvers,
+        &t.value,
+        BlacklistOptions { query_timeout: timeout, overall: (timeout * 5).max(BlacklistOptions::default().overall) },
+    )
+    .await;
     let findings = blacklist_findings(&t.value, &r);
     if json {
         let out = serde_json::json!({ "result": r, "findings": findings });
@@ -588,7 +675,8 @@ async fn rdns(it: std::vec::IntoIter<String>) -> Result<(), String> {
     Ok(())
 }
 
-const EVIDENCE_USAGE: &str = "usage: zombo evidence headers|maillog [FILE|-] [--json]   (reads stdin when FILE is - or absent)";
+const EVIDENCE_USAGE: &str =
+    "usage: zombo evidence headers|maillog [FILE|-] [--json]   (reads stdin when FILE is - or absent)";
 
 fn evidence(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let kind = it.next().ok_or(EVIDENCE_USAGE)?;
@@ -606,7 +694,9 @@ fn evidence(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     let text = match file.as_deref() {
         None | Some("-") => zombo_core::evidence::read_limited(std::io::stdin().lock()),
-        Some(path) => zombo_core::evidence::read_limited(std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?),
+        Some(path) => {
+            zombo_core::evidence::read_limited(std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?)
+        }
     }
     .map_err(|e| e.to_string())?;
     if kind == "headers" {
@@ -730,7 +820,12 @@ async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--timeout-ms" => {
-                timeout = Duration::from_millis(it.next().ok_or("--timeout-ms needs a value")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+                timeout = Duration::from_millis(
+                    it.next()
+                        .ok_or("--timeout-ms needs a value")?
+                        .parse()
+                        .map_err(|_| "--timeout-ms needs a number")?,
+                )
             }
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{TLS_USAGE}")),
             _ if target.is_none() => target = Some(a),
@@ -761,10 +856,21 @@ async fn tls(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         Trust::Invalid => "does not verify",
     };
     println!("  OCSP stapling: {}", if r.ocsp_stapled { "yes" } else { "no" });
-    println!("  trust: {trust}; name {}; verified: {}", if r.hostname_match { "matches" } else { "does NOT match" }, if r.verified { "yes" } else { "NO" });
+    println!(
+        "  trust: {trust}; name {}; verified: {}",
+        if r.hostname_match { "matches" } else { "does NOT match" },
+        if r.verified { "yes" } else { "NO" }
+    );
     for (i, c) in r.chain.iter().enumerate() {
         println!("  [{i}] {} (issuer {})", c.subject, c.issuer);
-        println!("      {}{}, signature {}, valid {} to {}", c.key, if c.self_signed { " (self-signed)" } else { "" }, c.signature, c.not_before.date(), c.not_after.date());
+        println!(
+            "      {}{}, signature {}, valid {} to {}",
+            c.key,
+            if c.self_signed { " (self-signed)" } else { "" },
+            c.signature,
+            c.not_before.date(),
+            c.not_after.date()
+        );
         if !c.sans.is_empty() {
             println!("      names: {}", c.sans.join(", "));
         }
@@ -782,7 +888,9 @@ async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         match a.as_str() {
             "--json" => json = true,
             "--full" => full = true,
-            "--timeout-ms" => dial = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--timeout-ms" => {
+                dial = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
             "--port" => {
                 let p: u16 = value("--port")?.parse().map_err(|_| "--port needs a number from 1 to 65535")?;
                 if p == 0 || chosen.len() >= 64 {
@@ -799,7 +907,13 @@ async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     if !matches!(t.kind, Kind::Domain | Kind::Hostname | Kind::Ip) {
         return Err(format!("ports needs a domain, host name or IP, not {:?}", t.kind));
     }
-    let table: &[ServicePort] = if !chosen.is_empty() { &chosen } else if full { FULL } else { QUICK };
+    let table: &[ServicePort] = if !chosen.is_empty() {
+        &chosen
+    } else if full {
+        FULL
+    } else {
+        QUICK
+    };
     let addresses = resolve_target(&t.value, dial.max(Duration::from_secs(4))).await.map_err(|e| e.to_string())?;
     let r = probe(&addresses, table, Timing { dial, ..Timing::default() }).await;
     let findings = ports_findings(&t.value, &r);
@@ -819,7 +933,13 @@ async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             PortState::Filtered => "filtered (no answer)",
             PortState::NoRoute => "no route from this network",
         };
-        println!("  {:<40} {:>5}  {:<22} {state}{}", p.address.to_string(), p.port, p.service, p.banner.as_deref().map(|b| format!("  {b}")).unwrap_or_default());
+        println!(
+            "  {:<40} {:>5}  {:<22} {state}{}",
+            p.address.to_string(),
+            p.port,
+            p.service,
+            p.banner.as_deref().map(|b| format!("  {b}")).unwrap_or_default()
+        );
     }
     println!();
     print_findings(&findings);
@@ -827,10 +947,12 @@ async fn ports(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
 }
 
 const SMTP_USAGE: &str = "usage: zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
-const CAA_USAGE: &str = "usage: zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+const CAA_USAGE: &str =
+    "usage: zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
 
 async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
-    let (mut target, mut json, mut timeout, mut resolvers, mut mode, mut ehlo) = (None, false, Duration::from_secs(10), vec![], None, None);
+    let (mut target, mut json, mut timeout, mut resolvers, mut mode, mut ehlo) =
+        (None, false, Duration::from_secs(10), vec![], None, None);
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
         match a.as_str() {
@@ -838,7 +960,10 @@ async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
             "--implicit-tls" => mode = Some(Mode::Implicit),
             "--starttls" => mode = Some(Mode::Starttls),
             "--ehlo" => ehlo = Some(value("--ehlo")?),
-            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--timeout-ms" => {
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
             "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{SMTP_USAGE}")),
             _ if target.is_none() => target = Some(a),
@@ -920,9 +1045,21 @@ async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         show("offers after TLS", e);
     }
     if let Some(c) = &r.tls {
-        println!("  TLS: {} {}; name {}; verified: {}", c.version, c.cipher, if c.hostname_match { "matches" } else { "does NOT match" }, if c.verified { "yes" } else { "NO" });
+        println!(
+            "  TLS: {} {}; name {}; verified: {}",
+            c.version,
+            c.cipher,
+            if c.hostname_match { "matches" } else { "does NOT match" },
+            if c.verified { "yes" } else { "NO" }
+        );
         for (i, cert) in c.chain.iter().enumerate() {
-            println!("  [{i}] {} (issuer {}) valid {} to {}", cert.subject, cert.issuer, cert.not_before.date(), cert.not_after.date());
+            println!(
+                "  [{i}] {} (issuer {}) valid {} to {}",
+                cert.subject,
+                cert.issuer,
+                cert.not_before.date(),
+                cert.not_after.date()
+            );
         }
     }
     println!();
@@ -931,14 +1068,18 @@ async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
 }
 
 async fn caa(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
-    let (mut target, mut json, mut timeout, mut resolvers, mut port, mut cert) = (None, false, Duration::from_secs(4), vec![], 443u16, true);
+    let (mut target, mut json, mut timeout, mut resolvers, mut port, mut cert) =
+        (None, false, Duration::from_secs(4), vec![], 443u16, true);
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
         match a.as_str() {
             "--json" => json = true,
             "--no-cert" => cert = false,
             "--port" => port = value("--port")?.parse().map_err(|_| "--port needs a number")?,
-            "--timeout-ms" => timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?),
+            "--timeout-ms" => {
+                timeout =
+                    Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
             "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{CAA_USAGE}")),
             _ if target.is_none() => target = Some(a),
@@ -979,7 +1120,10 @@ async fn caa(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         println!("    {}{} \"{}\"", if c.critical { "critical " } else { "" }, c.tag, c.value);
     }
     if let Some(c) = &served {
-        println!("  served certificate on port {port}: issued by {}", c.chain.first().map_or("?", |l| l.issuer.as_str()));
+        println!(
+            "  served certificate on port {port}: issued by {}",
+            c.chain.first().map_or("?", |l| l.issuer.as_str())
+        );
     }
     if let Some(e) = cert_error {
         println!("  could not read the certificate on port {port} ({e}); the issuer was not compared");

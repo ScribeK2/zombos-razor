@@ -41,7 +41,14 @@ pub struct Dnsbl {
     pub note: &'static str,
 }
 
-const fn bl(name: &'static str, zone: &'static str, kind: SubjectKind, severity: Severity, delist: &'static str, note: &'static str) -> Dnsbl {
+const fn bl(
+    name: &'static str,
+    zone: &'static str,
+    kind: SubjectKind,
+    severity: Severity,
+    delist: &'static str,
+    note: &'static str,
+) -> Dnsbl {
     Dnsbl { name, zone, kind, severity, delist, note }
 }
 
@@ -51,8 +58,22 @@ pub const DNSBLS: [Dnsbl; 10] = {
     use SubjectKind::{Domain, Ip};
     [
         bl("Spamhaus ZEN", "zen.spamhaus.org", Ip, Critical, "https://check.spamhaus.org/", ""),
-        bl("SpamCop", "bl.spamcop.net", Ip, Critical, "https://www.spamcop.net/bl.shtml", "SpamCop listings expire 24 hours after the last report."),
-        bl("Barracuda", "b.barracudacentral.org", Ip, Critical, "https://www.barracudacentral.org/rbl/removal-request", ""),
+        bl(
+            "SpamCop",
+            "bl.spamcop.net",
+            Ip,
+            Critical,
+            "https://www.spamcop.net/bl.shtml",
+            "SpamCop listings expire 24 hours after the last report.",
+        ),
+        bl(
+            "Barracuda",
+            "b.barracudacentral.org",
+            Ip,
+            Critical,
+            "https://www.barracudacentral.org/rbl/removal-request",
+            "",
+        ),
         bl("PSBL", "psbl.surriel.com", Ip, Warning, "https://psbl.org/remove", ""),
         bl("Mailspike", "bl.mailspike.net", Ip, Warning, "https://mailspike.org/iplookup.html", ""),
         bl(
@@ -178,17 +199,27 @@ pub async fn check_blacklist(resolvers: &[SocketAddr], target: &str, opts: Optio
             return res;
         }
         Ok(IpAddr::V4(_)) => {
-            res.subjects.insert(target.to_string(), Subject { kind: SubjectKind::Ip, source: "target".into(), lists: BTreeMap::new() });
+            res.subjects.insert(
+                target.to_string(),
+                Subject { kind: SubjectKind::Ip, source: "target".into(), lists: BTreeMap::new() },
+            );
         }
         Err(_) => {
-            res.subjects.insert(target.to_string(), Subject { kind: SubjectKind::Domain, source: "target".into(), lists: BTreeMap::new() });
+            res.subjects.insert(
+                target.to_string(),
+                Subject { kind: SubjectKind::Domain, source: "target".into(), lists: BTreeMap::new() },
+            );
             match mail_addresses(&resolver, target).await {
                 Ok(addrs) => {
                     for (ip, source) in addrs {
                         if res.subjects.len() > MAX_ADDRESSES {
                             break;
                         }
-                        res.subjects.entry(ip.to_string()).or_insert(Subject { kind: SubjectKind::Ip, source, lists: BTreeMap::new() });
+                        res.subjects.entry(ip.to_string()).or_insert(Subject {
+                            kind: SubjectKind::Ip,
+                            source,
+                            lists: BTreeMap::new(),
+                        });
                     }
                 }
                 Err(e) => res.resolve = Some(e),
@@ -244,7 +275,11 @@ async fn mail_addresses(resolver: &Resolver, domain: &str) -> Result<Vec<(Ipv4Ad
     mxs.sort();
     mxs.dedup();
     mxs.truncate(MAX_MX_HOSTS);
-    let (hosts, source) = if mxs.is_empty() { (vec![domain.to_string()], "A record of ") } else { (mxs.into_iter().map(|(_, h)| h).collect(), "MX ") };
+    let (hosts, source) = if mxs.is_empty() {
+        (vec![domain.to_string()], "A record of ")
+    } else {
+        (mxs.into_iter().map(|(_, h)| h).collect(), "MX ")
+    };
     let mut set = JoinSet::new();
     for (i, h) in hosts.iter().cloned().enumerate() {
         let resolver = resolver.clone();
@@ -254,11 +289,22 @@ async fn mail_addresses(resolver: &Resolver, domain: &str) -> Result<Vec<(Ipv4Ad
     let mut errs: Vec<(usize, String)> = vec![];
     while let Some(Ok((i, r))) = set.join_next().await {
         match r {
-            Ok(m) => found[i] = m.answers.iter().filter_map(|a| if let RData::A(ip) = &a.data { Some(ip.0) } else { None }).collect(),
+            Ok(m) => {
+                found[i] = m
+                    .answers
+                    .iter()
+                    .filter_map(|a| if let RData::A(ip) = &a.data { Some(ip.0) } else { None })
+                    .collect()
+            }
             Err(e) => errs.push((i, format!("{}: {e}", printable(&clip(&hosts[i]))))),
         }
     }
-    let out: Vec<(Ipv4Addr, String)> = found.iter().enumerate().flat_map(|(i, ips)| ips.iter().map(move |ip| (*ip, i))).map(|(ip, i)| (ip, format!("{source}{}", printable(&clip(&hosts[i]))))).collect();
+    let out: Vec<(Ipv4Addr, String)> = found
+        .iter()
+        .enumerate()
+        .flat_map(|(i, ips)| ips.iter().map(move |ip| (*ip, i)))
+        .map(|(ip, i)| (ip, format!("{source}{}", printable(&clip(&hosts[i])))))
+        .collect();
     if out.is_empty() && !errs.is_empty() {
         errs.sort();
         return Err(errs.into_iter().map(|(_, e)| e).collect::<Vec<_>>().join("; "));
@@ -291,7 +337,11 @@ async fn query_dnsbl(resolver: &Resolver, l: &Dnsbl, name: &str) -> Verdict {
             _ => continue,
         };
         if is_127_255_255(ip) || ip == Ipv4Addr::LOCALHOST {
-            return Verdict { codes: vec![ip.to_string()], error: format!("the list refused the query ({ip})"), ..Verdict::new(l, State::Refused) };
+            return Verdict {
+                codes: vec![ip.to_string()],
+                error: format!("the list refused the query ({ip})"),
+                ..Verdict::new(l, State::Refused)
+            };
         }
         if ip.octets()[0] != 127 {
             // Some resolvers rewrite NXDOMAIN to an ad or block page.
@@ -327,7 +377,13 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: impl Into<Cow<'static, str>>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: impl Into<Cow<'static, str>>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: Some(recommendation.into()) }
 }
 
@@ -338,7 +394,10 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
             "blacklist_ipv6",
             Info,
             "IPv6 not checked",
-            format!("DNS blocklist coverage for IPv6 is limited, so {} was not checked. This is not a clean result.", printable(&clip(target))),
+            format!(
+                "DNS blocklist coverage for IPv6 is limited, so {} was not checked. This is not a clean result.",
+                printable(&clip(target))
+            ),
             "Check the sending IPv4 address instead, or look the address up on the providers' own websites.",
         )];
     }
@@ -402,8 +461,14 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
     }
     if r.subjects.len() == 1 && addresses == 0 {
         let msg = match &r.resolve {
-            Some(why) => format!("Could not look up {}'s mail hosts ({why}), so only domain blocklists were checked.", printable(&clip(target))),
-            None => format!("No IPv4 mail host addresses were found for {}, so only domain blocklists were checked.", printable(&clip(target))),
+            Some(why) => format!(
+                "Could not look up {}'s mail hosts ({why}), so only domain blocklists were checked.",
+                printable(&clip(target))
+            ),
+            None => format!(
+                "No IPv4 mail host addresses were found for {}, so only domain blocklists were checked.",
+                printable(&clip(target))
+            ),
         };
         out.push(finding(
             "blacklist_no_addresses",

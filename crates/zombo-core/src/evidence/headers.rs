@@ -41,7 +41,8 @@ static RECEIVED_BY: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)\bby\s+(\S+)"));
 static RECEIVED_WITH: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)\bwith\s+(\S+)"));
 static AUTH_DKIM_DOMAIN: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)header\.d=([^\s;]+)"));
 static AUTH_DKIM_IDENTITY: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)header\.i=[^@\s;]*@([^\s;]+)"));
-static SPAM_STATUS: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)^(yes|no)\b.*?score=(-?[0-9.]+).*?required=(-?[0-9.]+)"));
+static SPAM_STATUS: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?i)^(yes|no)\b.*?score=(-?[0-9.]+).*?required=(-?[0-9.]+)"));
 static SCL_VALUE: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)\bSCL:(-?\d+)"));
 
 /// A receiving server's word on one check. The common words are variants; any
@@ -230,7 +231,8 @@ fn strip_quotes(mut s: &str) -> &str {
 fn split_header(line: &str) -> Option<(&str, &str)> {
     let (name, value) = line.split_once(':')?;
     let mut chars = name.chars();
-    let valid = chars.next().is_some_and(|c| c.is_ascii_alphanumeric()) && chars.all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let valid =
+        chars.next().is_some_and(|c| c.is_ascii_alphanumeric()) && chars.all(|c| c.is_ascii_alphanumeric() || c == '-');
     valid.then_some((name, value.strip_prefix(char::is_whitespace).unwrap_or(value)))
 }
 
@@ -350,10 +352,21 @@ fn parse_hop(received: &str) -> Hop {
 /// ranges count as public, so the fixtures and the RFC examples read like real mail.
 fn is_public(ip: IpAddr) -> bool {
     match ip.to_canonical() {
-        IpAddr::V4(a) => !(a.is_unspecified() || a.is_loopback() || a.is_multicast() || a.is_link_local() || a.is_broadcast() || a.is_private()),
+        IpAddr::V4(a) => {
+            !(a.is_unspecified()
+                || a.is_loopback()
+                || a.is_multicast()
+                || a.is_link_local()
+                || a.is_broadcast()
+                || a.is_private())
+        }
         IpAddr::V6(a) => {
             let first = a.segments()[0];
-            !(a.is_unspecified() || a.is_loopback() || a.is_multicast() || first & 0xffc0 == 0xfe80 || first & 0xfe00 == 0xfc00)
+            !(a.is_unspecified()
+                || a.is_loopback()
+                || a.is_multicast()
+                || first & 0xffc0 == 0xfe80
+                || first & 0xfe00 == 0xfc00)
         }
     }
 }
@@ -412,7 +425,10 @@ fn parse_auth(auth: &mut AuthResults, header: &str) {
 
 fn parse_signature(header: &str) -> DkimSignature {
     let tag = |name: &str| {
-        header.split(';').find_map(|t| t.split_once('=').filter(|(k, _)| k.trim() == name)).map_or(String::new(), |(_, v)| v.split_whitespace().collect::<String>().to_ascii_lowercase())
+        header
+            .split(';')
+            .find_map(|t| t.split_once('=').filter(|(k, _)| k.trim() == name))
+            .map_or(String::new(), |(_, v)| v.split_whitespace().collect::<String>().to_ascii_lowercase())
     };
     DkimSignature { domain: tag("d"), selector: tag("s") }
 }
@@ -420,7 +436,8 @@ fn parse_signature(header: &str) -> DkimSignature {
 fn parse_spam(b: &Block) -> SpamSignals {
     let mut sp = SpamSignals::default();
     for name in ["x-spam-score", "x-spamd-score"] {
-        let score = b.first(name).split_whitespace().next().and_then(|w| w.parse::<f64>().ok()).filter(|s| s.is_finite());
+        let score =
+            b.first(name).split_whitespace().next().and_then(|w| w.parse::<f64>().ok()).filter(|s| s.is_finite());
         sp.score = score.or(sp.score);
     }
     if let Some(m) = SPAM_STATUS.captures(b.first("x-spam-status")) {
@@ -437,7 +454,9 @@ fn parse_spam(b: &Block) -> SpamSignals {
     if let Some(score) = sp.score {
         sp.flagged |= score >= sp.required.unwrap_or(DEFAULT_SPAM_THRESHOLD);
     }
-    let scl = Some(b.first("x-ms-exchange-organization-scl")).filter(|s| !s.is_empty()).or_else(|| capture(&SCL_VALUE, b.first("x-forefront-antispam-report")));
+    let scl = Some(b.first("x-ms-exchange-organization-scl"))
+        .filter(|s| !s.is_empty())
+        .or_else(|| capture(&SCL_VALUE, b.first("x-forefront-antispam-report")));
     if let Some(n) = scl.and_then(|s| s.trim().parse::<i32>().ok()) {
         sp.scl = Some(n);
         sp.flagged |= n >= SCL_SPAM_LEVEL;
@@ -544,9 +563,16 @@ fn minutes(seconds: i64) -> String {
 /// The Findings for one header analysis, wording as in the Go version.
 pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
     let mut out = vec![];
-    let mut add = |code: &'static str, severity, title: String, message: String, recommendation: Option<&'static str>| {
-        out.push(Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) });
-    };
+    let mut add =
+        |code: &'static str, severity, title: String, message: String, recommendation: Option<&'static str>| {
+            out.push(Finding {
+                code,
+                severity,
+                title: title.into(),
+                message,
+                recommendation: recommendation.map(Into::into),
+            });
+        };
     let au = &a.auth;
     let al = &a.alignment;
     if au.spf.is_none() && au.dkim.is_none() && au.dmarc.is_none() {
@@ -564,7 +590,10 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
             "email_headers_spf_fail",
             Severity::Critical,
             "SPF failed".into(),
-            format!("The receiving server says the sending server isn't allowed to send for {}.", orunknown(&al.return_path_domain)),
+            format!(
+                "The receiving server says the sending server isn't allowed to send for {}.",
+                orunknown(&al.return_path_domain)
+            ),
             Some("Add the sending service to the domain's SPF record, or check whether this message is forged."),
         ),
         Some(v) => add(
@@ -588,7 +617,9 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
             "email_headers_dkim_fail",
             Severity::Warning,
             format!("DKIM {v}"),
-            format!("The DKIM signature did not verify ({v}). Forwarding or a mailing list that rewrites the message can cause this."),
+            format!(
+                "The DKIM signature did not verify ({v}). Forwarding or a mailing list that rewrites the message can cause this."
+            ),
             Some("Check the signing domain's published key with Email Authentication."),
         ),
     }
@@ -598,13 +629,28 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
             "email_headers_dmarc_fail",
             Severity::Critical,
             "DMARC failed".into(),
-            format!("Neither SPF nor DKIM passed in alignment with the From domain {}, so receivers may reject or quarantine it.", orunknown(&al.from_domain)),
+            format!(
+                "Neither SPF nor DKIM passed in alignment with the From domain {}, so receivers may reject or quarantine it.",
+                orunknown(&al.from_domain)
+            ),
             Some("If this mail is legitimate, align SPF or DKIM with the From domain; if not, it is spoofed."),
         ),
-        Some(v) => add("email_headers_dmarc_none", Severity::Info, format!("No DMARC verdict ({v})"), format!("The receiving server reported DMARC as {v}."), None),
+        Some(v) => add(
+            "email_headers_dmarc_none",
+            Severity::Info,
+            format!("No DMARC verdict ({v})"),
+            format!("The receiving server reported DMARC as {v}."),
+            None,
+        ),
     }
     if [&au.spf, &au.dkim, &au.dmarc].iter().all(|v| **v == Some(Verdict::Pass)) {
-        add("email_headers_authenticated", Severity::Ok, "Authenticated".into(), "SPF, DKIM and DMARC all passed at the receiving server.".into(), None);
+        add(
+            "email_headers_authenticated",
+            Severity::Ok,
+            "Authenticated".into(),
+            "SPF, DKIM and DMARC all passed at the receiving server.".into(),
+            None,
+        );
     }
     if al.from_return_path_aligned == Some(false) && al.dkim_aligned != Some(true) {
         add(
@@ -615,15 +661,24 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
                 "The From domain ({}) and the bounce address domain ({}) belong to different organisations, and no aligned DKIM signature ties them together.",
                 al.from_domain, al.return_path_domain
             ),
-            Some("For legitimate mail sent through a provider, set a custom bounce domain or DKIM signing for the From domain."),
+            Some(
+                "For legitimate mail sent through a provider, set a custom bounce domain or DKIM signing for the From domain.",
+            ),
         );
     }
-    if let Some((prev, slow)) = a.hops.windows(2).map(|w| (&w[0], &w[1])).find(|(_, x)| x.delay_s.is_some_and(|d| d > SLOW_HOP_SECONDS)) {
+    if let Some((prev, slow)) =
+        a.hops.windows(2).map(|w| (&w[0], &w[1])).find(|(_, x)| x.delay_s.is_some_and(|d| d > SLOW_HOP_SECONDS))
+    {
         add(
             "email_headers_delayed",
             Severity::Warning,
             "Delayed in transit".into(),
-            format!("It waited {} between {} and {}.", minutes(slow.delay_s.unwrap_or_default()), orunknown(&prev.by_host), orunknown(&slow.by_host)),
+            format!(
+                "It waited {} between {} and {}.",
+                minutes(slow.delay_s.unwrap_or_default()),
+                orunknown(&prev.by_host),
+                orunknown(&slow.by_host)
+            ),
             Some("Look for queueing, greylisting or a retry at that server; its logs will say why."),
         );
     }
@@ -649,28 +704,36 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
                 "email_headers_multiple_from",
                 Severity::Warning,
                 "More than one From header".into(),
-                format!("The message has {count} From headers; a legitimate message has one. Mail programs may show a different sender than the one a receiving server checked."),
+                format!(
+                    "The message has {count} From headers; a legitimate message has one. Mail programs may show a different sender than the one a receiving server checked."
+                ),
                 Some("Treat the message as forged unless the sender can explain it."),
             ),
             Anomaly::ClockSkew { hop } => add(
                 "email_headers_clock_skew",
                 Severity::Info,
                 "Hop dates run backwards".into(),
-                format!("Hop {} is dated before the server that handed it the message, so a server clock is wrong or a Received line was edited.", hop + 1),
+                format!(
+                    "Hop {} is dated before the server that handed it the message, so a server clock is wrong or a Received line was edited.",
+                    hop + 1
+                ),
                 None,
             ),
             Anomaly::TooManyHops { total } => add(
                 "email_headers_too_many_hops",
                 Severity::Info,
                 "Very long Received chain".into(),
-                format!("The message has {total} Received headers; only the newest {MAX_HOPS} were analysed, so the origin may be missing."),
+                format!(
+                    "The message has {total} Received headers; only the newest {MAX_HOPS} were analysed, so the origin may be missing."
+                ),
                 None,
             ),
             Anomaly::Truncated => add(
                 "email_headers_truncated",
                 Severity::Info,
                 "Part of the paste was skipped".into(),
-                "A line, a header or the number of headers went over the analysis limits; the rest was left out.".into(),
+                "A line, a header or the number of headers went over the analysis limits; the rest was left out."
+                    .into(),
                 None,
             ),
         }

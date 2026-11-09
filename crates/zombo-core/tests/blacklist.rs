@@ -61,14 +61,22 @@ async fn reports_a_listing_with_its_reason_and_delist_link() {
     assert!(!lists.contains_key("Spamhaus DBL"), "an IP was checked against a domain list");
     let f = find(&fs, "blacklist_listed").expect("a listing finding");
     assert_eq!(f.severity, Severity::Critical);
-    assert!(f.message.contains("Spamhaus ZEN") && f.message.contains("SBL1") && f.message.contains(": SBL)"), "{}", f.message);
+    assert!(
+        f.message.contains("Spamhaus ZEN") && f.message.contains("SBL1") && f.message.contains(": SBL)"),
+        "{}",
+        f.message
+    );
     assert!(f.recommendation.as_deref().unwrap().contains("https://check.spamhaus.org/"));
     assert!(find(&fs, "blacklist_clean").is_none(), "a listed address was also called clean: {:?}", codes(&fs));
 }
 
 #[tokio::test]
 async fn severity_follows_the_list() {
-    let (_, fs) = run("7.113.0.203.psbl.surriel.com. 300 IN A 127.0.0.2\n7.113.0.203.dnsbl-1.uceprotect.net. 300 IN A 127.0.0.2", "203.0.113.7").await;
+    let (_, fs) = run(
+        "7.113.0.203.psbl.surriel.com. 300 IN A 127.0.0.2\n7.113.0.203.dnsbl-1.uceprotect.net. 300 IN A 127.0.0.2",
+        "203.0.113.7",
+    )
+    .await;
     let sev = |title: &str| fs.iter().find(|f| f.title == title).map(|f| f.severity);
     assert_eq!(sev("203.0.113.7 listed on PSBL"), Some(Severity::Warning));
     assert_eq!(sev("203.0.113.7 listed on UCEPROTECT Level 1"), Some(Severity::Info));
@@ -108,7 +116,9 @@ async fn a_neighbouring_range_is_still_a_listing() {
 #[tokio::test]
 async fn a_refusal_wins_over_a_listing_in_the_same_reply() {
     let server = serve(|name, t| match (name, t) {
-        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => Reply::Answers(vec![a(name, "127.0.0.2"), a(name, "127.255.255.254")]),
+        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => {
+            Reply::Answers(vec![a(name, "127.0.0.2"), a(name, "127.255.255.254")])
+        }
         _ => Reply::NxDomain,
     })
     .await;
@@ -119,13 +129,23 @@ async fn a_refusal_wins_over_a_listing_in_the_same_reply() {
 
 #[tokio::test]
 async fn checks_a_domains_mail_hosts_and_the_domain() {
-    let text = format!("{}\nmail.example.com. 300 IN A 203.0.113.7\n{}\nexample.com.dbl.spamhaus.org. 300 IN A 127.0.1.2", zone("example"), zen_listing());
+    let text = format!(
+        "{}\nmail.example.com. 300 IN A 203.0.113.7\n{}\nexample.com.dbl.spamhaus.org. 300 IN A 127.0.1.2",
+        zone("example"),
+        zen_listing()
+    );
     let (r, fs) = run(&text, "example.com").await;
     let ip = &r.subjects["203.0.113.7"];
     assert_eq!((ip.source.as_str(), ip.lists["Spamhaus ZEN"].state), ("MX mail.example.com", State::Listed));
-    assert!(!r.subjects.contains_key("93.184.216.34"), "the domain's own A record was checked although it has MX hosts");
+    assert!(
+        !r.subjects.contains_key("93.184.216.34"),
+        "the domain's own A record was checked although it has MX hosts"
+    );
     let dom = &r.subjects["example.com"];
-    assert_eq!((dom.lists["Spamhaus DBL"].state, dom.lists["SURBL"].state, dom.lists.len()), (State::Listed, State::Clean, 2));
+    assert_eq!(
+        (dom.lists["Spamhaus DBL"].state, dom.lists["SURBL"].state, dom.lists.len()),
+        (State::Listed, State::Clean, 2)
+    );
     assert_eq!(fs.iter().filter(|f| f.code == "blacklist_listed").count(), 2, "one finding per listing: {fs:?}");
     let zen = fs.iter().find(|f| f.title == "203.0.113.7 listed on Spamhaus ZEN").unwrap();
     assert!(zen.message.starts_with("203.0.113.7 (MX mail.example.com) is listed on"), "{}", zen.message);
@@ -185,7 +205,11 @@ async fn pbl_is_a_policy_warning_not_critical() {
 
 #[tokio::test]
 async fn a_mixed_pbl_and_sbl_listing_stays_critical() {
-    let (_, fs) = run("7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.10\n7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.2", "203.0.113.7").await;
+    let (_, fs) = run(
+        "7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.10\n7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.2",
+        "203.0.113.7",
+    )
+    .await;
     assert_eq!(find(&fs, "blacklist_listed").unwrap().severity, Severity::Critical);
 }
 
@@ -197,12 +221,17 @@ async fn timeouts_are_unknown_not_clean() {
     assert_eq!(r.subjects["203.0.113.7"].lists["Spamhaus ZEN"].state, State::Unknown);
     assert!(find(&fs, "blacklist_clean").is_none(), "timeouts called clean: {:?}", codes(&fs));
     assert_eq!(find(&fs, "blacklist_unknown").map(|f| f.severity), Some(Severity::Warning));
-    assert!(started.elapsed() < Duration::from_secs(3), "the lists were asked one after another: {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the lists were asked one after another: {:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
 async fn one_silent_blocklist_does_not_delay_the_others() {
-    let server = serve(|name, _| if name.ends_with(".zen.spamhaus.org") { Reply::Silent } else { Reply::NxDomain }).await;
+    let server =
+        serve(|name, _| if name.ends_with(".zen.spamhaus.org") { Reply::Silent } else { Reply::NxDomain }).await;
     let started = Instant::now();
     let (r, fs) = run_on(server, "203.0.113.7").await;
     let lists = &r.subjects["203.0.113.7"].lists;
@@ -231,7 +260,12 @@ async fn the_overall_deadline_ends_the_wait_and_reports_unanswered_lists() {
 async fn a_second_resolver_is_tried_when_the_first_gives_no_answer() {
     let dead = FakeDns::silent().await;
     let live = FakeDns::start(&zen_listing()).await;
-    let r = check_blacklist(&[dead.addr, live.addr], "203.0.113.7", Options { query_timeout: Duration::from_millis(200), overall: Duration::from_secs(10) }).await;
+    let r = check_blacklist(
+        &[dead.addr, live.addr],
+        "203.0.113.7",
+        Options { query_timeout: Duration::from_millis(200), overall: Duration::from_secs(10) },
+    )
+    .await;
     assert_eq!(r.subjects["203.0.113.7"].lists["Spamhaus ZEN"].state, State::Listed);
 }
 
@@ -261,7 +295,9 @@ async fn an_alias_with_no_address_is_unknown_not_clean() {
 #[tokio::test]
 async fn an_alias_followed_by_a_listing_address_is_a_listing() {
     let server = serve(|name, t| match (name, t) {
-        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => Reply::Answers(vec![cname(name, "x.zen.spamhaus.org"), a("x.zen.spamhaus.org", "127.0.0.4")]),
+        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => {
+            Reply::Answers(vec![cname(name, "x.zen.spamhaus.org"), a("x.zen.spamhaus.org", "127.0.0.4")])
+        }
         _ => Reply::NxDomain,
     })
     .await;
@@ -281,7 +317,9 @@ async fn an_address_outside_127_8_means_the_resolver_rewrites_answers() {
 #[tokio::test]
 async fn a_flood_of_listing_codes_is_bounded() {
     let server = serve(|name, t| match (name, t) {
-        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => Reply::Answers((2..120).map(|i| a(name, &format!("127.0.0.{i}"))).collect()),
+        ("7.113.0.203.zen.spamhaus.org", RecordType::A) => {
+            Reply::Answers((2..120).map(|i| a(name, &format!("127.0.0.{i}"))).collect())
+        }
         _ => Reply::NxDomain,
     })
     .await;
@@ -293,7 +331,8 @@ async fn a_flood_of_listing_codes_is_bounded() {
 async fn a_huge_txt_reason_is_cut_short() {
     let chunk = "A".repeat(250);
     let strings = vec![format!("\"{chunk}\""); 200].join(" "); // 50 KB, which only fits over TCP
-    let text = format!("7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.2\n7.113.0.203.zen.spamhaus.org. 300 IN TXT {strings}");
+    let text =
+        format!("7.113.0.203.zen.spamhaus.org. 300 IN A 127.0.0.2\n7.113.0.203.zen.spamhaus.org. 300 IN TXT {strings}");
     let (r, fs) = run(&text, "203.0.113.7").await;
     let zen = &r.subjects["203.0.113.7"].lists["Spamhaus ZEN"];
     assert_eq!(zen.state, State::Listed);
@@ -314,7 +353,9 @@ async fn a_flood_of_mx_hosts_is_bounded() {
     let asked = Arc::new(AtomicUsize::new(0));
     let counter = asked.clone();
     let server = serve(move |name, t| match t {
-        RecordType::MX if name == "example.com" => Reply::Answers((0..60).map(|i| scripted::mx(name, i, &format!("m{i}.example.com"))).collect()),
+        RecordType::MX if name == "example.com" => {
+            Reply::Answers((0..60).map(|i| scripted::mx(name, i, &format!("m{i}.example.com"))).collect())
+        }
         RecordType::A if name.starts_with('m') => {
             counter.fetch_add(1, Ordering::SeqCst);
             Reply::Answers(vec![a(name, "198.51.100.9")])
@@ -333,7 +374,9 @@ async fn at_most_ten_questions_are_in_flight() {
     let counter = asked.clone();
     let server = serve(move |name, t| match t {
         RecordType::MX if name == "example.com" => Reply::Answers(vec![scripted::mx(name, 10, "mail.example.com")]),
-        RecordType::A if name == "mail.example.com" => Reply::Answers((1..=5).map(|i| a(name, &format!("198.51.100.{i}"))).collect()),
+        RecordType::A if name == "mail.example.com" => {
+            Reply::Answers((1..=5).map(|i| a(name, &format!("198.51.100.{i}"))).collect())
+        }
         _ => {
             counter.fetch_add(1, Ordering::SeqCst);
             Reply::Silent

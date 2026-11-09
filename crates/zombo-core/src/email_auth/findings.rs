@@ -2,14 +2,20 @@
 //! titles and wording are the Go engine's.
 
 use super::{
-    Bimi, DkimAudit, DmarcAudit, EffectiveAll, EmailAuthResult, MAX_LOOKUPS, Mechanism, MtaSts, Policy, Qualifier, SpfAudit, SpfNode, TlsRpt,
-    spf::LOOKUP_CAP,
+    Bimi, DkimAudit, DmarcAudit, EffectiveAll, EmailAuthResult, MAX_LOOKUPS, Mechanism, MtaSts, Policy, Qualifier,
+    SpfAudit, SpfNode, TlsRpt, spf::LOOKUP_CAP,
 };
 use std::borrow::Cow;
 
 use crate::{Finding, Severity};
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) }
 }
 
@@ -176,7 +182,8 @@ pub fn spf_missing_provider(domain: &str, mx_hosts: &[String], spf: &SpfAudit) -
 fn spf_includes(node: &SpfNode, domain: &str) -> bool {
     node.terms.iter().any(|t| match &t.mechanism {
         Mechanism::Include(v) | Mechanism::Redirect(v) => {
-            v.strip_suffix('.').unwrap_or(v).eq_ignore_ascii_case(domain) || t.target.as_deref().is_some_and(|n| spf_includes(n, domain))
+            v.strip_suffix('.').unwrap_or(v).eq_ignore_ascii_case(domain)
+                || t.target.as_deref().is_some_and(|n| spf_includes(n, domain))
         }
         _ => false,
     })
@@ -246,7 +253,13 @@ pub fn dkim_findings(domain: &str, r: &DkimAudit) -> Vec<Finding> {
         ));
     }
     if !active.is_empty() {
-        out.push(finding("dkim_found", Ok, "DKIM key published", format!("{domain} publishes DKIM keys for {}.", active.join(", ")), None));
+        out.push(finding(
+            "dkim_found",
+            Ok,
+            "DKIM key published",
+            format!("{domain} publishes DKIM keys for {}.", active.join(", ")),
+            None,
+        ));
         return out;
     }
     let mut msg = format!("None of the {} selectors checked has an active DKIM key for {domain}", r.checked.len());
@@ -284,8 +297,12 @@ pub fn dmarc_findings(domain: &str, r: &DmarcAudit) -> Vec<Finding> {
                 "dmarc_missing",
                 Warning,
                 "No DMARC record",
-                format!("_dmarc.{domain} has no DMARC record, so receivers apply no policy to mail failing SPF and DKIM, and nobody gets reports."),
-                Some("Publish v=DMARC1; p=none; rua=mailto:… to start collecting reports, then tighten to quarantine or reject."),
+                format!(
+                    "_dmarc.{domain} has no DMARC record, so receivers apply no policy to mail failing SPF and DKIM, and nobody gets reports."
+                ),
+                Some(
+                    "Publish v=DMARC1; p=none; rua=mailto:… to start collecting reports, then tighten to quarantine or reject.",
+                ),
             )];
         }
         1 => {}
@@ -332,7 +349,10 @@ pub fn dmarc_findings(domain: &str, r: &DmarcAudit) -> Vec<Finding> {
             "dmarc_partial",
             Info,
             format!("DMARC applies to {}% of mail", d.pct),
-            format!("pct={}: the policy is applied to only part of failing mail; the rest gets the next weaker treatment.", d.pct),
+            format!(
+                "pct={}: the policy is applied to only part of failing mail; the rest gets the next weaker treatment.",
+                d.pct
+            ),
             None,
         ));
     }
@@ -361,7 +381,9 @@ pub fn tls_rpt_findings(domain: &str, r: &TlsRpt) -> Vec<Finding> {
             "email_tlsrpt_lookup_failed",
             Warning,
             "TLS-RPT lookup failed",
-            format!("The TXT lookup for _smtp._tls.{domain} got no answer ({e}), so its TLS reporting record is unknown."),
+            format!(
+                "The TXT lookup for _smtp._tls.{domain} got no answer ({e}), so its TLS reporting record is unknown."
+            ),
             Some("Re-run; if it keeps failing, check the domain's nameservers."),
         )];
     }
@@ -370,17 +392,27 @@ pub fn tls_rpt_findings(domain: &str, r: &TlsRpt) -> Vec<Finding> {
             "email_tlsrpt_missing",
             Info,
             "No TLS-RPT record",
-            format!("_smtp._tls.{domain} has no TLS-RPT record, so mail servers that support TLS reporting have nowhere to send reports of failed encrypted delivery to {domain}."),
+            format!(
+                "_smtp._tls.{domain} has no TLS-RPT record, so mail servers that support TLS reporting have nowhere to send reports of failed encrypted delivery to {domain}."
+            ),
             Some("Optional. Publish v=TLSRPTv1; rua=mailto:<mailbox> as a TXT record at _smtp._tls.<domain>."),
         ),
         1 if r.rua.is_empty() || !r.rua.iter().all(|u| scheme_is(u, &["mailto:", "https:"])) => finding(
             "email_tlsrpt_invalid",
             Warning,
             "TLS-RPT record is unusable",
-            format!("The TLS-RPT record at _smtp._tls.{domain} has no usable rua= (every address must start with mailto: or https:), so senders have nowhere to send reports."),
+            format!(
+                "The TLS-RPT record at _smtp._tls.{domain} has no usable rua= (every address must start with mailto: or https:), so senders have nowhere to send reports."
+            ),
             Some("Set rua=mailto:<mailbox> or rua=https://<endpoint>."),
         ),
-        1 => finding("email_tlsrpt_ok", Ok, "TLS-RPT published", format!("TLS failure reports for {domain} go to {}.", r.rua.join(", ")), None),
+        1 => finding(
+            "email_tlsrpt_ok",
+            Ok,
+            "TLS-RPT published",
+            format!("TLS failure reports for {domain} go to {}.", r.rua.join(", ")),
+            None,
+        ),
         n => finding(
             "email_tlsrpt_multiple",
             Warning,
@@ -417,20 +449,30 @@ pub fn bimi_findings(domain: &str, r: &Bimi) -> Vec<Finding> {
             "email_bimi_missing",
             Info,
             "No BIMI record",
-            format!("default._bimi.{domain} has no BIMI record, so mail clients show no brand logo beside mail from {domain}."),
+            format!(
+                "default._bimi.{domain} has no BIMI record, so mail clients show no brand logo beside mail from {domain}."
+            ),
             Some("Optional. BIMI needs DMARC at p=quarantine or p=reject first."),
         ),
         (1, None, _) => invalid("it has no l= tag"),
         (1, Some(l), _) if !l.is_empty() && !scheme_is(l, &["https://"]) => invalid("l= is not an https URL"),
         (1, _, Some(a)) if !a.is_empty() && !scheme_is(a, &["https://"]) => invalid("a= is not an https URL"),
-        (1, Some(""), _) => finding("email_bimi_ok", Ok, "BIMI published", format!("{domain}'s BIMI record has an empty l=, which declines to show a logo."), None),
+        (1, Some(""), _) => finding(
+            "email_bimi_ok",
+            Ok,
+            "BIMI published",
+            format!("{domain}'s BIMI record has an empty l=, which declines to show a logo."),
+            None,
+        ),
         (1, Some(l), a) => finding(
             "email_bimi_ok",
             Ok,
             "BIMI published",
             match a.filter(|a| !a.is_empty()) {
                 Some(a) => format!("{domain} publishes a BIMI logo at {l} with an evidence document at {a}."),
-                None => format!("{domain} publishes a BIMI logo at {l} with no a= evidence document; some mail clients require one."),
+                None => format!(
+                    "{domain} publishes a BIMI logo at {l} with no a= evidence document; some mail clients require one."
+                ),
             },
             None,
         ),
@@ -462,22 +504,32 @@ pub fn mta_sts_findings(domain: &str, r: &MtaSts) -> Vec<Finding> {
             "email_mtasts_missing",
             Info,
             "No MTA-STS record",
-            format!("_mta-sts.{domain} has no MTA-STS record, so senders are not told to require TLS when they deliver mail to {domain}."),
-            Some("Optional. Publish v=STSv1; id=<version> at _mta-sts.<domain> and serve the policy at https://mta-sts.<domain>/.well-known/mta-sts.txt."),
+            format!(
+                "_mta-sts.{domain} has no MTA-STS record, so senders are not told to require TLS when they deliver mail to {domain}."
+            ),
+            Some(
+                "Optional. Publish v=STSv1; id=<version> at _mta-sts.<domain> and serve the policy at https://mta-sts.<domain>/.well-known/mta-sts.txt.",
+            ),
         ),
         (1, Some(id)) if valid_id(id) => finding(
             "email_mtasts_ok",
             Ok,
             "MTA-STS record published",
-            format!("_mta-sts.{domain} announces an MTA-STS policy (id {id}). Only this record was checked; the policy file at https://mta-sts.{domain}/.well-known/mta-sts.txt was not fetched."),
+            format!(
+                "_mta-sts.{domain} announces an MTA-STS policy (id {id}). Only this record was checked; the policy file at https://mta-sts.{domain}/.well-known/mta-sts.txt was not fetched."
+            ),
             None,
         ),
         (1, _) => finding(
             "email_mtasts_invalid",
             Warning,
             "MTA-STS record is unusable",
-            format!("The MTA-STS record at _mta-sts.{domain} has no valid id= (1 to 32 letters and digits), so senders ignore it."),
-            Some("Set id= to a short alphanumeric version, such as a timestamp, and change it whenever the policy file changes."),
+            format!(
+                "The MTA-STS record at _mta-sts.{domain} has no valid id= (1 to 32 letters and digits), so senders ignore it."
+            ),
+            Some(
+                "Set id= to a short alphanumeric version, such as a timestamp, and change it whenever the policy file changes.",
+            ),
         ),
         (n, _) => finding(
             "email_mtasts_multiple",

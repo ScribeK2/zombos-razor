@@ -172,9 +172,13 @@ impl Agreement {
             Agreement::Agree => "Every vantage that answered gives the same answer.",
             Agreement::Cached => "The nameservers agree, and some resolvers still serve old records.",
             Agreement::NameserversDiffer => "The authoritative nameservers disagree with each other.",
-            Agreement::ResolversDiffer => "Resolvers disagree, and there is no authoritative answer to compare against.",
+            Agreement::ResolversDiffer => {
+                "Resolvers disagree, and there is no authoritative answer to compare against."
+            }
             Agreement::Inconclusive => "Too few vantages answered to compare.",
-            Agreement::Intercepted => "This network answers DNS itself, so the vantages are not independent and the comparison proves nothing.",
+            Agreement::Intercepted => {
+                "This network answers DNS itself, so the vantages are not independent and the comparison proves nothing."
+            }
         }
     }
 }
@@ -251,7 +255,8 @@ pub async fn propagation_with(
     let ns_disagree = disagreement(&ns_answers, &types);
     let stale = if ns_disagree.is_empty() { stale(&res_answers, &ns_answers, &types) } else { BTreeMap::new() };
     // Only nameservers that answered with the AA flag count: an interceptor's answer proves nothing.
-    let usable = answered(&res_answers) + ns_answers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).count();
+    let usable = answered(&res_answers)
+        + ns_answers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).count();
     let intercepted = network_intercepted(&ns_answers);
     let agreement = if intercepted {
         Agreement::Intercepted
@@ -284,7 +289,8 @@ pub async fn propagation_with(
 fn network_intercepted(nameservers: &[VantageAnswer]) -> bool {
     let answered: Vec<&VantageAnswer> = nameservers.iter().filter(|n| n.error.is_none()).collect();
     let distinct: std::collections::BTreeSet<SocketAddr> = answered.iter().map(|n| n.vantage.address).collect();
-    distinct.len() >= 2 && answered.iter().all(|n| n.authoritative == Some(false) && n.recursion_available == Some(true))
+    distinct.len() >= 2
+        && answered.iter().all(|n| n.authoritative == Some(false) && n.recursion_available == Some(true))
 }
 
 /// Types on which the answering Vantages differ, plus "existence" when some
@@ -312,7 +318,11 @@ fn disagreement(all: &[VantageAnswer], types: &[RecordType]) -> Vec<String> {
 /// Which resolvers differ from the nameservers, per type. Only nameservers
 /// that answered with the authoritative flag count as the truth: an answer
 /// without it came from a forwarder or interceptor.
-fn stale(resolvers: &[VantageAnswer], nameservers: &[VantageAnswer], types: &[RecordType]) -> BTreeMap<String, Vec<String>> {
+fn stale(
+    resolvers: &[VantageAnswer],
+    nameservers: &[VantageAnswer],
+    types: &[RecordType],
+) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let Some(truth) = nameservers.iter().find(|n| n.error.is_none() && n.authoritative == Some(true)) else {
         return out;
@@ -327,7 +337,8 @@ fn stale(resolvers: &[VantageAnswer], nameservers: &[VantageAnswer], types: &[Re
             continue;
         }
         let want = truth.answers.get(&t);
-        for r in live.clone().filter(|r| r.rcode == truth.rcode && !r.failed.contains(&t) && r.answers.get(&t) != want) {
+        for r in live.clone().filter(|r| r.rcode == truth.rcode && !r.failed.contains(&t) && r.answers.get(&t) != want)
+        {
             out.entry(t.clone()).or_default().push(r.vantage.name.clone());
         }
     }
@@ -404,7 +415,9 @@ pub(crate) async fn find_apex(
     let mut zone = target.to_string();
     loop {
         let name = Name::from_ascii(&zone).map_err(|_| DiscoverError::NoNameservers(target.into()))?;
-        let m = ask_any(bootstrap, &name, RecordType::NS, limit).await.ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
+        let m = ask_any(bootstrap, &name, RecordType::NS, limit)
+            .await
+            .ok_or_else(|| DiscoverError::NoResolver(target.into()))?;
         let names: Vec<String> = m
             .answers
             .iter()
@@ -475,7 +488,8 @@ pub(crate) fn ipv6_available() -> bool {
 /// make it catch up until someone bumps the serial.
 fn ns_disagree_finding(r: &PropagationResult) -> Finding {
     let types = r.ns_disagree.join(", ");
-    let live: Vec<&VantageAnswer> = r.nameservers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).collect();
+    let live: Vec<&VantageAnswer> =
+        r.nameservers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).collect();
     let with_soa: Vec<(&VantageAnswer, Soa)> = live.iter().filter_map(|n| n.soa.map(|s| (*n, s))).collect();
     let low = with_soa.iter().min_by_key(|(_, s)| s.serial);
     let high = with_soa.iter().max_by_key(|(_, s)| s.serial);
@@ -494,7 +508,10 @@ fn ns_disagree_finding(r: &PropagationResult) -> Finding {
         };
     }
     let same = match low {
-        Some((_, s)) => format!(" They report the same serial ({}), so a nameserver that copies the zone will not pick the change up: the serial was not increased.", s.serial),
+        Some((_, s)) => format!(
+            " They report the same serial ({}), so a nameserver that copies the zone will not pick the change up: the serial was not increased.",
+            s.serial
+        ),
         None => String::new(),
     };
     Finding {
@@ -552,7 +569,10 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
             severity: Severity::Warning,
             title: "Exists on no resolver".into(),
             message: format!("Every resolver that answered says {target} does not exist (NXDOMAIN)."),
-            recommendation: Some("Check the spelling and the domain's registration and delegation; there is nothing to propagate yet.".into()),
+            recommendation: Some(
+                "Check the spelling and the domain's registration and delegation; there is nothing to propagate yet."
+                    .into(),
+            ),
         });
         return out;
     }
@@ -594,7 +614,9 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
             severity: Severity::Warning,
             title: "Too few resolvers answered".into(),
             message: "Only one resolver answered, so there is nothing to compare it with.".into(),
-            recommendation: Some("Re-run; if resolvers keep failing, outbound DNS may be filtered on this network.".into()),
+            recommendation: Some(
+                "Re-run; if resolvers keep failing, outbound DNS may be filtered on this network.".into(),
+            ),
         });
     } else if records.is_empty() && addrs.is_empty() && r.stale.is_empty() && !r.intercepted {
         out.push(Finding {
@@ -625,12 +647,16 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
             severity: Severity::Warning,
             title: "A nameserver didn't answer".into(),
             message: format!("{down} did not answer when asked directly, so it is left out of the comparison."),
-            recommendation: Some("If it should be serving the zone, check that it is online and reachable on UDP and TCP port 53.".into()),
+            recommendation: Some(
+                "If it should be serving the zone, check that it is online and reachable on UDP and TCP port 53."
+                    .into(),
+            ),
         });
     }
     let faking = names(&|n| n.authoritative == Some(false));
     if r.intercepted {
-        let who: Vec<&str> = r.nameservers.iter().filter(|n| n.error.is_none()).map(|n| n.vantage.name.as_str()).collect();
+        let who: Vec<&str> =
+            r.nameservers.iter().filter(|n| n.error.is_none()).map(|n| n.vantage.name.as_str()).collect();
         out.push(crate::dns::interception_finding(&who));
     } else if !faking.is_empty() {
         out.push(Finding {
@@ -655,14 +681,17 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
                 code: "dns_authoritative_consistent",
                 severity: Severity::Ok,
                 title: "Matches the authoritative servers".into(),
-                message: format!("{live} nameserver(s) agree, and every resolver that answered returns the same records."),
+                message: format!(
+                    "{live} nameserver(s) agree, and every resolver that answered returns the same records."
+                ),
                 recommendation: None,
             });
         }
         return out;
     }
     let who: std::collections::BTreeSet<&str> = r.stale.values().flatten().map(String::as_str).collect();
-    let types: Vec<&str> = r.stale.keys().map(|t| if t == "existence" { "whether the name exists" } else { t.as_str() }).collect();
+    let types: Vec<&str> =
+        r.stale.keys().map(|t| if t == "existence" { "whether the name exists" } else { t.as_str() }).collect();
     let wait = r
         .resolvers
         .iter()

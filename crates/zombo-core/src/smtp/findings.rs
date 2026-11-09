@@ -14,7 +14,13 @@ use crate::{
 /// Ports that many networks and hosting providers refuse to let customers dial out to.
 const OUTBOUND_MAIL: [u16; 4] = [25, 465, 587, 2525];
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Cow::Borrowed) }
 }
 
@@ -167,7 +173,13 @@ pub fn smtp_findings_at(r: &SmtpResult, expect_names: &[String], now: OffsetDate
     if let Some(tls) = &r.tls {
         out.extend(tls_findings_at(&r.host, r.port, tls, now));
         let how = if r.mode == Mode::Implicit { "Implicit TLS accepted" } else { "STARTTLS accepted" };
-        out.push(finding("smtp_tls_ok", Severity::Ok, how, format!("{place} spoke {} ({}).", tls.version, tls.cipher), None));
+        out.push(finding(
+            "smtp_tls_ok",
+            Severity::Ok,
+            how,
+            format!("{place} spoke {} ({}).", tls.version, tls.cipher),
+            None,
+        ));
     }
     out
 }

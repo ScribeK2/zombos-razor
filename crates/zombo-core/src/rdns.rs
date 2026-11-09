@@ -125,8 +125,15 @@ async fn check_ip(resolver: &Resolver, ip: IpAddr) -> RdnsResult {
         let name = printable(name.trim_end_matches('.'));
         ptrs.push(match f {
             Some(Ok(addresses)) => Ptr { confirmed: addresses.contains(&ip), name, addresses, forward_error: None },
-            Some(Err(e)) => Ptr { name, addresses: vec![], forward_error: Some(printable(&clip(&e))), confirmed: false },
-            None => Ptr { name, addresses: vec![], forward_error: Some("the lookup did not finish".into()), confirmed: false },
+            Some(Err(e)) => {
+                Ptr { name, addresses: vec![], forward_error: Some(printable(&clip(&e))), confirmed: false }
+            }
+            None => Ptr {
+                name,
+                addresses: vec![],
+                forward_error: Some("the lookup did not finish".into()),
+                confirmed: false,
+            },
         });
     }
     out
@@ -163,7 +170,13 @@ fn embeds_address(name: &str, ip: Ipv4Addr) -> bool {
     })
 }
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<std::borrow::Cow<'static, str>>, message: String, recommendation: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<std::borrow::Cow<'static, str>>,
+    message: String,
+    recommendation: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) }
 }
 
@@ -191,7 +204,13 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                 ));
             } else {
                 let list: Vec<String> = addresses.iter().map(ToString::to_string).collect();
-                out.push(finding("rdns_addresses", Info, "Addresses", format!("{host} resolves to {}.", list.join(", ")), None));
+                out.push(finding(
+                    "rdns_addresses",
+                    Info,
+                    "Addresses",
+                    format!("{host} resolves to {}.", list.join(", ")),
+                    None,
+                ));
             }
         }
         RdnsResult::Ip { ip, ptr_error, ptrs, .. } => {
@@ -200,7 +219,10 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                     "rdns_lookup_failed",
                     Warning,
                     "Reverse DNS lookup failed",
-                    format!("The PTR lookup for {ip} got no answer ({}), so its reverse DNS is unknown.", printable(&clip(e))),
+                    format!(
+                        "The PTR lookup for {ip} got no answer ({}), so its reverse DNS is unknown.",
+                        printable(&clip(e))
+                    ),
                     Some("Re-run; if it keeps failing, check the network's DNS resolver."),
                 ));
                 return out;
@@ -240,7 +262,10 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                     let got = if p.addresses.is_empty() {
                         format!("has no {family} record")
                     } else {
-                        format!("resolves to {}, not {ip}", p.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "))
+                        format!(
+                            "resolves to {}, not {ip}",
+                            p.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+                        )
                     };
                     out.push(finding(
                         "rdns_not_confirmed",
@@ -268,7 +293,10 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                     "rdns_confirmed",
                     Ok,
                     "Reverse DNS confirmed",
-                    format!("{ip} points to {}, which resolves back to {ip}.", names.into_iter().collect::<Vec<_>>().join(", ")),
+                    format!(
+                        "{ip} points to {}, which resolves back to {ip}.",
+                        names.into_iter().collect::<Vec<_>>().join(", ")
+                    ),
                     None,
                 ));
             }

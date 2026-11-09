@@ -11,7 +11,13 @@ const CLOSED: &str = "127.0.0.1:1";
 
 /// An RDAP base on a closed port, so only a proxy can answer.
 fn behind_a_proxy(proxy: Option<String>) -> Endpoints {
-    Endpoints { rdap: [("com".to_string(), "http://127.0.0.1:1/".to_string())].into(), whois: [("com".to_string(), CLOSED.to_string())].into(), whois_iana: CLOSED.into(), proxy, ..Endpoints::default() }
+    Endpoints {
+        rdap: [("com".to_string(), "http://127.0.0.1:1/".to_string())].into(),
+        whois: [("com".to_string(), CLOSED.to_string())].into(),
+        whois_iana: CLOSED.into(),
+        proxy,
+        ..Endpoints::default()
+    }
 }
 
 #[tokio::test]

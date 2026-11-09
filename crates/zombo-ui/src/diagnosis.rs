@@ -201,7 +201,15 @@ pub fn propagation_records(r: &PropagationResult) -> Vec<String> {
 
 impl Propagation {
     pub fn new() -> Self {
-        Propagation { state: CheckState::NotRun, rows: vec![], settled: false, stale: BTreeMap::new(), agreement: None, findings: vec![], history: History::default() }
+        Propagation {
+            state: CheckState::NotRun,
+            rows: vec![],
+            settled: false,
+            stale: BTreeMap::new(),
+            agreement: None,
+            findings: vec![],
+            history: History::default(),
+        }
     }
 
     pub fn apply(&mut self, target: &str, event: PropEvent) {
@@ -266,7 +274,14 @@ pub struct Tab {
 
 impl Tab {
     pub fn new(target: Target) -> Self {
-        Tab { target, section: Section::Dns, propagation: Propagation::new(), record: RecordKind::default(), runs: HashMap::new(), smtp_port: smtp_plan::PORTS[0] }
+        Tab {
+            target,
+            section: Section::Dns,
+            propagation: Propagation::new(),
+            record: RecordKind::default(),
+            runs: HashMap::new(),
+            smtp_port: smtp_plan::PORTS[0],
+        }
     }
 
     pub fn step_port(&mut self, delta: isize) {
@@ -314,7 +329,8 @@ impl Tab {
     }
 
     fn summary_state(&self) -> CheckState {
-        let states: Vec<CheckState> = Section::ALL.iter().filter(|&&s| s != Section::Summary).map(|&s| self.state(s)).collect();
+        let states: Vec<CheckState> =
+            Section::ALL.iter().filter(|&&s| s != Section::Summary).map(|&s| self.state(s)).collect();
         if states.contains(&CheckState::Running) {
             return CheckState::Running;
         }
@@ -325,7 +341,13 @@ impl Tab {
         let failed = run.iter().filter(|s| s.can_retry()).count();
         let problems = problems(&self.findings(Section::Summary));
         if problems == 0 && failed > 0 {
-            return CheckState::Failed { reason: if failed == 1 { "1 Check did not finish".into() } else { format!("{failed} Checks did not finish") } };
+            return CheckState::Failed {
+                reason: if failed == 1 {
+                    "1 Check did not finish".into()
+                } else {
+                    format!("{failed} Checks did not finish")
+                },
+            };
         }
         CheckState::Done { problems: problems + failed }
     }
@@ -339,7 +361,9 @@ impl Tab {
                     .iter()
                     .filter(|&&s| s != Section::Summary)
                     .flat_map(|&s| self.findings(s))
-                    .filter(|f| seen.insert((f.code, if is_network_wide(f.code) { String::new() } else { f.message.clone() })))
+                    .filter(|f| {
+                        seen.insert((f.code, if is_network_wide(f.code) { String::new() } else { f.message.clone() }))
+                    })
                     .collect();
                 ordered(&all)
             }
@@ -354,14 +378,22 @@ impl Tab {
             CheckState::NotRun => v("NOT RUN", &self.not_run_reason(section)),
             CheckState::Running => v("RUNNING", "Results appear here as each answer arrives."),
             CheckState::Failed { reason } => v("FAILED", reason),
-            CheckState::TimedOut => v("TIMED OUT", "The Check did not finish in time. Retry it, or try again from another network."),
+            CheckState::TimedOut => {
+                v("TIMED OUT", "The Check did not finish in time. Retry it, or try again from another network.")
+            }
             CheckState::Done { problems } => match (section, self.propagation.agreement) {
                 (Section::Dns, Some(a)) => v(a.label(), a.reason()),
-                _ if *problems == 0 && section == Section::Summary => {
-                    v("NO PROBLEMS", "Every Check that ran found nothing wrong. Checks that have not run are listed as not run.")
+                _ if *problems == 0 && section == Section::Summary => v(
+                    "NO PROBLEMS",
+                    "Every Check that ran found nothing wrong. Checks that have not run are listed as not run.",
+                ),
+                _ if *problems == 0 => {
+                    v("NO PROBLEMS", "This Check found nothing wrong. Read the findings below for what it looked at.")
                 }
-                _ if *problems == 0 => v("NO PROBLEMS", "This Check found nothing wrong. Read the findings below for what it looked at."),
-                _ => v(&format!("{problems} PROBLEM{}", if *problems == 1 { "" } else { "S" }), "Read the findings below, worst first."),
+                _ => v(
+                    &format!("{problems} PROBLEM{}", if *problems == 1 { "" } else { "S" }),
+                    "Read the findings below, worst first.",
+                ),
             },
         }
     }
@@ -388,7 +420,9 @@ impl Tab {
                 "The {} Check runs only when you ask for it, because it connects to the target's servers or sends many queries. Nothing was checked yet. Press Run, or Ctrl+R in this section.",
                 s.label()
             ),
-            s if kind == Kind::Ip => format!("The {} Check needs a domain or host name, so it does not apply to an IP address.", s.label()),
+            s if kind == Kind::Ip => {
+                format!("The {} Check needs a domain or host name, so it does not apply to an IP address.", s.label())
+            }
             s if !crate::checks::automatic(kind).contains(&s) => {
                 format!("The {} Check does not start on its own for a host name. Press Ctrl+R to run it.", s.label())
             }
@@ -463,7 +497,12 @@ mod tests {
 
     #[test]
     fn only_warnings_and_criticals_count_as_problems() {
-        let f = [finding(Severity::Ok, "a"), finding(Severity::Info, "b"), finding(Severity::Warning, "c"), finding(Severity::Critical, "d")];
+        let f = [
+            finding(Severity::Ok, "a"),
+            finding(Severity::Info, "b"),
+            finding(Severity::Warning, "c"),
+            finding(Severity::Critical, "d"),
+        ];
         assert_eq!(problems(&f), 2);
         assert_eq!(counts(&f).map(|(_, n)| n), [1, 1, 1, 1]);
     }
@@ -554,7 +593,9 @@ mod tests {
     #[test]
     fn sections_that_have_not_run_say_not_run_honestly() {
         let t = tab();
-        for s in [Section::Delegation, Section::Dnssec, Section::Email, Section::Web, Section::Tls, Section::Registration] {
+        for s in
+            [Section::Delegation, Section::Dnssec, Section::Email, Section::Web, Section::Tls, Section::Registration]
+        {
             assert_eq!(t.state(s), CheckState::NotRun);
             let v = t.verdict(s);
             assert_eq!(v.word, "NOT RUN");
@@ -582,7 +623,8 @@ mod tests {
         let f = finding(Severity::Warning, "w");
         t.run_mut(Section::Registration).apply(CheckEvent::Started);
         assert_eq!(t.state(Section::Summary), CheckState::Running);
-        t.run_mut(Section::Registration).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f], ..Outcome::default() }))));
+        t.run_mut(Section::Registration)
+            .apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![f], ..Outcome::default() }))));
         assert_eq!(t.state(Section::Registration), CheckState::Done { problems: 1 });
         assert_eq!(t.state(Section::Dns), CheckState::NotRun);
         assert_eq!(t.findings(Section::Summary).len(), 1);
@@ -595,7 +637,10 @@ mod tests {
         let mut t = tab();
         for s in [Section::Delegation, Section::Dnssec] {
             t.run_mut(s).apply(CheckEvent::Started);
-            t.run_mut(s).apply(CheckEvent::Finished(Box::new(Ok(Outcome { findings: vec![finding(Severity::Warning, "dns_network_intercepts")], ..Outcome::default() }))));
+            t.run_mut(s).apply(CheckEvent::Finished(Box::new(Ok(Outcome {
+                findings: vec![finding(Severity::Warning, "dns_network_intercepts")],
+                ..Outcome::default()
+            }))));
         }
         assert_eq!(t.findings(Section::Delegation).len(), 1);
         assert_eq!(t.findings(Section::Summary).len(), 1);

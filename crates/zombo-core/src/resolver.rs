@@ -52,7 +52,8 @@ pub fn parse_resolv_conf(text: &str) -> Vec<SocketAddr> {
 /// The machine's resolvers from `/etc/resolv.conf`; empty when there are none or the file is unreadable.
 pub fn system_resolvers() -> Vec<SocketAddr> {
     let mut bytes = vec![];
-    let read = std::fs::File::open("/etc/resolv.conf").and_then(|f| f.take(RESOLV_CONF_MAX_BYTES).read_to_end(&mut bytes));
+    let read =
+        std::fs::File::open("/etc/resolv.conf").and_then(|f| f.take(RESOLV_CONF_MAX_BYTES).read_to_end(&mut bytes));
     if read.is_err() {
         return vec![];
     }
@@ -107,7 +108,10 @@ impl Resolver {
             .answers
             .iter()
             .filter_map(|a| match &a.data {
-                RData::MX(mx) => Some(Mx { preference: mx.preference, host: printable(&clip(mx.exchange.to_string().trim_end_matches('.'))).to_ascii_lowercase() }),
+                RData::MX(mx) => Some(Mx {
+                    preference: mx.preference,
+                    host: printable(&clip(mx.exchange.to_string().trim_end_matches('.'))).to_ascii_lowercase(),
+                }),
                 _ => None,
             })
             .filter(|mx| !mx.host.is_empty())

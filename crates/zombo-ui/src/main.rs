@@ -39,12 +39,18 @@ fn launch(started: Instant) {
             }),
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))),
             window_decorations: Some(WindowDecorations::Client),
-            window_background: if zombo_ui::chrome::detect_compositor_shadow() { WindowBackgroundAppearance::Opaque } else { WindowBackgroundAppearance::Transparent },
+            window_background: if zombo_ui::chrome::detect_compositor_shadow() {
+                WindowBackgroundAppearance::Opaque
+            } else {
+                WindowBackgroundAppearance::Transparent
+            },
             app_id: Some(APP_ID.into()),
             window_min_size: Some(size(px(720.), px(480.))),
             ..Default::default()
         };
-        if let Err(e) = gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| app::Shell::new(started, window, cx))) {
+        if let Err(e) =
+            gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| app::Shell::new(started, window, cx)))
+        {
             eprintln!("zombo-razor: cannot open the window: {e}");
             cx.quit();
         }

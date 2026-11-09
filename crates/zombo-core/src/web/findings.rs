@@ -7,7 +7,13 @@ use crate::finding::{Finding, Severity};
 
 const SLOW_MS: u64 = 3000;
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<std::borrow::Cow<'static, str>>, message: String, rec: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<std::borrow::Cow<'static, str>>,
+    message: String,
+    rec: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation: rec.map(Into::into) }
 }
 
@@ -28,7 +34,10 @@ fn downgrade_finding(r: &WebResult) -> Option<Finding> {
         code: "web_redirect_downgrade",
         severity: Severity::Warning,
         title: format!("Redirect from HTTPS to HTTP: {} to {}", d.from, d.to).into(),
-        message: format!("{} redirects to {}, which drops the connection from HTTPS to plain HTTP. Anything sent after that hop is readable and changeable on the network.", d.from, d.to),
+        message: format!(
+            "{} redirects to {}, which drops the connection from HTTPS to plain HTTP. Anything sent after that hop is readable and changeable on the network.",
+            d.from, d.to
+        ),
         recommendation: Some("Redirect to https:// URLs only.".into()),
     })
 }
@@ -51,7 +60,10 @@ fn unverified_origin_finding(o: &OriginAnswer) -> Option<Finding> {
         code: "web_origin_cert_not_verified",
         severity: Severity::Info,
         title: "Origin certificate was not verified".into(),
-        message: format!("The origin {} was asked with --insecure-origin, so its certificate was not verified. {seen}", o.ip),
+        message: format!(
+            "The origin {} was asked with --insecure-origin, so its certificate was not verified. {seen}",
+            o.ip
+        ),
         recommendation: None,
     })
 }
@@ -62,7 +74,11 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
         let mut msg = format!("{} could not be loaded: {e}.", r.url);
         if let Some(last) = r.chain.last() {
             // It answered, but a redirect led somewhere that failed.
-            msg = format!("{} redirects to {}, which failed: {e}.", last.url, last.location.as_deref().unwrap_or_default());
+            msg = format!(
+                "{} redirects to {}, which failed: {e}.",
+                last.url,
+                last.location.as_deref().unwrap_or_default()
+            );
         } else if let Some(h) = &r.https_error {
             msg = format!("Neither HTTPS nor HTTP answered. HTTPS: {h}; HTTP: {e}.");
         }
@@ -126,7 +142,13 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
             Some("Check the document root, index file, and access or firewall rules (a 403 can be a WAF blocking automated requests)."),
         ));
     } else if (200..300).contains(&status) {
-        out.push(finding("website_inspection_healthy", Severity::Ok, "Site is up", format!("{final_url} answered HTTP {status} in {} ms.", r.time_ms), None));
+        out.push(finding(
+            "website_inspection_healthy",
+            Severity::Ok,
+            "Site is up",
+            format!("{final_url} answered HTTP {status} in {} ms.", r.time_ms),
+            None,
+        ));
     }
     if let Some(e) = &r.https_error {
         out.push(finding(
@@ -161,13 +183,18 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
                     "website_inspection_missing_hsts",
                     Warning,
                     "No HSTS",
-                    "The site does not send Strict-Transport-Security, so browsers may still try plain HTTP first.".into(),
+                    "The site does not send Strict-Transport-Security, so browsers may still try plain HTTP first."
+                        .into(),
                     Some("Add Strict-Transport-Security: max-age=31536000 once HTTPS works everywhere on the site."),
                 ));
             }
         }
         if !missing.is_empty() {
-            let title = if missing.len() == 1 { "Missing 1 security header".to_string() } else { format!("Missing {} security headers", missing.len()) };
+            let title = if missing.len() == 1 {
+                "Missing 1 security header".to_string()
+            } else {
+                format!("Missing {} security headers", missing.len())
+            };
             out.push(finding(
                 "website_inspection_missing_headers",
                 Info,
@@ -197,7 +224,13 @@ fn provider_findings(r: &WebResult) -> Vec<Finding> {
             ProviderKind::Cdn => ("website_cdn_detected", format!("Served through {}", d.provider)),
             ProviderKind::Host => ("website_host_detected", format!("Hosted on {}", d.provider)),
         };
-        out.push(finding(code, Severity::Info, title, format!("{} points to {} ({}).", h.host, d.provider, d.evidence.join("; ")), None));
+        out.push(finding(
+            code,
+            Severity::Info,
+            title,
+            format!("{} points to {} ({}).", h.host, d.provider, d.evidence.join("; ")),
+            None,
+        ));
     }
     if !h.asns.is_empty() {
         // One entry per AS, with the addresses in it; prefix and country stay in the JSON.
@@ -208,8 +241,19 @@ fn provider_findings(r: &WebResult) -> Vec<Finding> {
                 None => list.push((a.asn, a.name.as_deref(), vec![a.ip.to_string()])),
             }
         }
-        let text: Vec<String> = list.iter().map(|(asn, name, ips)| format!("AS{asn}{} ({})", name.map_or(String::new(), |n| format!(" {n}")), ips.join(", "))).collect();
-        out.push(finding("website_asn", Severity::Info, "Network that serves the site", format!("{} is announced by {}.", h.host, text.join("; ")), None));
+        let text: Vec<String> = list
+            .iter()
+            .map(|(asn, name, ips)| {
+                format!("AS{asn}{} ({})", name.map_or(String::new(), |n| format!(" {n}")), ips.join(", "))
+            })
+            .collect();
+        out.push(finding(
+            "website_asn",
+            Severity::Info,
+            "Network that serves the site",
+            format!("{} is announced by {}.", h.host, text.join("; ")),
+            None,
+        ));
     }
     if let Some(e) = &h.dns_error {
         out.push(finding(

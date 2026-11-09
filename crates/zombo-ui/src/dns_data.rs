@@ -25,7 +25,13 @@ pub fn nameserver_answers(rows: &[Row]) -> Option<Collapsed> {
     let mut summary = plural(servers.len(), "nameserver");
     match (serials.len(), serials.first()) {
         (1, Some(serial)) => {
-            let on = if servers.len() == 1 { "" } else if servers.len() == 2 { " on both" } else { " on all" };
+            let on = if servers.len() == 1 {
+                ""
+            } else if servers.len() == 2 {
+                " on both"
+            } else {
+                " on all"
+            };
             summary.push_str(&format!(" \u{b7} SOA serial {serial}{on}"));
         }
         (n, _) if n > 1 => summary.push_str(" \u{b7} SOA serials differ"),
@@ -72,7 +78,10 @@ mod tests {
         Row {
             resolver: name.into(),
             location: String::new(),
-            answers: answers.iter().map(|(t, vs)| (t.to_string(), vs.iter().map(|v| v.to_string()).collect())).collect(),
+            answers: answers
+                .iter()
+                .map(|(t, vs)| (t.to_string(), vs.iter().map(|v| v.to_string()).collect()))
+                .collect(),
             ttls: BTreeMap::new(),
             error: None,
             authoritative,
@@ -90,7 +99,10 @@ mod tests {
         let c = nameserver_answers(&rows).unwrap();
         assert_eq!(c.title, "Nameserver answers");
         assert_eq!(c.summary, "2 nameservers \u{b7} SOA serial 2026110902 on both");
-        assert_eq!(c.lines, vec![("ns1 TXT".to_string(), "\"a\"".to_string()), ("ns2 TXT".to_string(), "\"a\"".to_string())]);
+        assert_eq!(
+            c.lines,
+            vec![("ns1 TXT".to_string(), "\"a\"".to_string()), ("ns2 TXT".to_string(), "\"a\"".to_string())]
+        );
     }
 
     #[test]

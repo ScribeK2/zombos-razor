@@ -79,7 +79,22 @@ mod tests {
     #[test]
     fn rail_order_matches_the_design() {
         let labels: Vec<_> = Section::ALL.iter().map(|s| s.label()).collect();
-        assert_eq!(labels, ["Summary", "DNS", "Delegation", "DNSSEC", "Email", "Web", "TLS", "Registration", "Port scan", "SMTP banner", "Blacklist"]);
+        assert_eq!(
+            labels,
+            [
+                "Summary",
+                "DNS",
+                "Delegation",
+                "DNSSEC",
+                "Email",
+                "Web",
+                "TLS",
+                "Registration",
+                "Port scan",
+                "SMTP banner",
+                "Blacklist"
+            ]
+        );
     }
 
     #[test]

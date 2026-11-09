@@ -27,7 +27,16 @@ const fn sp(port: u16, service: &'static str) -> ServicePort {
 }
 
 /// The services a rep asks about first.
-pub const QUICK: &[ServicePort] = &[sp(80, "HTTP"), sp(443, "HTTPS"), sp(25, "SMTP"), sp(587, "Submission"), sp(993, "IMAPS"), sp(22, "SSH"), sp(21, "FTP"), sp(3306, "MySQL")];
+pub const QUICK: &[ServicePort] = &[
+    sp(80, "HTTP"),
+    sp(443, "HTTPS"),
+    sp(25, "SMTP"),
+    sp(587, "Submission"),
+    sp(993, "IMAPS"),
+    sp(22, "SSH"),
+    sp(21, "FTP"),
+    sp(3306, "MySQL"),
+];
 
 /// The ports a hosting, mail or database server commonly listens on.
 pub const FULL: &[ServicePort] = &[
@@ -120,7 +129,9 @@ impl Default for Timing {
 pub enum PortsError {
     #[error("could not resolve {0}: {1}")]
     Resolve(String, String),
-    #[error("{0} has no address this machine can reach (it has only IPv6 addresses and this machine has no IPv6 route)")]
+    #[error(
+        "{0} has no address this machine can reach (it has only IPv6 addresses and this machine has no IPv6 route)"
+    )]
     NoUsableAddress(String),
 }
 
@@ -166,7 +177,13 @@ fn classify(e: &io::Error) -> PortState {
 
 /// The first line of a greeting, printable characters only: it comes from the network.
 fn clean_banner(raw: &[u8]) -> Option<String> {
-    let line: String = String::from_utf8_lossy(raw).split('\n').next().unwrap_or("").chars().filter(|c| !c.is_control() && *c != '\u{fffd}').collect();
+    let line: String = String::from_utf8_lossy(raw)
+        .split('\n')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control() && *c != '\u{fffd}')
+        .collect();
     let line = line.trim();
     (!line.is_empty()).then(|| line.to_string())
 }
@@ -198,7 +215,15 @@ where
 {
     let mut out: Vec<PortProbe> = addresses
         .iter()
-        .flat_map(|&address| ports.iter().map(move |p| PortProbe { address, port: p.port, service: p.service, state: PortState::Filtered, banner: None }))
+        .flat_map(|&address| {
+            ports.iter().map(move |p| PortProbe {
+                address,
+                port: p.port,
+                service: p.service,
+                state: PortState::Filtered,
+                banner: None,
+            })
+        })
         .collect();
     let (connect, gate) = (Arc::new(connect), Arc::new(Semaphore::new(t.parallel.max(1))));
     let mut set = JoinSet::new();
@@ -224,7 +249,13 @@ pub async fn probe(addresses: &[IpAddr], ports: &[ServicePort], t: Timing) -> Po
     probe_with(TcpStream::connect, addresses, ports, t).await
 }
 
-fn finding(code: &'static str, severity: Severity, title: &'static str, message: String, recommendation: Option<&'static str>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: &'static str,
+    message: String,
+    recommendation: Option<&'static str>,
+) -> Finding {
     Finding { code, severity, title: Cow::Borrowed(title), message, recommendation: recommendation.map(Cow::Borrowed) }
 }
 
@@ -259,7 +290,14 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
     }
     // The addresses on which none of `ports` is open: a site open over IPv6
     // only still fails for most visitors.
-    let lacking = |ports: &[u16]| r.addresses.iter().filter(|a| !ports.iter().any(|p| open_on.contains(&(**a, *p)))).map(ToString::to_string).collect::<Vec<_>>().join(" and ");
+    let lacking = |ports: &[u16]| {
+        r.addresses
+            .iter()
+            .filter(|a| !ports.iter().any(|p| open_on.contains(&(**a, *p))))
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" and ")
+    };
     let addrs = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(" and ");
 
     // Outbound mail ports are blocked by many networks and hosting providers, so silence on
@@ -270,7 +308,9 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
             "hosting_reachability_mail_filtered",
             Severity::Info,
             "No answer on the mail ports",
-            format!("{addrs} did not answer on the mail ports probed. Many networks and hosting providers block outbound mail connections, so this may be the network doing the probing and not the server."),
+            format!(
+                "{addrs} did not answer on the mail ports probed. Many networks and hosting providers block outbound mail connections, so this may be the network doing the probing and not the server."
+            ),
             Some("Re-run from a network that allows outbound mail, or check the server's own mail logs."),
         )];
     }
@@ -284,9 +324,16 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
             msg += ": this network has no route to it.";
             rec = "Your own connection may lack a route (e.g. no IPv6); re-run from another network.";
         } else {
-            msg += &format!(" ({closed} refused, {filtered} got no answer, {no_route} had no route from this network).");
+            msg +=
+                &format!(" ({closed} refused, {filtered} got no answer, {no_route} had no route from this network).");
         }
-        return vec![finding("hosting_reachability_unreachable", Severity::Critical, "Host unreachable", msg, Some(rec))];
+        return vec![finding(
+            "hosting_reachability_unreachable",
+            Severity::Critical,
+            "Host unreachable",
+            msg,
+            Some(rec),
+        )];
     }
 
     let mut out = vec![];
@@ -334,10 +381,19 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
             "hosting_reachability_database_exposed",
             Severity::Warning,
             "Database open to the internet",
-            format!("{} accepts connections from anywhere, which invites brute-force and exploit attempts.", dbs.join(", ")),
+            format!(
+                "{} accepts connections from anywhere, which invites brute-force and exploit attempts.",
+                dbs.join(", ")
+            ),
             Some("Firewall database ports to the hosts that need them, or bind the database to localhost."),
         ));
     }
-    out.push(finding("hosting_reachability_reachable", Severity::Ok, "Reachable", format!("{addrs} answers on {}.", services.join(", ")), None));
+    out.push(finding(
+        "hosting_reachability_reachable",
+        Severity::Ok,
+        "Reachable",
+        format!("{addrs} answers on {}.", services.join(", ")),
+        None,
+    ));
     out
 }

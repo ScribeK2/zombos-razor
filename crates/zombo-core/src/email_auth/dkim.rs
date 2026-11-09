@@ -11,9 +11,43 @@ use super::{
 
 /// Selectors the common mail providers use.
 pub const DKIM_COMMON_SELECTORS: [&str; 37] = [
-    "default", "google", "selector1", "selector2", "k1", "k2", "k3", "s1", "s2", "mail", "dkim", "email", "smtp", "mandrill", "mailchimp", "mxvault",
-    "zoho", "protonmail", "protonmail2", "protonmail3", "fm1", "fm2", "fm3", "everlytickey1", "everlytickey2", "mailjet", "sendgrid", "smtpapi",
-    "amazonses", "mailgun", "mg", "pm", "zendesk1", "zendesk2", "hs1", "hs2", "mimecast",
+    "default",
+    "google",
+    "selector1",
+    "selector2",
+    "k1",
+    "k2",
+    "k3",
+    "s1",
+    "s2",
+    "mail",
+    "dkim",
+    "email",
+    "smtp",
+    "mandrill",
+    "mailchimp",
+    "mxvault",
+    "zoho",
+    "protonmail",
+    "protonmail2",
+    "protonmail3",
+    "fm1",
+    "fm2",
+    "fm3",
+    "everlytickey1",
+    "everlytickey2",
+    "mailjet",
+    "sendgrid",
+    "smtpapi",
+    "amazonses",
+    "mailgun",
+    "mg",
+    "pm",
+    "zendesk1",
+    "zendesk2",
+    "hs1",
+    "hs2",
+    "mimecast",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -96,7 +130,10 @@ pub fn parse_selectors(raw: &[String]) -> Result<Vec<String>, String> {
     for s in raw.iter().flat_map(|r| r.split([',', ';', ' ', '\t', '\n'])).filter(|s| !s.is_empty()) {
         let s = s.to_ascii_lowercase();
         let label = |l: &str| {
-            !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-') && !l.starts_with('-') && !l.ends_with('-')
+            !l.is_empty()
+                && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+                && !l.starts_with('-')
+                && !l.ends_with('-')
         };
         if !s.split('.').all(label) {
             return Err(format!("{s:?} is not a valid DKIM selector"));
@@ -114,7 +151,8 @@ pub fn parse_selectors(raw: &[String]) -> Result<Vec<String>, String> {
 /// Ask for `<selector>._domainkey.<domain>` for every common selector and the
 /// caller's (at most `MAX_CUSTOM_SELECTORS`), all at the same time.
 pub(crate) async fn dkim_audit(dns: Dns, domain: &str, custom: &[String]) -> DkimAudit {
-    let mut audit = DkimAudit { checked: DKIM_COMMON_SELECTORS.iter().map(ToString::to_string).collect(), ..Default::default() };
+    let mut audit =
+        DkimAudit { checked: DKIM_COMMON_SELECTORS.iter().map(ToString::to_string).collect(), ..Default::default() };
     for s in custom.iter().map(|s| s.to_ascii_lowercase()) {
         if audit.custom.len() == MAX_CUSTOM_SELECTORS {
             break;
@@ -134,7 +172,9 @@ pub(crate) async fn dkim_audit(dns: Dns, domain: &str, custom: &[String]) -> Dki
     let answers = concurrently(asked.collect()).await;
     for (sel, answer) in audit.checked.iter().zip(answers) {
         match answer {
-            Some(Ok(txt)) => audit.keys.extend(txt.records.iter().filter_map(|r| parse_dkim_key(sel, txt.cname.as_deref(), r))),
+            Some(Ok(txt)) => {
+                audit.keys.extend(txt.records.iter().filter_map(|r| parse_dkim_key(sel, txt.cname.as_deref(), r)))
+            }
             _ => audit.failed.push(sel.clone()),
         }
     }
@@ -303,7 +343,10 @@ mod tests {
 
     #[test]
     fn selectors_are_split_lowercased_and_made_distinct() {
-        assert_eq!(parse_selectors(&raw(&["Acme2024, other  google", "OTHER;a.b\tc_d-e\nx"])).unwrap(), ["acme2024", "other", "google", "a.b", "c_d-e", "x"]);
+        assert_eq!(
+            parse_selectors(&raw(&["Acme2024, other  google", "OTHER;a.b\tc_d-e\nx"])).unwrap(),
+            ["acme2024", "other", "google", "a.b", "c_d-e", "x"]
+        );
         assert!(parse_selectors(&[]).unwrap().is_empty());
         assert!(parse_selectors(&raw(&[" , ;"])).unwrap().is_empty());
     }
@@ -331,14 +374,21 @@ mod tests {
     fn rsa_key_sizes_are_read_from_the_modulus() {
         for bits in [512, 1024, 2048, 4096] {
             let k = key(&format!("v=DKIM1; k=rsa; p={}", spki(bits)));
-            assert_eq!((k.bits, k.error, k.revoked, k.key_type), (Some(bits as u32), None, false, KeyType::Rsa), "{bits}");
+            assert_eq!(
+                (k.bits, k.error, k.revoked, k.key_type),
+                (Some(bits as u32), None, false, KeyType::Rsa),
+                "{bits}"
+            );
         }
     }
 
     #[test]
     fn k_defaults_to_rsa_and_is_case_insensitive() {
         assert_eq!(key(&format!("p={}", spki(1024))).key_type, KeyType::Rsa);
-        assert_eq!(key("v=DKIM1; k=ED25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=").key_type, KeyType::Ed25519);
+        assert_eq!(
+            key("v=DKIM1; k=ED25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=").key_type,
+            KeyType::Ed25519
+        );
         assert_eq!(key("v=DKIM1; k=ecdsa; p=AAAA").key_type, KeyType::Other("ecdsa".into()));
     }
 
@@ -378,7 +428,10 @@ mod tests {
     #[test]
     fn flags_and_cname_are_kept() {
         let k = parse_dkim_key("sel", Some("k.provider.test"), "v=DKIM1; t=y:s; p=").unwrap();
-        assert_eq!((k.flags, k.cname.as_deref(), k.selector.as_str()), (DkimFlags { testing: true, strict: true }, Some("k.provider.test"), "sel"));
+        assert_eq!(
+            (k.flags, k.cname.as_deref(), k.selector.as_str()),
+            (DkimFlags { testing: true, strict: true }, Some("k.provider.test"), "sel")
+        );
         assert_eq!(key("v=DKIM1; p=").flags, DkimFlags::default());
     }
 
@@ -396,7 +449,13 @@ mod tests {
         for end in (0..s.len()).step_by(4) {
             cases.push(format!("v=DKIM1; p={}", &s[..end]));
         }
-        for len in [&[0x30u8, 0x84, 0xff, 0xff, 0xff, 0xff][..], &[0x30, 0x80], &[0x30, 0x82, 0x01], &[0x02, 0x00], &[0x30, 0x03, 0x02, 0x01, 0x00]] {
+        for len in [
+            &[0x30u8, 0x84, 0xff, 0xff, 0xff, 0xff][..],
+            &[0x30, 0x80],
+            &[0x30, 0x82, 0x01],
+            &[0x02, 0x00],
+            &[0x30, 0x03, 0x02, 0x01, 0x00],
+        ] {
             cases.push(format!("v=DKIM1; p={}", b64(len)));
         }
         for c in cases {

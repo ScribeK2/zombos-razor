@@ -24,7 +24,10 @@ mod tests {
     fn a_notice_is_made_only_when_the_setting_is_on() {
         let on = Settings::default();
         let off = Settings { notifications: false, ..Settings::default() };
-        assert_eq!(watch_notice(&on, "example.com DNS changed").map(|n| n.1).as_deref(), Some("example.com DNS changed"));
+        assert_eq!(
+            watch_notice(&on, "example.com DNS changed").map(|n| n.1).as_deref(),
+            Some("example.com DNS changed")
+        );
         assert_eq!(watch_notice(&off, "example.com DNS changed"), None);
     }
 

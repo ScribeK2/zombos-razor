@@ -65,7 +65,15 @@ struct Binding {
     label: &'static str,
 }
 
-const fn bind(key: &'static str, ctrl: bool, alt: bool, shift: bool, when: When, action: Action, label: &'static str) -> Binding {
+const fn bind(
+    key: &'static str,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    when: When,
+    action: Action,
+    label: &'static str,
+) -> Binding {
     Binding { key, ctrl, alt, shift, when, action, label }
 }
 
@@ -112,10 +120,7 @@ pub struct Entry {
 }
 
 pub fn entries() -> Vec<Entry> {
-    BINDINGS
-        .iter()
-        .map(|b| Entry { action: b.action, label: b.label, shortcut: shortcut_text(b) })
-        .collect()
+    BINDINGS.iter().map(|b| Entry { action: b.action, label: b.label, shortcut: shortcut_text(b) }).collect()
 }
 
 fn shortcut_text(b: &Binding) -> String {
@@ -276,8 +281,14 @@ mod tests {
         assert_eq!(action_for(Mode::Browse, false, press("c", true, true, false)), Some(Action::CopyAll));
         let entries = entries();
         let shown = |a: Action| entries.iter().find(|e| e.action == a).map(|e| (e.label, e.shortcut.clone()));
-        assert_eq!(shown(Action::OpenEvidence(Kind::Headers)), Some(("Analyse pasted headers", "Ctrl+Shift+H".to_string())));
-        assert_eq!(shown(Action::OpenEvidence(Kind::MailLog)), Some(("Analyse pasted mail log", "Ctrl+Shift+M".to_string())));
+        assert_eq!(
+            shown(Action::OpenEvidence(Kind::Headers)),
+            Some(("Analyse pasted headers", "Ctrl+Shift+H".to_string()))
+        );
+        assert_eq!(
+            shown(Action::OpenEvidence(Kind::MailLog)),
+            Some(("Analyse pasted mail log", "Ctrl+Shift+M".to_string()))
+        );
         assert_eq!(shown(Action::Analyse).map(|s| s.1).as_deref(), Some("Ctrl+Enter"));
         let mut seen = std::collections::HashSet::new();
         assert!(entries.iter().all(|e| seen.insert(e.shortcut.clone())), "two actions share a shortcut");
@@ -287,7 +298,10 @@ mod tests {
     fn copy_as_json_has_a_key_and_a_palette_entry() {
         assert_eq!(action_for(Mode::Browse, false, press("j", true, false, true)), Some(Action::CopyJson));
         let e = entries();
-        assert_eq!(e.iter().find(|e| e.action == Action::CopyJson).map(|e| (e.label, e.shortcut.as_str())), Some(("Copy section as JSON", "Ctrl+Shift+J")));
+        assert_eq!(
+            e.iter().find(|e| e.action == Action::CopyJson).map(|e| (e.label, e.shortcut.as_str())),
+            Some(("Copy section as JSON", "Ctrl+Shift+J"))
+        );
     }
 
     #[test]
@@ -343,7 +357,10 @@ mod tests {
         assert_eq!(action_for(Mode::Settings, false, ctrl(",")), Some(Action::Settings));
         assert_eq!(action_for(Mode::Settings, false, plain("escape")), Some(Action::Dismiss));
         let e = entries();
-        assert_eq!(e.iter().find(|e| e.action == Action::Settings).map(|e| (e.label, e.shortcut.as_str())), Some(("Settings", "Ctrl+,")));
+        assert_eq!(
+            e.iter().find(|e| e.action == Action::Settings).map(|e| (e.label, e.shortcut.as_str())),
+            Some(("Settings", "Ctrl+,"))
+        );
     }
 
     #[test]

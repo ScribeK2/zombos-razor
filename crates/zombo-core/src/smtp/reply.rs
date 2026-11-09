@@ -113,7 +113,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
             self.stream.write_all(b"\r\n").await?;
             self.stream.flush().await
         };
-        timeout(step, io).await.map_err(|_| ReplyError::TimedOut(step.as_secs().max(1)))?.map_err(|e| ReplyError::Io(printable(&e.to_string())))
+        timeout(step, io)
+            .await
+            .map_err(|_| ReplyError::TimedOut(step.as_secs().max(1)))?
+            .map_err(|e| ReplyError::Io(printable(&e.to_string())))
     }
 }
 
@@ -181,7 +184,9 @@ impl Extensions {
 /// The host name a 220 greeting opens with ("mail.example.com ESMTP ready"), lower case; none when it opens with anything else.
 pub fn banner_host(first_line: &str) -> Option<String> {
     let word = first_line.split_whitespace().next()?.trim_end_matches('.').to_ascii_lowercase();
-    let looks_like_name = word.contains('.') && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')) && word.parse::<std::net::IpAddr>().is_err();
+    let looks_like_name = word.contains('.')
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
+        && word.parse::<std::net::IpAddr>().is_err();
     looks_like_name.then_some(word)
 }
 
@@ -195,7 +200,15 @@ mod tests {
 
     #[test]
     fn extensions_are_read_case_insensitively_and_bounded() {
-        let e = Extensions::parse(&lines(&["mx.test Hello", "starttls", "SIZE 52428800", "AUTH PLAIN login PLAIN", "PIPELINING", "8BITMIME", "ENHANCEDSTATUSCODES"]));
+        let e = Extensions::parse(&lines(&[
+            "mx.test Hello",
+            "starttls",
+            "SIZE 52428800",
+            "AUTH PLAIN login PLAIN",
+            "PIPELINING",
+            "8BITMIME",
+            "ENHANCEDSTATUSCODES",
+        ]));
         assert!(e.starttls && e.pipelining && e.eight_bit_mime);
         assert_eq!(e.size, Some(52_428_800));
         assert_eq!(e.auth, ["PLAIN", "LOGIN"]);

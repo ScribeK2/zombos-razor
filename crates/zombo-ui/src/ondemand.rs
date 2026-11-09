@@ -36,7 +36,11 @@ pub fn run_label(section: Section) -> Option<&'static str> {
 }
 
 pub fn brief(section: Section) -> Option<Brief> {
-    let brief = |what: &str, contacts: String, note: &'static str| Brief { what: what.into(), contacts, note: Some(note).filter(|n| !n.is_empty()) };
+    let brief = |what: &str, contacts: String, note: &'static str| Brief {
+        what: what.into(),
+        contacts,
+        note: Some(note).filter(|n| !n.is_empty()),
+    };
     match section {
         Section::Ports => {
             let ports = QUICK.iter().map(|p| p.port.to_string()).collect::<Vec<_>>().join(", ");

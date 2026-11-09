@@ -73,7 +73,15 @@ pub enum Mechanism {
 impl Mechanism {
     /// Whether the term costs a DNS lookup against the limit of ten.
     pub fn is_lookup(&self) -> bool {
-        matches!(self, Mechanism::Include(_) | Mechanism::Redirect(_) | Mechanism::A(_) | Mechanism::Mx(_) | Mechanism::Ptr(_) | Mechanism::Exists(_))
+        matches!(
+            self,
+            Mechanism::Include(_)
+                | Mechanism::Redirect(_)
+                | Mechanism::A(_)
+                | Mechanism::Mx(_)
+                | Mechanism::Ptr(_)
+                | Mechanism::Exists(_)
+        )
     }
 }
 
@@ -160,7 +168,9 @@ impl fmt::Display for SpfError {
             SpfError::TooManyTerms { domain } => write!(f, "{domain}: more than {MAX_TERMS} terms"),
             SpfError::Loop { kind, domain } => write!(f, "{kind} loops back to {domain}"),
             SpfError::NoRecord { kind, domain } => write!(f, "{kind} target {domain} has no SPF record"),
-            SpfError::MultipleRecords { kind, domain, count } => write!(f, "{kind} target {domain} has {count} SPF records"),
+            SpfError::MultipleRecords { kind, domain, count } => {
+                write!(f, "{kind} target {domain} has {count} SPF records")
+            }
             SpfError::TooManyVoids(n) => write!(f, "{n} void lookups (limit {MAX_VOIDS})"),
         }
     }
@@ -175,7 +185,10 @@ pub struct ParsedSpf {
 
 /// Every `v=spf1` record among a name's TXT records.
 pub fn spf_records(txts: &[String]) -> Vec<String> {
-    txts.iter().filter(|t| t.split_whitespace().next().is_some_and(|v| v.eq_ignore_ascii_case("v=spf1"))).cloned().collect()
+    txts.iter()
+        .filter(|t| t.split_whitespace().next().is_some_and(|v| v.eq_ignore_ascii_case("v=spf1")))
+        .cloned()
+        .collect()
 }
 
 /// Parse one SPF record. `domain` only labels the errors.
@@ -226,7 +239,10 @@ pub fn parse_spf(domain: &str, record: &str) -> ParsedSpf {
             "include" | "exists" => {
                 let include = lower == "include";
                 if rest.is_empty() {
-                    out.errors.push(SpfError::MissingDomain { domain: d(), mechanism: if include { "include" } else { "exists" } });
+                    out.errors.push(SpfError::MissingDomain {
+                        domain: d(),
+                        mechanism: if include { "include" } else { "exists" },
+                    });
                 }
                 if include { Mechanism::Include(rest.into()) } else { Mechanism::Exists(rest.into()) }
             }
@@ -420,7 +436,11 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
                 let query = match &t.mechanism {
                     // A macro expands per message: nothing to resolve.
                     Mechanism::Include(v) | Mechanism::Redirect(v) if !v.is_empty() && !v.contains('%') => {
-                        let kind = if matches!(t.mechanism, Mechanism::Include(_)) { RefKind::Include } else { RefKind::Redirect };
+                        let kind = if matches!(t.mechanism, Mechanism::Include(_)) {
+                            RefKind::Include
+                        } else {
+                            RefKind::Redirect
+                        };
                         let target = v.strip_suffix('.').unwrap_or(v).to_ascii_lowercase();
                         if path.contains(&target) {
                             audit.errors.push(SpfError::Loop { kind, domain: target.clone() });
@@ -474,7 +494,11 @@ pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
                                 1 => slot.record = recs.pop(),
                                 n => {
                                     slot.error = Some(NodeError::MultipleRecords);
-                                    audit.errors.push(SpfError::MultipleRecords { kind: *kind, domain: target.clone(), count: n });
+                                    audit.errors.push(SpfError::MultipleRecords {
+                                        kind: *kind,
+                                        domain: target.clone(),
+                                        count: n,
+                                    });
                                 }
                             }
                         }
@@ -513,7 +537,12 @@ fn build(arena: &mut [Slot], i: usize) -> SpfNode {
     for (term, child) in children {
         terms[term].target = Some(Box::new(build(arena, child)));
     }
-    SpfNode { domain: std::mem::take(&mut arena[i].domain), record: arena[i].record.take(), terms, error: arena[i].error.take() }
+    SpfNode {
+        domain: std::mem::take(&mut arena[i].domain),
+        record: arena[i].record.take(),
+        terms,
+        error: arena[i].error.take(),
+    }
 }
 
 #[cfg(test)]
@@ -581,7 +610,8 @@ mod tests {
 
     #[test]
     fn a_bad_ip_prefix_is_an_error() {
-        for bad in ["ip4:192.0.2.0/33", "ip4:192.0.2.0/", "ip4:192.0.2.0/+8", "ip6:::1/129", "ip4:", "ip4:192.0.2.0/-1"] {
+        for bad in ["ip4:192.0.2.0/33", "ip4:192.0.2.0/", "ip4:192.0.2.0/+8", "ip6:::1/129", "ip4:", "ip4:192.0.2.0/-1"]
+        {
             assert_eq!(p(&format!("v=spf1 {bad}")).errors.len(), 1, "{bad}");
         }
     }
@@ -602,7 +632,10 @@ mod tests {
 
     #[test]
     fn only_v_spf1_records_count_and_case_is_ignored() {
-        let txts: Vec<String> = ["v=spf1 -all", "V=SPF1 ~all", "v=spf10 -all", "google-site-verification=x", "", "  v=spf1", "xv=spf1"].map(Into::into).into();
+        let txts: Vec<String> =
+            ["v=spf1 -all", "V=SPF1 ~all", "v=spf10 -all", "google-site-verification=x", "", "  v=spf1", "xv=spf1"]
+                .map(Into::into)
+                .into();
         assert_eq!(spf_records(&txts), ["v=spf1 -all", "V=SPF1 ~all", "  v=spf1"]);
     }
 
@@ -623,7 +656,18 @@ mod tests {
         let long = format!("v=spf1 {}", "x".repeat(65_000));
         assert!(errs(&long)[0].len() < 200);
         // Garbage, controls, multibyte text and lone qualifiers.
-        for junk in ["v=spf1 +", "v=spf1 ~ ? -", "v=spf1 \u{0}\u{1b}[31m", "v=spf1 =:/", "v=spf1 :::", "v=spf1 /", "v=spf1 é:ü/ö", "v=spf1 a:/", "v=spf1 mx//64", "v=spf1 \u{85}\u{2028}x"] {
+        for junk in [
+            "v=spf1 +",
+            "v=spf1 ~ ? -",
+            "v=spf1 \u{0}\u{1b}[31m",
+            "v=spf1 =:/",
+            "v=spf1 :::",
+            "v=spf1 /",
+            "v=spf1 é:ü/ö",
+            "v=spf1 a:/",
+            "v=spf1 mx//64",
+            "v=spf1 \u{85}\u{2028}x",
+        ] {
             let _ = p(junk);
         }
     }
@@ -646,7 +690,10 @@ mod tests {
         assert_eq!(effective_all(&node(vec![all(Qualifier::Fail)])), EffectiveAll::All(Qualifier::Fail));
         assert_eq!(effective_all(&node(vec![])), EffectiveAll::Absent);
         let via = |target| node(vec![term(Qualifier::Pass, Mechanism::Redirect("r.test".into()), target)]);
-        assert_eq!(effective_all(&via(Some(node(vec![all(Qualifier::SoftFail)])))), EffectiveAll::All(Qualifier::SoftFail));
+        assert_eq!(
+            effective_all(&via(Some(node(vec![all(Qualifier::SoftFail)])))),
+            EffectiveAll::All(Qualifier::SoftFail)
+        );
         assert_eq!(effective_all(&via(None)), EffectiveAll::Unknown);
         let mut broken = node(vec![]);
         broken.error = Some(NodeError::NoRecord);

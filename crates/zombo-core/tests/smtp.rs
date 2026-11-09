@@ -20,7 +20,8 @@ const HOST: &str = "mail.example.test";
 fn options(mode: Mode) -> SmtpOptions {
     let mut o = SmtpOptions::for_port(25);
     o.mode = mode;
-    o.timing = Timing { connect: Duration::from_secs(2), step: Duration::from_secs(2), overall: Duration::from_secs(6) };
+    o.timing =
+        Timing { connect: Duration::from_secs(2), step: Duration::from_secs(2), overall: Duration::from_secs(6) };
     o
 }
 
@@ -37,7 +38,8 @@ fn server(ca: &Ca, sans: &[&str]) -> std::sync::Arc<rustls::ServerConfig> {
     pki::server_config(vec![leaf.der], leaf.key)
 }
 
-const EHLO_PLAIN: &str = "250-mail.example.test\r\n250-PIPELINING\r\n250-SIZE 35882577\r\n250-8BITMIME\r\n250 STARTTLS\r\n";
+const EHLO_PLAIN: &str =
+    "250-mail.example.test\r\n250-PIPELINING\r\n250-SIZE 35882577\r\n250-8BITMIME\r\n250 STARTTLS\r\n";
 
 fn starttls_script(ehlo_before: &str, cfg: std::sync::Arc<rustls::ServerConfig>) -> Vec<Step> {
     vec![
@@ -191,17 +193,30 @@ async fn a_greeting_that_is_not_220_stops_the_dialogue() {
 
 #[tokio::test]
 async fn the_greeting_name_is_compared_with_the_expected_names() {
-    let srv = FakeSmtp::start(vec![say("220 smtp.other.test ESMTP\r\n"), Step::Expect("EHLO"), say("250 smtp.other.test\r\n"), Step::Expect("QUIT")]).await;
+    let srv = FakeSmtp::start(vec![
+        say("220 smtp.other.test ESMTP\r\n"),
+        Step::Expect("EHLO"),
+        say("250 smtp.other.test\r\n"),
+        Step::Expect("QUIT"),
+    ])
+    .await;
     let r = run(srv.addr, &options(Mode::Starttls), &RootCertStore::empty()).await;
     let expect = vec![HOST.to_string(), "ptr.example.test.".to_string()];
     let fs = smtp_findings_at(&r, &expect, NOW);
     let f = fs.iter().find(|f| f.code == "smtp_banner_name_mismatch").unwrap();
     assert_eq!(f.severity, Severity::Info);
-    assert!(f.message.contains("smtp.other.test") && f.message.contains("mail.example.test, ptr.example.test"), "{}", f.message);
+    assert!(
+        f.message.contains("smtp.other.test") && f.message.contains("mail.example.test, ptr.example.test"),
+        "{}",
+        f.message
+    );
 
     let same = vec!["SMTP.Other.Test.".to_string()];
     assert!(!codes(&smtp_findings_at(&r, &same, NOW)).contains(&"smtp_banner_name_mismatch"));
-    assert!(!codes(&smtp_findings_at(&r, &[], NOW)).contains(&"smtp_banner_name_mismatch"), "no names to compare, no finding");
+    assert!(
+        !codes(&smtp_findings_at(&r, &[], NOW)).contains(&"smtp_banner_name_mismatch"),
+        "no names to compare, no finding"
+    );
 }
 
 async fn hostile(script: Vec<Step>) -> SmtpResult {
@@ -226,7 +241,9 @@ async fn hostile_replies_are_refused_without_panic() {
     let r = hostile(vec![say("220-a\r\n250 b\r\n")]).await;
     assert!(r.failure.as_ref().unwrap().message.contains("not an SMTP reply"), "{:?}", r.failure);
 
-    for junk in [&b"\x00\x01\x02\xff\xfe\r\n"[..], b"HTTP/1.1 400 Bad Request\r\n", b"\r\n", b"999 nope\r\n", b"220x\r\n"] {
+    for junk in
+        [&b"\x00\x01\x02\xff\xfe\r\n"[..], b"HTTP/1.1 400 Bad Request\r\n", b"\r\n", b"999 nope\r\n", b"220x\r\n"]
+    {
         let r = hostile(vec![Step::Raw(junk.to_vec())]).await;
         assert!(r.failure.is_some(), "{junk:?}");
         assert_eq!(r.reach, Reach::Answered);
@@ -235,7 +252,13 @@ async fn hostile_replies_are_refused_without_panic() {
 
 #[tokio::test]
 async fn control_characters_never_reach_a_finding() {
-    let r = hostile(vec![say("220 mail.example.test \x1b[31mESMTP\x07\r\n"), Step::Expect("EHLO"), say("554 \x1b[2Jgo away\r\n"), Step::Close]).await;
+    let r = hostile(vec![
+        say("220 mail.example.test \x1b[31mESMTP\x07\r\n"),
+        Step::Expect("EHLO"),
+        say("554 \x1b[2Jgo away\r\n"),
+        Step::Close,
+    ])
+    .await;
     let fs = smtp_findings_at(&r, &[], NOW);
     for f in &fs {
         assert!(!f.message.chars().any(char::is_control), "{:?}", f.message);
@@ -271,7 +294,8 @@ async fn a_silent_server_is_reported_as_no_greeting() {
 async fn a_server_that_never_finishes_a_reply_hits_the_overall_deadline() {
     let srv = FakeSmtp::start(vec![say("220-hello\r\n"), Step::Drip(Duration::from_millis(50))]).await;
     let mut o = options(Mode::Starttls);
-    o.timing = Timing { connect: Duration::from_secs(2), step: Duration::from_secs(30), overall: Duration::from_millis(600) };
+    o.timing =
+        Timing { connect: Duration::from_secs(2), step: Duration::from_secs(30), overall: Duration::from_millis(600) };
     let started = Instant::now();
     let r = run(srv.addr, &o, &RootCertStore::empty()).await;
     assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
@@ -322,7 +346,12 @@ async fn an_ehlo_name_that_could_inject_commands_is_refused_before_connecting() 
 
 #[tokio::test]
 async fn a_server_that_rejects_ehlo_is_reported() {
-    let r = hostile(vec![say("220 mail.example.test ESMTP\r\n"), Step::Expect("EHLO"), say("502 5.5.2 command not recognized\r\n")]).await;
+    let r = hostile(vec![
+        say("220 mail.example.test ESMTP\r\n"),
+        Step::Expect("EHLO"),
+        say("502 5.5.2 command not recognized\r\n"),
+    ])
+    .await;
     assert_eq!(r.failure.as_ref().unwrap().stage, Stage::Ehlo);
     assert_eq!(codes(&smtp_findings_at(&r, &[], NOW)), ["smtp_protocol_error"]);
 }

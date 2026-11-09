@@ -30,7 +30,11 @@ pub fn cname(name: &str, to: &str) -> Record {
 }
 
 pub fn mx(name: &str, preference: u16, host: &str) -> Record {
-    Record::from_rdata(Name::from_ascii(name).unwrap(), 300, RData::MX(MX::new(preference, Name::from_ascii(host).unwrap())))
+    Record::from_rdata(
+        Name::from_ascii(name).unwrap(),
+        300,
+        RData::MX(MX::new(preference, Name::from_ascii(host).unwrap())),
+    )
 }
 
 pub fn ptr(name: &str, to: &str) -> Record {

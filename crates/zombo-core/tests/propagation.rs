@@ -15,9 +15,10 @@ fn codes(fs: &[zombo_core::Finding]) -> Vec<&str> {
 #[tokio::test]
 async fn agrees_when_every_resolver_matches() {
     let (a, b) = (FakeDns::start(&zone("example")).await, FakeDns::start(&zone("example")).await);
-    let res = propagation(&[resolver("One", &a), resolver("Two", &b)], "example.com", Scope::All, Duration::from_millis(500))
-        .await
-        .unwrap();
+    let res =
+        propagation(&[resolver("One", &a), resolver("Two", &b)], "example.com", Scope::All, Duration::from_millis(500))
+            .await
+            .unwrap();
     assert_eq!(res.resolvers.len(), 2);
     assert!(res.disagree.is_empty(), "{:?}", res.disagree);
     assert_eq!(res.resolvers[0].answers["MX"], ["10 mail.example.com."]);
@@ -65,7 +66,9 @@ async fn differing_addresses_are_info_not_a_warning() {
 async fn a_failed_query_on_one_resolver_is_not_a_disagreement() {
     let one = FakeDns::start(&zone("example")).await;
     let refused = FakeDns::start(&zone("example")).await.refuse(RecordType::TXT);
-    let res = propagation(&[resolver("One", &one), resolver("TXT refused", &refused)], "example.com", Scope::All, T).await.unwrap();
+    let res = propagation(&[resolver("One", &one), resolver("TXT refused", &refused)], "example.com", Scope::All, T)
+        .await
+        .unwrap();
     assert!(!res.disagree.contains(&"TXT".into()), "{:?}", res.disagree);
     assert_eq!(res.resolvers[1].failed, ["TXT"]);
     assert!(!codes(&propagation_findings("example.com", &res)).contains(&"dns_propagation_mismatch"));
@@ -74,9 +77,14 @@ async fn a_failed_query_on_one_resolver_is_not_a_disagreement() {
 #[tokio::test]
 async fn too_few_answers_cannot_be_called_propagated() {
     let (one, down) = (FakeDns::start(&zone("example")).await, FakeDns::silent().await);
-    let res = propagation(&[resolver("One", &one), resolver("Down", &down)], "example.com", Scope::All, Duration::from_millis(300))
-        .await
-        .unwrap();
+    let res = propagation(
+        &[resolver("One", &one), resolver("Down", &down)],
+        "example.com",
+        Scope::All,
+        Duration::from_millis(300),
+    )
+    .await
+    .unwrap();
     let fs = propagation_findings("example.com", &res);
     let c = codes(&fs);
     assert!(!c.contains(&"dns_propagation_consistent") && c.contains(&"dns_propagation_insufficient"), "{c:?}");
@@ -86,7 +94,9 @@ async fn too_few_answers_cannot_be_called_propagated() {
 #[tokio::test]
 async fn no_resolver_answering_is_an_error() {
     let down = FakeDns::silent().await;
-    let err = propagation(&[resolver("Down", &down)], "example.com", Scope::All, Duration::from_millis(300)).await.unwrap_err();
+    let err = propagation(&[resolver("Down", &down)], "example.com", Scope::All, Duration::from_millis(300))
+        .await
+        .unwrap_err();
     assert!(matches!(err, PropagationError::NoneAnswered));
 }
 
@@ -132,9 +142,14 @@ async fn reports_the_ttl_each_resolver_returned() {
 async fn reports_each_resolver_as_it_answers() {
     let (a, down) = (FakeDns::start(&zone("example")).await, FakeDns::silent().await);
     let mut seen = vec![];
-    propagation_with(&[resolver("Down", &down), resolver("Fast", &a)], &[], "example.com", Scope::Web, Duration::from_millis(400), |r| {
-        seen.push(r.vantage.name.clone())
-    })
+    propagation_with(
+        &[resolver("Down", &down), resolver("Fast", &a)],
+        &[],
+        "example.com",
+        Scope::Web,
+        Duration::from_millis(400),
+        |r| seen.push(r.vantage.name.clone()),
+    )
     .await
     .unwrap();
     assert_eq!(seen, ["Fast", "Down"], "the fast resolver is reported before the one that times out");

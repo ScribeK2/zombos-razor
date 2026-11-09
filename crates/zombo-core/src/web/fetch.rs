@@ -14,8 +14,8 @@ use serde::Serialize;
 use ureq::{
     Agent,
     config::Config,
-    tls::{Certificate, RootCerts, TlsConfig},
     http::Uri,
+    tls::{Certificate, RootCerts, TlsConfig},
     unversioned::{
         resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
         transport::{DefaultConnector, NextTimeout},
@@ -153,9 +153,13 @@ fn cert_rejection(e: &ureq::Error) -> Option<String> {
     match rustls {
         rustls::Error::InvalidCertificate(reason) => Some(match reason {
             CertificateError::Expired | CertificateError::ExpiredContext { .. } => "it has expired".to_string(),
-            CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => "it is not valid yet".to_string(),
+            CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
+                "it is not valid yet".to_string()
+            }
             CertificateError::UnknownIssuer => "it is not signed by a trusted authority".to_string(),
-            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => "it is not valid for the site name".to_string(),
+            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
+                "it is not valid for the site name".to_string()
+            }
             other => printable(&format!("{other:?}")),
         }),
         _ => None,
@@ -202,7 +206,12 @@ pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration, tls: 
         };
         f.elapsed = started.elapsed();
         let status = resp.status().as_u16();
-        f.headers = resp.headers().iter().take(MAX_HEADERS).map(|(n, v)| (n.as_str().to_ascii_lowercase(), clean(v.as_bytes()))).collect();
+        f.headers = resp
+            .headers()
+            .iter()
+            .take(MAX_HEADERS)
+            .map(|(n, v)| (n.as_str().to_ascii_lowercase(), clean(v.as_bytes())))
+            .collect();
         let location = f.header("location").filter(|l| !l.is_empty()).map(str::to_string);
         f.chain.push(Hop { url: url.clone(), status, location: location.clone() });
 

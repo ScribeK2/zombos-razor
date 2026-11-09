@@ -19,18 +19,24 @@ const MAX_REJECTIONS: usize = 50_000;
 /// Findings of one code shown; the rest are counted in one summary Finding.
 const FINDING_CAP: usize = 10;
 
-static POSTFIX_TAG: LazyLock<Regex> =
-    LazyLock::new(|| re(r"postfix(?:/[\w.-]+)*/(smtpd|cleanup|qmgr|smtp|lmtp|local|virtual|pipe|error|discard|bounce|pickup)\[\d+\]:\s*(.*)$"));
+static POSTFIX_TAG: LazyLock<Regex> = LazyLock::new(|| {
+    re(
+        r"postfix(?:/[\w.-]+)*/(smtpd|cleanup|qmgr|smtp|lmtp|local|virtual|pipe|error|discard|bounce|pickup)\[\d+\]:\s*(.*)$",
+    )
+});
 static DOVECOT_TAG: LazyLock<Regex> = LazyLock::new(|| re(r"\bdovecot(?:\[\d+\])?:\s*(.*)$"));
 /// A record starts with a timestamp or carries a Postfix/Dovecot tag; a
 /// hard-wrapped fragment has neither.
 static RECORD_START: LazyLock<Regex> = LazyLock::new(|| {
-    re(r"^\s*(?:\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})|\b(?:postfix|dovecot)(?:/[\w.-]+)*(?:\[\d+\])?:")
+    re(
+        r"^\s*(?:\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})|\b(?:postfix|dovecot)(?:/[\w.-]+)*(?:\[\d+\])?:",
+    )
 });
 /// `warning:`, `error:`, `statistics:` and `NOQUEUE:` are not queue ids.
 static NOT_QUEUE_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:[a-z]+|NOQUEUE)$"));
 static QUEUE_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^([0-9A-Za-z]{6,}):\s*(.*)$"));
-static ISO_STAMP: LazyLock<Regex> = LazyLock::new(|| re(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"));
+static ISO_STAMP: LazyLock<Regex> =
+    LazyLock::new(|| re(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"));
 static SYSLOG_STAMP: LazyLock<Regex> = LazyLock::new(|| re(r"\b([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\b"));
 static CLIENT: LazyLock<Regex> = LazyLock::new(|| re(r"client=([^\s\[]+)\[(?:IPv6:)?([0-9a-fA-F.:]+)\]"));
 static MESSAGE_ID: LazyLock<Regex> = LazyLock::new(|| re(r"message-id=(<[^>]*>|\S+)"));
@@ -154,7 +160,9 @@ impl Reason {
             Self::MailboxMissing => "Recipient mailbox doesn't exist at the receiving server",
             Self::DomainMissing => "Recipient domain doesn't exist or has no working MX",
             Self::MailboxFull => "Recipient mailbox is full (over quota)",
-            Self::SenderPolicy => "Rejected by the receiving server's policy on the sender's reverse DNS, DMARC or authentication",
+            Self::SenderPolicy => {
+                "Rejected by the receiving server's policy on the sender's reverse DNS, DMARC or authentication"
+            }
             Self::Greylisted => "Greylisted or rate-limited; temporary, Postfix will retry",
             Self::Policy => "Rejected by the receiving server's policy (spam, blocklist or policy)",
             Self::ConnectFailed => "Could not connect to the recipient's server; temporary, Postfix will retry",
@@ -222,20 +230,47 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     vec![
         // Not "Recipient address rejected": Postfix prefixes many refusals with it
         // (greylisting, access denied), so it says nothing about the mailbox.
-        rule(Reason::MailboxMissing, Needs::Any, vec![Test::DsnPrefix(&["5.1.1", "5.1.0"]), Test::Reply(ci("user unknown|unknown user|no such user|does not exist"))]),
+        rule(
+            Reason::MailboxMissing,
+            Needs::Any,
+            vec![
+                Test::DsnPrefix(&["5.1.1", "5.1.0"]),
+                Test::Reply(ci("user unknown|unknown user|no such user|does not exist")),
+            ],
+        ),
         rule(Reason::DomainMissing, Needs::Any, vec![Test::DsnPrefix(&["5.1.2"])]),
-        rule(Reason::MailboxFull, Needs::Any, vec![Test::DsnIs(&["5.2.2", "4.2.2"]), Test::Reply(ci(r"mailbox full|over\s?quota"))]),
+        rule(
+            Reason::MailboxFull,
+            Needs::Any,
+            vec![Test::DsnIs(&["5.2.2", "4.2.2"]), Test::Reply(ci(r"mailbox full|over\s?quota"))],
+        ),
         rule(Reason::SenderPolicy, Needs::Any, vec![Test::DsnPrefix(&["5.7.25", "5.7.26"])]),
         rule(
             Reason::Greylisted,
             Needs::Temporary,
-            vec![Test::DsnPrefixAndReply(&["5.7", "4.7"], ci("greylist|try again|rate")), Test::CodePrefix("421"), Test::Reply(ci("greylist|try again later|rate limit"))],
+            vec![
+                Test::DsnPrefixAndReply(&["5.7", "4.7"], ci("greylist|try again|rate")),
+                Test::CodePrefix("421"),
+                Test::Reply(ci("greylist|try again later|rate limit")),
+            ],
         ),
-        rule(Reason::Policy, Needs::Any, vec![Test::DsnPrefix(&["5.7"]), Test::Reply(ci("blocked|spam|blacklist|blocklist|policy|denied|reputation"))]),
+        rule(
+            Reason::Policy,
+            Needs::Any,
+            vec![
+                Test::DsnPrefix(&["5.7"]),
+                Test::Reply(ci("blocked|spam|blacklist|blocklist|policy|denied|reputation")),
+            ],
+        ),
         rule(
             Reason::ConnectFailed,
             Needs::Temporary,
-            vec![Test::DsnPrefix(&["4.4"]), Test::Reply(ci("timed out|timeout|connection refused|no route|unable to connect|conversation timed out"))],
+            vec![
+                Test::DsnPrefix(&["4.4"]),
+                Test::Reply(ci(
+                    "timed out|timeout|connection refused|no route|unable to connect|conversation timed out",
+                )),
+            ],
         ),
         rule(Reason::RemoteSystemError, Needs::Any, vec![Test::DsnPrefix(&["4.3", "5.3"])]),
         rule(Reason::Accepted, Needs::Any, vec![Test::DsnIs(&["2.0.0"]), Test::CodePrefix("250")]),
@@ -335,7 +370,10 @@ enum Event {
 }
 
 enum Line {
-    Queue { id: String, event: Option<Event> },
+    Queue {
+        id: String,
+        event: Option<Event>,
+    },
     Rejection(Rejection),
     /// A Postfix line about something other than a queued message (a warning, a connect).
     Other,
@@ -636,7 +674,9 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
                 reason_text(r.reason),
                 r.reply
             ),
-            recommendation: Some("If this sender is legitimate, check the listing or policy named in the reply.".into()),
+            recommendation: Some(
+                "If this sender is legitimate, check the listing or policy named in the reply.".into(),
+            ),
         });
     }
     if hidden > 0 {
@@ -644,7 +684,9 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
             code: "mail_log_more",
             severity: Severity::Info,
             title: "More in the log".into(),
-            message: format!("{hidden} more problems aren't listed here; every message is in the pasted log's analysis."),
+            message: format!(
+                "{hidden} more problems aren't listed here; every message is in the pasted log's analysis."
+            ),
             recommendation: None,
         });
     }
@@ -653,7 +695,10 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
             code: "mail_log_delivered",
             severity: Severity::Ok,
             title: "Delivered".into(),
-            message: format!("{delivered} of {} messages in the log were delivered to every recipient.", a.messages.len()),
+            message: format!(
+                "{delivered} of {} messages in the log were delivered to every recipient.",
+                a.messages.len()
+            ),
             recommendation: None,
         });
     }
@@ -662,7 +707,8 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
             code: "mail_log_truncated",
             severity: Severity::Info,
             title: "Part of the paste was skipped".into(),
-            message: "A line, a message or a recipient list went over the analysis limits; the rest was left out.".into(),
+            message: "A line, a message or a recipient list went over the analysis limits; the rest was left out."
+                .into(),
             recommendation: None,
         });
     }

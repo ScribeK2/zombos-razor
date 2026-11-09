@@ -2,7 +2,11 @@
 //! state machines that turn elapsed time into a color or an opacity. The window layer only
 //! asks these functions what to draw at this instant.
 
-use std::{collections::HashMap, process::Command, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    process::Command,
+    time::{Duration, Instant},
+};
 
 pub const PRESS_AND_HOVER: Duration = Duration::from_millis(80);
 pub const RESULT_FADE_IN: Duration = Duration::from_millis(100);
@@ -68,13 +72,28 @@ fn parse_enable_animations(out: &str) -> Option<bool> {
 /// Ask the desktop. gsettings first, then the XDG settings portal. Blocking, so call it off the
 /// UI thread.
 pub fn read_system_motion() -> Motion {
-    let run = |cmd: &str, args: &[&str]| Command::new(cmd).args(args).output().ok().filter(|o| o.status.success()).and_then(|o| String::from_utf8(o.stdout).ok());
+    let run = |cmd: &str, args: &[&str]| {
+        Command::new(cmd)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+    };
     let out = run("gsettings", &["get", "org.gnome.desktop.interface", "enable-animations"]).or_else(|| {
         run(
             "gdbus",
             &[
-                "call", "--session", "--dest", "org.freedesktop.portal.Desktop", "--object-path", "/org/freedesktop/portal/desktop",
-                "--method", "org.freedesktop.portal.Settings.Read", "org.gnome.desktop.interface", "enable-animations",
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.portal.Desktop",
+                "--object-path",
+                "/org/freedesktop/portal/desktop",
+                "--method",
+                "org.freedesktop.portal.Settings.Read",
+                "org.gnome.desktop.interface",
+                "enable-animations",
             ],
         )
     });
@@ -134,7 +153,11 @@ impl<K: std::hash::Hash + Eq> Feedback<K> {
         };
         match self.states.get(key) {
             None => rest,
-            Some(t) => lerp_rgb(pick(t.from), pick(t.to), motion.progress(now.saturating_duration_since(t.since), PRESS_AND_HOVER)),
+            Some(t) => lerp_rgb(
+                pick(t.from),
+                pick(t.to),
+                motion.progress(now.saturating_duration_since(t.since), PRESS_AND_HOVER),
+            ),
         }
     }
 

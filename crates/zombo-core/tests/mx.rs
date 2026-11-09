@@ -17,7 +17,10 @@ fn want(list: &[(u16, &str)]) -> Vec<Mx> {
 #[tokio::test]
 async fn mx_hosts_come_back_lowest_preference_first() {
     let zone = "example.com. 60 IN MX 20 mx2.example.com.\nexample.com. 60 IN MX 10 MX1.Example.com.\nexample.com. 60 IN MX 10 mx0.example.com.\n";
-    assert_eq!(mx(zone, "example.com").await.unwrap(), want(&[(10, "mx0.example.com"), (10, "mx1.example.com"), (20, "mx2.example.com")]));
+    assert_eq!(
+        mx(zone, "example.com").await.unwrap(),
+        want(&[(10, "mx0.example.com"), (10, "mx1.example.com"), (20, "mx2.example.com")])
+    );
 }
 
 #[tokio::test]

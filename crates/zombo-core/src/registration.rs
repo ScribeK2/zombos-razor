@@ -47,7 +47,13 @@ pub fn check_proxy(proxy: &str) -> Result<(), String> {
 
 impl Default for Endpoints {
     fn default() -> Self {
-        Endpoints { rdap: BTreeMap::new(), whois: BTreeMap::new(), whois_iana: "whois.iana.org:43".into(), whois_referral_port: 43, proxy: None }
+        Endpoints {
+            rdap: BTreeMap::new(),
+            whois: BTreeMap::new(),
+            whois_iana: "whois.iana.org:43".into(),
+            whois_referral_port: 43,
+            proxy: None,
+        }
     }
 }
 
@@ -166,7 +172,11 @@ const MAX_REDIRECTS: u32 = 3;
 /// Look up who registered `target` (a domain or a name below one), asking RDAP
 /// first and WHOIS when RDAP has no service or fails. An RDAP 404 is authoritative:
 /// the domain is not registered, and WHOIS is not asked. The whole lookup, however many servers it asks, takes at most `limit`.
-pub async fn check_registration(target: &str, endpoints: &Endpoints, limit: Duration) -> Result<Registration, RegistrationError> {
+pub async fn check_registration(
+    target: &str,
+    endpoints: &Endpoints,
+    limit: Duration,
+) -> Result<Registration, RegistrationError> {
     let name = registrable_domain(&clean_name(target)?);
     let deadline = Instant::now() + limit;
     tokio::time::timeout(limit, async {
@@ -199,7 +209,9 @@ fn clean_name(target: &str) -> Result<String, RegistrationError> {
     let name = target.trim_end_matches('.').to_ascii_lowercase();
     let ok = name.contains('.')
         && name.len() <= 253
-        && name.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_')));
+        && name.split('.').all(|l| {
+            !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'))
+        });
     if ok { Ok(name) } else { Err(RegistrationError::BadName(target.into())) }
 }
 
@@ -223,7 +235,11 @@ fn rdap_bases() -> &'static HashMap<String, String> {
         let mut m = HashMap::new();
         for (tlds, urls) in b.services {
             let Some(first) = urls.first() else { continue };
-            let url = urls.iter().find(|u| u.starts_with("https://")).cloned().unwrap_or_else(|| first.replacen("http://", "https://", 1));
+            let url = urls
+                .iter()
+                .find(|u| u.starts_with("https://"))
+                .cloned()
+                .unwrap_or_else(|| first.replacen("http://", "https://", 1));
             for tld in tlds {
                 m.insert(tld.to_ascii_lowercase(), url.clone());
             }
@@ -296,7 +312,12 @@ impl RdapEntity {
     }
 }
 
-async fn rdap_lookup(base: &str, name: &str, deadline: Instant, proxy: Option<String>) -> Result<Registration, RdapError> {
+async fn rdap_lookup(
+    base: &str,
+    name: &str,
+    deadline: Instant,
+    proxy: Option<String>,
+) -> Result<Registration, RdapError> {
     let url = format!("{}/domain/{name}", base.trim_end_matches('/'));
     // Plain http is accepted only when the caller named such a base itself (a test server).
     let https_only = !base.starts_with("http://");
@@ -332,7 +353,12 @@ async fn rdap_lookup(base: &str, name: &str, deadline: Instant, proxy: Option<St
 
 /// One bounded GET: (status, body). The body is read only for a 200, and an
 /// oversized one is an error, not a truncation.
-fn rdap_get(url: &str, https_only: bool, limit: Duration, proxy: Option<&str>) -> Result<(ureq::http::StatusCode, Vec<u8>), RdapError> {
+fn rdap_get(
+    url: &str,
+    https_only: bool,
+    limit: Duration,
+    proxy: Option<&str>,
+) -> Result<(ureq::http::StatusCode, Vec<u8>), RdapError> {
     let fail = |e: ureq::Error| RdapError::Request(e.to_string());
     let mut builder = ureq::Agent::config_builder();
     if let Some(p) = proxy {
@@ -393,9 +419,17 @@ fn whois_query_for(name: &str) -> String {
 }
 
 const REGISTRAR: &[&str] = &["Registrar", "Registrar Name", "Registrar Organization"];
-const EXPIRES: &[&str] =
-    &["Registry Expiry Date", "Registrar Registration Expiration Date", "Expiration Date", "Expiry Date", "Expires", "Expires On", "paid-till"];
-const CREATED: &[&str] = &["Creation Date", "Created Date", "Created", "Created On", "Registration Date", "Registered On"];
+const EXPIRES: &[&str] = &[
+    "Registry Expiry Date",
+    "Registrar Registration Expiration Date",
+    "Expiration Date",
+    "Expiry Date",
+    "Expires",
+    "Expires On",
+    "paid-till",
+];
+const CREATED: &[&str] =
+    &["Creation Date", "Created Date", "Created", "Created On", "Registration Date", "Registered On"];
 const UPDATED: &[&str] = &["Updated Date", "Last Updated", "Last Modified", "Modified", "Changed"];
 const NAMESERVERS: &[&str] = &["Name Server", "Nameserver", "nserver"];
 const STATUS: &[&str] = &["Domain Status", "Status"];
@@ -483,7 +517,12 @@ fn parse_whois(name: &str, server: &str, text: &str) -> Registration {
 
 /// Ask a port-43 server, following one IANA referral when `server` is unknown,
 /// and parse the reply.
-async fn whois_lookup(ep: &Endpoints, server: Option<&str>, name: &str, deadline: Instant) -> Result<Registration, WhoisError> {
+async fn whois_lookup(
+    ep: &Endpoints,
+    server: Option<&str>,
+    name: &str,
+    deadline: Instant,
+) -> Result<Registration, WhoisError> {
     let server = match server {
         Some(s) => s.to_string(),
         None => {
@@ -519,7 +558,8 @@ async fn whois_query(server: &str, query: &str, deadline: Instant) -> Result<Str
         }
         Ok(String::from_utf8_lossy(&buf).into_owned())
     };
-    let text = tokio::time::timeout_at(deadline.into(), ask).await.map_err(|_| WhoisError::Io("timed out".into()))??;
+    let text =
+        tokio::time::timeout_at(deadline.into(), ask).await.map_err(|_| WhoisError::Io("timed out".into()))??;
     if text.trim().is_empty() {
         return Err(WhoisError::Empty(server.into()));
     }
@@ -554,7 +594,9 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
     if !r.registered {
         let via = match r.source {
             Source::Rdap => format!("The registry's RDAP service has no record of {d}."),
-            Source::Whois => format!("The WHOIS reply for {d} carries no registrar or dates, which means it is not registered."),
+            Source::Whois => {
+                format!("The WHOIS reply for {d} carries no registrar or dates, which means it is not registered.")
+            }
         };
         return vec![finding(
             "registration_not_registered",
@@ -575,7 +617,12 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
                 Severity::Critical,
                 "Domain expired",
                 format!("{d} expired on {when}. Websites and email on it may stop working at any time."),
-                Some(format!("Renew it at the registrar{at} now, before it enters redemption and costs more to restore.").into()),
+                Some(
+                    format!(
+                        "Renew it at the registrar{at} now, before it enters redemption and costs more to restore."
+                    )
+                    .into(),
+                ),
             ));
         } else if days <= 30 {
             let n = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
@@ -596,7 +643,8 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
             ));
         }
     }
-    let among = |set: &[&str]| r.statuses.iter().filter(|s| set.contains(&s.as_str())).cloned().collect::<Vec<_>>().join(", ");
+    let among =
+        |set: &[&str]| r.statuses.iter().filter(|s| set.contains(&s.as_str())).cloned().collect::<Vec<_>>().join(", ");
     let holds = among(&HOLDS);
     if !holds.is_empty() {
         out.push(finding(
@@ -674,7 +722,10 @@ fn normalize_date(s: &str) -> RegDate {
 }
 
 fn parse_date(s: &str) -> Option<OffsetDateTime> {
-    use time::{Date, PrimitiveDateTime, format_description::{FormatItem, well_known::Rfc3339}};
+    use time::{
+        Date, PrimitiveDateTime,
+        format_description::{FormatItem, well_known::Rfc3339},
+    };
     if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
         return Some(t);
     }
@@ -683,7 +734,10 @@ fn parse_date(s: &str) -> Option<OffsetDateTime> {
         time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second][optional [.[subsecond]]]"),
     ];
     // A trailing zone abbreviation (UTC, GMT, CET) is read as UTC, as Go does for names it does not know.
-    let bare = s.rsplit_once(' ').filter(|(_, z)| (3..=5).contains(&z.len()) && z.bytes().all(|b| b.is_ascii_uppercase())).map_or(s, |(t, _)| t);
+    let bare = s
+        .rsplit_once(' ')
+        .filter(|(_, z)| (3..=5).contains(&z.len()) && z.bytes().all(|b| b.is_ascii_uppercase()))
+        .map_or(s, |(t, _)| t);
     if let Some(t) = datetime.iter().find_map(|f| PrimitiveDateTime::parse(bare, f).ok()) {
         return Some(t.assume_utc());
     }

@@ -69,7 +69,9 @@ fn single(records: &[String]) -> Option<std::collections::BTreeMap<String, Strin
 
 pub fn parse_tls_rpt(txts: &[String]) -> TlsRpt {
     let records = matching(txts, "TLSRPTv1");
-    let rua = single(&records).map(|t| t.get("rua").map_or_else(Vec::new, |r| r.split(',').filter(|u| !u.is_empty()).map(String::from).collect()));
+    let rua = single(&records).map(|t| {
+        t.get("rua").map_or_else(Vec::new, |r| r.split(',').filter(|u| !u.is_empty()).map(String::from).collect())
+    });
     TlsRpt { rua: rua.unwrap_or_default(), records, lookup_error: None }
 }
 
@@ -95,7 +97,8 @@ mod tests {
 
     #[test]
     fn tls_rpt_reads_its_report_addresses() {
-        let r = parse_tls_rpt(&v(&["google-site-verification=x", "v=TLSRPTv1; rua=mailto:a@x.test, https://r.x.test/tls"]));
+        let r =
+            parse_tls_rpt(&v(&["google-site-verification=x", "v=TLSRPTv1; rua=mailto:a@x.test, https://r.x.test/tls"]));
         assert_eq!(r.records.len(), 1);
         assert_eq!(r.rua, ["mailto:a@x.test", "https://r.x.test/tls"]);
     }
@@ -109,13 +112,20 @@ mod tests {
 
     #[test]
     fn a_record_with_another_version_is_not_a_tls_rpt_record() {
-        assert!(parse_tls_rpt(&v(&["v=TLSRPTv2; rua=mailto:a@x.test", "rua=mailto:a@x.test; v=TLSRPTv1"])).records.is_empty());
+        assert!(
+            parse_tls_rpt(&v(&["v=TLSRPTv2; rua=mailto:a@x.test", "rua=mailto:a@x.test; v=TLSRPTv1"]))
+                .records
+                .is_empty()
+        );
     }
 
     #[test]
     fn bimi_reads_logo_and_evidence() {
         let b = parse_bimi(&v(&["v=BIMI1; l=https://x.test/logo.svg; a=https://x.test/vmc.pem"]));
-        assert_eq!((b.logo.as_deref(), b.authority.as_deref()), (Some("https://x.test/logo.svg"), Some("https://x.test/vmc.pem")));
+        assert_eq!(
+            (b.logo.as_deref(), b.authority.as_deref()),
+            (Some("https://x.test/logo.svg"), Some("https://x.test/vmc.pem"))
+        );
         let opt_out = parse_bimi(&v(&["v=BIMI1; l=;"]));
         assert_eq!((opt_out.logo.as_deref(), opt_out.authority), (Some(""), None));
         assert_eq!(parse_bimi(&v(&["v=BIMI1; a=https://x.test/vmc.pem"])).logo, None);

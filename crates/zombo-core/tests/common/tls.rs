@@ -4,7 +4,10 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose};
+use rcgen::{
+    BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    KeyPair, KeyUsagePurpose,
+};
 use rustls::{
     RootCertStore, ServerConfig,
     crypto::ring,

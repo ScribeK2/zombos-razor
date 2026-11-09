@@ -7,7 +7,10 @@ impl Shell {
     pub(super) fn copy_current(&mut self, format: Format, cx: &mut Context<Self>) {
         if self.ws.current_evidence().is_some() {
             if format == Format::Json {
-                self.toast = Some(("JSON copy works on a Diagnosis tab. Use Ctrl+Shift+C for Markdown here.".into(), Instant::now()));
+                self.toast = Some((
+                    "JSON copy works on a Diagnosis tab. Use Ctrl+Shift+C for Markdown here.".into(),
+                    Instant::now(),
+                ));
             } else {
                 self.copy_evidence(format == Format::Whole, cx);
             }

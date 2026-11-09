@@ -7,7 +7,9 @@ use registry::{FakeHttp, FakeWhois, Reply, closed_port, fixture, rdap_domain, si
 use time::{Duration, OffsetDateTime};
 use zombo_core::{
     Finding, Severity,
-    registration::{Endpoints, RegDate, Registration, RegistrationError, Source, check_registration, registration_findings},
+    registration::{
+        Endpoints, RegDate, Registration, RegistrationError, Source, check_registration, registration_findings,
+    },
 };
 
 const T: Wait = Wait::from_secs(5);
@@ -72,7 +74,11 @@ fn findings_by_expiry_and_status() {
         let f = code(&fs, want).unwrap_or_else(|| panic!("{name}: {:?}", codes(&fs)));
         assert_eq!(f.severity, severity, "{name}");
         if severity != Severity::Info {
-            assert!(code(&fs, "registration_ok").is_none(), "{name}: a problem was also called healthy: {:?}", codes(&fs));
+            assert!(
+                code(&fs, "registration_ok").is_none(),
+                "{name}: a problem was also called healthy: {:?}",
+                codes(&fs)
+            );
         }
     }
 }
@@ -86,7 +92,11 @@ fn the_finding_wording_is_the_go_wording() {
     assert!(soon.message.ends_with(", in 20 days."), "{}", soon.message);
     let hold = code(&fs, "registration_on_hold").unwrap();
     assert_eq!(hold.title, "Domain is on hold");
-    assert!(hold.message.starts_with("example.com has status clientHold, serverHold: the registry has removed it from DNS"), "{}", hold.message);
+    assert!(
+        hold.message.starts_with("example.com has status clientHold, serverHold: the registry has removed it from DNS"),
+        "{}",
+        hold.message
+    );
     let one = registration_findings("example.com", &reg(0, &[]));
     assert!(code(&one, "registration_expiring_soon").unwrap().message.ends_with(", in 0 days."));
 }
@@ -126,7 +136,10 @@ fn not_registered_says_where_it_found_out() {
     assert_eq!(fs[0].message, "The registry's RDAP service has no record of nope.com.");
     r.source = Source::Whois;
     let fs = registration_findings("nope.com", &r);
-    assert_eq!(fs[0].message, "The WHOIS reply for nope.com carries no registrar or dates, which means it is not registered.");
+    assert_eq!(
+        fs[0].message,
+        "The WHOIS reply for nope.com carries no registrar or dates, which means it is not registered."
+    );
 }
 
 // RDAP
@@ -334,7 +347,10 @@ async fn an_empty_looking_whois_reply_means_not_registered() {
     let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
     assert_eq!(r.source, Source::Whois);
     assert!(!r.registered);
-    assert_eq!(code(&registration_findings("nope.test", &r), "registration_not_registered").unwrap().severity, Severity::Critical);
+    assert_eq!(
+        code(&registration_findings("nope.test", &r), "registration_not_registered").unwrap().severity,
+        Severity::Critical
+    );
 }
 
 #[tokio::test]
@@ -356,7 +372,8 @@ async fn registry_formats_without_a_registrar_or_dates() {
 
 #[tokio::test]
 async fn whois_dates_in_other_formats_are_normalised() {
-    let whois = FakeWhois::reply("Registrar: X\nCreated On: 14-Aug-1995\nExpires: 2030.01.02\nLast Updated: whenever\n").await;
+    let whois =
+        FakeWhois::reply("Registrar: X\nCreated On: 14-Aug-1995\nExpires: 2030.01.02\nLast Updated: whenever\n").await;
     let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
     assert_eq!(r.created.unwrap().to_string(), "1995-08-14T00:00:00Z");
     assert_eq!(r.expires.unwrap().to_string(), "2030-01-02T00:00:00Z");
@@ -376,7 +393,9 @@ async fn it_fails_when_neither_rdap_nor_whois_answers() {
 async fn a_silent_server_ends_at_the_deadline() {
     let rdap = silent().await;
     let started = std::time::Instant::now();
-    let err = check_registration("example.com", &rdap_only("com", &format!("http://{rdap}/")), Wait::from_millis(400)).await.unwrap_err();
+    let err = check_registration("example.com", &rdap_only("com", &format!("http://{rdap}/")), Wait::from_millis(400))
+        .await
+        .unwrap_err();
     assert!(matches!(err, RegistrationError::TimedOut), "{err}");
     assert!(started.elapsed() < Wait::from_secs(3), "took {:?}", started.elapsed());
 
@@ -395,7 +414,10 @@ async fn an_oversized_or_binary_whois_reply_is_capped_not_fatal() {
     assert_eq!(r.registrar.as_deref(), Some("Early Registrar"));
     assert_eq!(r.expires, None, "read past the 1 MiB cap");
 
-    let whois = FakeWhois::reply(vec![0xff, 0xfe, b'\n', 0x00, b':', b'\n', b'S', b't', b'a', b't', b'u', b's', b':', b' ', 0xc3, 0x28, b'\n']).await;
+    let whois = FakeWhois::reply(vec![
+        0xff, 0xfe, b'\n', 0x00, b':', b'\n', b'S', b't', b'a', b't', b'u', b's', b':', b' ', 0xc3, 0x28, b'\n',
+    ])
+    .await;
     let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
     assert_eq!(r.source, Source::Whois);
 }
@@ -412,7 +434,8 @@ async fn an_empty_whois_reply_is_an_error() {
 /// Like whois.denic.de: the detailed reply for "-T dn,ace <name>", the plain one otherwise.
 async fn fake_denic(detailed: &str, plain: &str) -> FakeWhois {
     let (detailed, plain) = (detailed.to_string(), plain.to_string());
-    FakeWhois::start(move |q| if q.starts_with("-T dn,ace ") { detailed.clone().into() } else { plain.clone().into() }).await
+    FakeWhois::start(move |q| if q.starts_with("-T dn,ace ") { detailed.clone().into() } else { plain.clone().into() })
+        .await
 }
 
 #[tokio::test]
@@ -462,9 +485,19 @@ async fn an_invalid_answer_fails_rather_than_saying_not_registered() {
 #[test]
 fn the_registrar_is_named_inside_the_recommendation_that_needs_one() {
     for (days, statuses, want, text) in [
-        (-5, &[][..], "registration_expired", "Renew it at the registrar (Example Registrar) now, before it enters redemption"),
+        (
+            -5,
+            &[][..],
+            "registration_expired",
+            "Renew it at the registrar (Example Registrar) now, before it enters redemption",
+        ),
         (300, &["clientHold"], "registration_on_hold", "Contact the registrar (Example Registrar) to find out why"),
-        (-40, &["redemptionPeriod"], "registration_pending_delete", "Ask the registrar (Example Registrar) to restore it immediately"),
+        (
+            -40,
+            &["redemptionPeriod"],
+            "registration_pending_delete",
+            "Ask the registrar (Example Registrar) to restore it immediately",
+        ),
     ] {
         let fs = registration_findings("example.com", &reg(days, statuses));
         let f = code(&fs, want).unwrap_or_else(|| panic!("{want}: {:?}", codes(&fs)));

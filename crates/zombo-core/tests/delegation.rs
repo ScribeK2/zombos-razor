@@ -38,7 +38,11 @@ fn healthy() -> DelegationResult {
                 child_ns: Some(set(ns.map(String::from))),
             })
             .collect(),
-        glue_served: ns.iter().enumerate().map(|(i, n)| (n.to_string(), set([ip(&format!("192.0.2.{}", i + 1))]))).collect(),
+        glue_served: ns
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), set([ip(&format!("192.0.2.{}", i + 1))])))
+            .collect(),
         unresolvable: vec![],
         cnames: vec![],
     }

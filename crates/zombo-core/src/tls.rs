@@ -17,7 +17,8 @@ use std::{
 };
 
 use rustls::{
-    AlertDescription, CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
+    AlertDescription, CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore,
+    SignatureScheme,
     client::{
         danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
         verify_server_cert_signed_by_trust_anchor, verify_server_name,
@@ -31,10 +32,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::TlsConnector;
 use x509_parser::{
-    certificate::X509Certificate,
-    extensions::GeneralName,
-    public_key::PublicKey,
-    signature_algorithm::RsaSsaPssParams,
+    certificate::X509Certificate, extensions::GeneralName, public_key::PublicKey, signature_algorithm::RsaSsaPssParams,
     x509::AlgorithmIdentifier,
 };
 
@@ -172,11 +170,21 @@ impl ServerCertVerifier for AcceptAnything {
         Ok(ServerCertVerified::assertion())
     }
 
-    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, RustlsError> {
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
         Ok(HandshakeSignatureValid::assertion())
     }
 
-    fn verify_tls13_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, RustlsError> {
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
         Ok(HandshakeSignatureValid::assertion())
     }
 
@@ -201,7 +209,13 @@ fn client_config() -> Result<(ClientConfig, Arc<AtomicBool>), RustlsError> {
 /// upgraded to the point where the server expects a ClientHello, and report
 /// what the server presents. `now` is the clock for every validity decision.
 /// The handshake must finish within `timeout`.
-pub async fn inspect_stream<S>(stream: S, server_name: &str, roots: &RootCertStore, now: OffsetDateTime, timeout: Duration) -> Result<TlsResult, TlsError>
+pub async fn inspect_stream<S>(
+    stream: S,
+    server_name: &str,
+    roots: &RootCertStore,
+    now: OffsetDateTime,
+    timeout: Duration,
+) -> Result<TlsResult, TlsError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -240,14 +254,29 @@ where
         .unwrap_or_default();
     let chain = conn.peer_certificates().ok_or(TlsError::NoCertificate)?;
     let a = assess(chain, server_name, roots, now)?;
-    let result = TlsResult { version, cipher, chain: a.chain, hostname_match: a.hostname_match, verified: a.verified, trust: a.trust, verify_error: a.verify_error, ocsp_stapled };
+    let result = TlsResult {
+        version,
+        cipher,
+        chain: a.chain,
+        hostname_match: a.hostname_match,
+        verified: a.verified,
+        trust: a.trust,
+        verify_error: a.verify_error,
+        ocsp_stapled,
+    };
     Ok((tls, result))
 }
 
 /// Connect to `addr` (a name is resolved with the system resolver) and inspect
 /// the TLS the server there presents for `server_name`. One `timeout` covers
 /// the connection and the handshake together.
-pub async fn check_tls_via(addr: impl tokio::net::ToSocketAddrs, server_name: &str, roots: &RootCertStore, now: OffsetDateTime, timeout: Duration) -> Result<TlsResult, TlsError> {
+pub async fn check_tls_via(
+    addr: impl tokio::net::ToSocketAddrs,
+    server_name: &str,
+    roots: &RootCertStore,
+    now: OffsetDateTime,
+    timeout: Duration,
+) -> Result<TlsResult, TlsError> {
     ServerName::try_from(server_name.to_owned()).map_err(|_| TlsError::BadName(server_name.to_owned()))?;
     tokio::time::timeout(timeout, async {
         let tcp = tokio::net::TcpStream::connect(addr).await.map_err(|e| TlsError::Connect(e.to_string()))?;
@@ -266,7 +295,10 @@ fn handshake_error(e: io::Error) -> TlsError {
     let inner = e.get_ref().and_then(|i| i.downcast_ref::<RustlsError>());
     match inner {
         // rustls speaks TLS 1.2 and 1.3 only, so a server stuck on 1.0 or 1.1 answers with one of these.
-        Some(RustlsError::AlertReceived(AlertDescription::ProtocolVersion | AlertDescription::HandshakeFailure) | RustlsError::PeerIncompatible(_)) => TlsError::Handshake(format!(
+        Some(
+            RustlsError::AlertReceived(AlertDescription::ProtocolVersion | AlertDescription::HandshakeFailure)
+            | RustlsError::PeerIncompatible(_),
+        ) => TlsError::Handshake(format!(
             "the server refused the handshake; it may offer only TLS 1.0 or 1.1 (deprecated, and not spoken by this tool) or no cipher suite in common ({e})"
         )),
         _ => TlsError::Handshake(clean(&e.to_string())),
@@ -291,7 +323,12 @@ fn unix(t: OffsetDateTime) -> UnixTime {
 /// Trust ignores hostname and expiry (as Go does): when the leaf is outside
 /// its validity the check runs at the middle of that validity, so an expired
 /// certificate is not also reported as untrusted.
-pub fn assess(chain: &[CertificateDer<'_>], server_name: &str, roots: &RootCertStore, now: OffsetDateTime) -> Result<Assessment, TlsError> {
+pub fn assess(
+    chain: &[CertificateDer<'_>],
+    server_name: &str,
+    roots: &RootCertStore,
+    now: OffsetDateTime,
+) -> Result<Assessment, TlsError> {
     if chain.is_empty() {
         return Err(TlsError::NoCertificate);
     }
@@ -313,11 +350,13 @@ pub fn assess(chain: &[CertificateDer<'_>], server_name: &str, roots: &RootCertS
             return Ok(Assessment { chain: certs, hostname_match: false, verified: false, trust, verify_error });
         }
     };
-    let verify = |at: OffsetDateTime| verify_server_cert_signed_by_trust_anchor(&parsed, roots, &chain[1..], unix(at), algs);
+    let verify =
+        |at: OffsetDateTime| verify_server_cert_signed_by_trust_anchor(&parsed, roots, &chain[1..], unix(at), algs);
     let name_error = verify_server_name(&parsed, &name).err();
     let at_now = verify(now);
     let in_date = leaf.not_before <= now && now <= leaf.not_after;
-    let trust_check = if in_date { at_now.clone() } else { verify(leaf.not_before + (leaf.not_after - leaf.not_before) / 2) };
+    let trust_check =
+        if in_date { at_now.clone() } else { verify(leaf.not_before + (leaf.not_after - leaf.not_before) / 2) };
 
     let trust = match &trust_check {
         Ok(()) => Trust::Ok,
@@ -334,7 +373,8 @@ pub fn assess(chain: &[CertificateDer<'_>], server_name: &str, roots: &RootCertS
         }
         Err(_) => Trust::Invalid,
     };
-    let verify_error = at_now.as_ref().err().or(name_error.as_ref()).or(trust_check.as_ref().err()).map(|e| clean(&e.to_string()));
+    let verify_error =
+        at_now.as_ref().err().or(name_error.as_ref()).or(trust_check.as_ref().err()).map(|e| clean(&e.to_string()));
     let verified = at_now.is_ok() && name_error.is_none();
     Ok(Assessment { chain: certs, hostname_match: name_error.is_none(), verified, trust, verify_error })
 }
@@ -345,10 +385,13 @@ fn clean(s: &str) -> String {
 }
 
 fn describe(der: &CertificateDer<'_>, leaf: bool) -> Result<TlsCert, TlsError> {
-    let (_, c) = x509_parser::parse_x509_certificate(der.as_ref()).map_err(|e| TlsError::Chain(format!("unreadable certificate: {e}")))?;
+    let (_, c) = x509_parser::parse_x509_certificate(der.as_ref())
+        .map_err(|e| TlsError::Chain(format!("unreadable certificate: {e}")))?;
     let name = |n: &x509_parser::x509::X509Name<'_>| {
         // A "*" is not a PrintableString character, so a strict decode refuses wildcard names.
-        let cn = n.iter_common_name().next().map(|a| a.as_str().map_or_else(|_| String::from_utf8_lossy(a.attr_value().data).into_owned(), str::to_string));
+        let cn = n.iter_common_name().next().map(|a| {
+            a.as_str().map_or_else(|_| String::from_utf8_lossy(a.attr_value().data).into_owned(), str::to_string)
+        });
         clean(&cn.unwrap_or_else(|| n.to_string()))
     };
     let sans = match (leaf, c.subject_alternative_name()) {
@@ -415,7 +458,13 @@ fn signature_name(a: &AlgorithmIdentifier<'_>) -> String {
         "1.2.840.113549.1.1.11" => "SHA256-RSA",
         "1.2.840.113549.1.1.12" => "SHA384-RSA",
         "1.2.840.113549.1.1.13" => "SHA512-RSA",
-        "1.2.840.113549.1.1.10" => match a.parameters.as_ref().and_then(|p| RsaSsaPssParams::try_from(p).ok()).map(|p| p.hash_algorithm_oid().to_id_string()).as_deref() {
+        "1.2.840.113549.1.1.10" => match a
+            .parameters
+            .as_ref()
+            .and_then(|p| RsaSsaPssParams::try_from(p).ok())
+            .map(|p| p.hash_algorithm_oid().to_id_string())
+            .as_deref()
+        {
             Some("2.16.840.1.101.3.4.2.1") => "SHA256-RSAPSS",
             Some("2.16.840.1.101.3.4.2.2") => "SHA384-RSAPSS",
             Some("2.16.840.1.101.3.4.2.3") => "SHA512-RSAPSS",
@@ -445,7 +494,13 @@ fn date(t: OffsetDateTime) -> String {
     t.format(format_description!("[day padding:none] [month repr:short] [year]")).unwrap_or_default()
 }
 
-fn finding(code: &'static str, severity: Severity, title: impl Into<Cow<'static, str>>, message: String, recommendation: Option<Cow<'static, str>>) -> Finding {
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: Option<Cow<'static, str>>,
+) -> Finding {
     Finding { code, severity, title: title.into(), message, recommendation }
 }
 
@@ -476,7 +531,10 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
             "ssl_inspection_expired",
             Severity::Critical,
             "Certificate expired",
-            format!("{which} on {place} expired on {expiry} ({} ago); browsers and mail clients reject it.", plural(-days, "day", "days")),
+            format!(
+                "{which} on {place} expired on {expiry} ({} ago); browsers and mail clients reject it.",
+                plural(-days, "day", "days")
+            ),
             Some(renew.into()),
         ));
     } else if days <= 14 {
@@ -492,7 +550,7 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
             "ssl_inspection_expiring_soon",
             Severity::Info,
             "Certificate expires within a month",
-            format!("{which} on {place} expires on {expiry} (in {})."  , plural(days, "day", "days")),
+            format!("{which} on {place} expires on {expiry} (in {}).", plural(days, "day", "days")),
             None,
         ));
     }
@@ -502,13 +560,17 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
             "ssl_inspection_not_yet_valid",
             Severity::Critical,
             "Certificate not yet valid",
-            format!("The certificate on {place} is not valid until {}; browsers and mail clients reject it until then.", date(leaf.not_before)),
+            format!(
+                "The certificate on {place} is not valid until {}; browsers and mail clients reject it until then.",
+                date(leaf.not_before)
+            ),
             Some("Check the clock on the server, or wait until the certificate's start date.".into()),
         ));
     }
 
     if !r.hostname_match {
-        let names: Vec<&str> = if leaf.sans.is_empty() { vec![&leaf.subject] } else { leaf.sans.iter().map(String::as_str).collect() };
+        let names: Vec<&str> =
+            if leaf.sans.is_empty() { vec![&leaf.subject] } else { leaf.sans.iter().map(String::as_str).collect() };
         let shown = names.iter().take(MAX_NAMES_LISTED).copied().collect::<Vec<_>>().join(", ");
         let more = names.len().saturating_sub(MAX_NAMES_LISTED);
         let more = if more > 0 { format!(" and {more} more") } else { String::new() };
@@ -517,7 +579,9 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
             Severity::Critical,
             format!("Certificate doesn't cover {host}"),
             format!("The certificate on {place} is for {shown}{more}, not {host}."),
-            Some(format!("Issue a certificate that includes {host}, or point {host} at the server that has one.").into()),
+            Some(
+                format!("Issue a certificate that includes {host}, or point {host} at the server that has one.").into(),
+            ),
         ));
     }
 
@@ -576,7 +640,10 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
                 "ssl_inspection_weak_signature",
                 Severity::Warning,
                 "Weak certificate signature",
-                format!("{what} on {place} is signed with {}, which is broken; current clients reject it.", c.signature),
+                format!(
+                    "{what} on {place} is signed with {}, which is broken; current clients reject it.",
+                    c.signature
+                ),
                 Some("Reissue the certificate: CAs no longer sign with SHA-1 or MD5.".into()),
             ));
         }
@@ -597,7 +664,11 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
             "ssl_inspection_valid",
             Severity::Ok,
             "Certificate valid",
-            format!("The certificate on {place} is valid for {host}, issued by {}, expiring {}.", leaf.issuer, date(leaf.not_after)),
+            format!(
+                "The certificate on {place} is valid for {host}, issued by {}, expiring {}.",
+                leaf.issuer,
+                date(leaf.not_after)
+            ),
             None,
         ));
     }

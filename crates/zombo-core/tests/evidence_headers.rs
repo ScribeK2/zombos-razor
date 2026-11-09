@@ -57,7 +57,9 @@ fn spoofed_headers_are_called_out() {
     }
     for f in header_findings(&a) {
         match f.code {
-            "email_headers_dmarc_fail" | "email_headers_spf_fail" => assert_eq!(f.severity, Severity::Critical, "{}", f.code),
+            "email_headers_dmarc_fail" | "email_headers_spf_fail" => {
+                assert_eq!(f.severity, Severity::Critical, "{}", f.code)
+            }
             "email_headers_misaligned" => assert_eq!(f.severity, Severity::Warning),
             _ => {}
         }
@@ -90,7 +92,10 @@ fn hops_read_oldest_first_with_delays() {
         "Received: from relay.ex.com (relay.ex.com [203.0.113.9]) by mx.dest.com with ESMTPS id Z2; Wed, 14 Jun 2026 10:02:00 -0700\nReceived: from sender.ex.com (sender.ex.com [203.0.113.5]) by relay.ex.com with ESMTP id Z1 for <u@dest.com>; Wed, 14 Jun 2026 10:00:00 -0700\nFrom: a@ex.com",
     );
     assert_eq!(a.hops.len(), 2);
-    assert_eq!((a.hops[0].from_host.as_str(), a.hops[0].from_ip, a.hops[0].with.as_str()), ("sender.ex.com", ip("203.0.113.5"), "ESMTP"));
+    assert_eq!(
+        (a.hops[0].from_host.as_str(), a.hops[0].from_ip, a.hops[0].with.as_str()),
+        ("sender.ex.com", ip("203.0.113.5"), "ESMTP")
+    );
     assert_eq!(a.hops[0].by_host, "relay.ex.com");
     assert_eq!((a.hops[0].delay_s, a.hops[1].delay_s, a.total_transit_s), (None, Some(120), Some(120)));
 }
@@ -161,7 +166,10 @@ fn a_failed_dkim_signature_does_not_count_as_aligned() {
     assert_eq!(a.alignment.dkim_domain, "");
     assert!(codes(&a).contains(&"email_headers_misaligned"));
     // The signature is still listed as written.
-    assert_eq!((a.auth.dkim_signatures[0].domain.as_str(), a.auth.dkim_signatures[0].selector.as_str()), ("yourbank.test", "forged"));
+    assert_eq!(
+        (a.auth.dkim_signatures[0].domain.as_str(), a.auth.dkim_signatures[0].selector.as_str()),
+        ("yourbank.test", "forged")
+    );
 }
 
 #[test]

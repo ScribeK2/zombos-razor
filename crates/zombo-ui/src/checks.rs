@@ -1,8 +1,13 @@
-use std::{net::SocketAddr, time::{Duration, SystemTime}};
+use std::{
+    net::SocketAddr,
+    time::{Duration, SystemTime},
+};
 
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
-    blacklist::{BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist},
+    blacklist::{
+        BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
+    },
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
@@ -66,7 +71,11 @@ fn propagation_resolvers(extra: &[SocketAddr]) -> Vec<zombo_core::propagation::V
     let mut resolvers = default_resolvers();
     for &address in extra {
         if !resolvers.iter().any(|r| r.address == address) {
-            resolvers.push(zombo_core::propagation::Vantage::resolver(&address.to_string(), "Added in settings", address));
+            resolvers.push(zombo_core::propagation::Vantage::resolver(
+                &address.to_string(),
+                "Added in settings",
+                address,
+            ));
         }
     }
     resolvers
@@ -92,16 +101,30 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
     let _ = tx.send(event);
 }
 
-pub async fn run_section(section: Section, name: String, settings: Settings, smtp: smtp_plan::Request, tx: UnboundedSender<CheckEvent>) {
+pub async fn run_section(
+    section: Section,
+    name: String,
+    settings: Settings,
+    smtp: smtp_plan::Request,
+    tx: UnboundedSender<CheckEvent>,
+) {
     let _ = tx.send(CheckEvent::Started);
-    let event = match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings, smtp)).await {
-        Ok(result) => CheckEvent::Finished(Box::new(result)),
-        Err(_) => CheckEvent::TimedOut,
-    };
+    let event =
+        match tokio::time::timeout(budget(section, settings.timeout).whole, produce(section, &name, &settings, smtp))
+            .await
+        {
+            Ok(result) => CheckEvent::Finished(Box::new(result)),
+            Err(_) => CheckEvent::TimedOut,
+        };
     let _ = tx.send(event);
 }
 
-async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_plan::Request) -> Result<Outcome, String> {
+async fn produce(
+    section: Section,
+    name: &str,
+    settings: &Settings,
+    smtp: smtp_plan::Request,
+) -> Result<Outcome, String> {
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section {
@@ -116,7 +139,11 @@ async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_p
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
             let r = email_auth(resolver, name, &settings.selectors, query).await;
-            if r.answered() { Ok(email_outcome(name, &r)) } else { Err(format!("no answer from DNS resolver {resolver}")) }
+            if r.answered() {
+                Ok(email_outcome(name, &r))
+            } else {
+                Err(format!("no answer from DNS resolver {resolver}"))
+            }
         }
         Section::Web => {
             let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
@@ -127,10 +154,12 @@ async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_p
             let (tls, caa) = tokio::join!(check_tls(name, 443, query), check_caa(&bootstrap, name, query));
             tls.map(|r| with_caa(tls_outcome(name, &r), &caa, Some(&r))).map_err(|e| e.to_string())
         }
-        Section::Registration => check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
-            .await
-            .map(|r| registration_outcome(name, &r))
-            .map_err(|e| e.to_string()),
+        Section::Registration => {
+            check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
+                .await
+                .map(|r| registration_outcome(name, &r))
+                .map_err(|e| e.to_string())
+        }
         Section::Ports => {
             let addresses = resolve_target(name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
             Ok(ports_outcome(name, &probe(&addresses, QUICK, PortTiming::default()).await))
@@ -139,14 +168,18 @@ async fn produce(section: Section, name: &str, settings: &Settings, smtp: smtp_p
             let resolvers = system_resolvers();
             let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
             let port = smtp.port;
-            let plan = smtp_plan::run(name, smtp, &Resolver::new(asked, Duration::from_secs(5)), |host| async move { check_smtp(&host, port, &SmtpOptions::for_port(port)).await }).await;
+            let plan = smtp_plan::run(name, smtp, &Resolver::new(asked, Duration::from_secs(5)), |host| async move {
+                check_smtp(&host, port, &SmtpOptions::for_port(port)).await
+            })
+            .await;
             let r = &plan.result;
             let mut expect = vec![];
             if plan.host.parse::<std::net::IpAddr>().is_err() {
                 expect.push(plan.host.clone());
             }
             if let (Some(ip), Reach::Answered, false) = (r.peer, r.reach, resolvers.is_empty())
-                && let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
+                && let RdnsResult::Ip { ptrs, .. } =
+                    check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
             {
                 expect.extend(ptrs.into_iter().map(|p| p.name));
             }
@@ -201,7 +234,10 @@ pub fn dnssec_outcome(r: &DnssecResult) -> Outcome {
             Some(e) => details.push(Fact::new(format!("Nameserver {}", n.name), format!("no usable answer: {e}"))),
             None => {
                 for k in &n.dnskeys {
-                    details.push(Fact::new(format!("Key at {}", n.name), format!("key tag {}, {}, flags {}", k.key_tag.0, k.algorithm, k.flags)));
+                    details.push(Fact::new(
+                        format!("Key at {}", n.name),
+                        format!("key tag {}, {}, flags {}", k.key_tag.0, k.algorithm, k.flags),
+                    ));
                 }
             }
         }
@@ -244,7 +280,17 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
         .chain
         .iter()
         .enumerate()
-        .map(|(i, h)| Fact::new(format!("Hop {}", i + 1), format!("{} {}{}", h.status, h.url, h.location.as_ref().map(|l| format!(" to {l}")).unwrap_or_default())))
+        .map(|(i, h)| {
+            Fact::new(
+                format!("Hop {}", i + 1),
+                format!(
+                    "{} {}{}",
+                    h.status,
+                    h.url,
+                    h.location.as_ref().map(|l| format!(" to {l}")).unwrap_or_default()
+                ),
+            )
+        })
         .collect();
     Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
 }
@@ -261,7 +307,14 @@ pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
         facts.push(Fact::new("Issuer", &leaf.issuer));
         facts.push(Fact::new("Expires", leaf.not_after.to_string()));
     }
-    let details = r.chain.iter().enumerate().map(|(i, c)| Fact::new(format!("Certificate {}", i + 1), format!("{} issued by {}, {}", c.subject, c.issuer, c.key))).collect();
+    let details = r
+        .chain
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            Fact::new(format!("Certificate {}", i + 1), format!("{} issued by {}, {}", c.subject, c.issuer, c.key))
+        })
+        .collect();
     let mut findings = tls_findings(host, 443, r);
     findings.extend(ocsp_findings(host, 443, r));
     Outcome { findings, facts, details_title: "Certificate chain", details }
@@ -274,7 +327,10 @@ pub fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Out
         (None, None) => o.facts.push(Fact::new("CAA", "none: any certificate authority may issue")),
         (None, Some(at)) => {
             for r in &caa.records {
-                o.facts.push(Fact::new(format!("CAA at {at}"), format!("{} {} \"{}\"", if r.critical { 128 } else { 0 }, r.tag, r.value)));
+                o.facts.push(Fact::new(
+                    format!("CAA at {at}"),
+                    format!("{} {} \"{}\"", if r.critical { 128 } else { 0 }, r.tag, r.value),
+                ));
             }
         }
     }
@@ -284,7 +340,8 @@ pub fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Out
 }
 
 pub fn registration_outcome(target: &str, r: &Registration) -> Outcome {
-    let mut facts = vec![Fact::new("Domain", &r.domain), Fact::new("Registered", if r.registered { "yes" } else { "no" })];
+    let mut facts =
+        vec![Fact::new("Domain", &r.domain), Fact::new("Registered", if r.registered { "yes" } else { "no" })];
     if let Some(v) = &r.registrar {
         facts.push(Fact::new("Registrar", v));
     }
@@ -377,7 +434,11 @@ pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
     if let Some(f) = &r.failure {
         facts.push(Fact::new("Stopped", format!("{:?}: {}", f.stage, f.message)));
     }
-    let details = r.extensions_after_tls.as_ref().map(|e| vec![Fact::new("Offers after STARTTLS", extensions_text(e))]).unwrap_or_default();
+    let details = r
+        .extensions_after_tls
+        .as_ref()
+        .map(|e| vec![Fact::new("Offers after STARTTLS", extensions_text(e))])
+        .unwrap_or_default();
     Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
 }
 
@@ -388,13 +449,18 @@ pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
         let kind = if s.kind == SubjectKind::Ip { "address" } else { "domain" };
         let listed: Vec<_> = s.lists.iter().filter(|(_, v)| v.state == State::Listed).collect();
         let unsure = s.lists.values().filter(|v| matches!(v.state, State::Refused | State::Unknown)).count();
-        let mut line = if listed.is_empty() { format!("not listed on any of {} lists", s.lists.len() - unsure) } else { format!("listed on {} of {} lists", listed.len(), s.lists.len()) };
+        let mut line = if listed.is_empty() {
+            format!("not listed on any of {} lists", s.lists.len() - unsure)
+        } else {
+            format!("listed on {} of {} lists", listed.len(), s.lists.len())
+        };
         if unsure > 0 {
             line += &format!(", {unsure} gave no verdict");
         }
         facts.push(Fact::new(format!("{subject} ({kind}, {})", s.source), line));
         for (name, v) in &listed {
-            let why = if v.reason.is_empty() { v.codes.join(", ") } else { format!("{} ({})", v.reason, v.codes.join(", ")) };
+            let why =
+                if v.reason.is_empty() { v.codes.join(", ") } else { format!("{} ({})", v.reason, v.codes.join(", ")) };
             facts.push(Fact::new(format!("Listed on {name}"), why));
         }
         for (name, v) in &s.lists {
@@ -459,16 +525,28 @@ mod tests {
         CaaResult {
             name: "www.example.com".into(),
             found_at: found_at.map(Into::into),
-            records: records.iter().map(|(c, t, v)| zombo_core::tls_extras::CaaRecord { critical: *c, tag: t.to_string(), value: v.to_string() }).collect(),
+            records: records
+                .iter()
+                .map(|(c, t, v)| zombo_core::tls_extras::CaaRecord {
+                    critical: *c,
+                    tag: t.to_string(),
+                    value: v.to_string(),
+                })
+                .collect(),
             error: error.map(Into::into),
         }
     }
 
     #[test]
     fn caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings() {
-        let o = with_caa(Outcome::default(), &caa(Some("example.com"), &[(false, "issue", "letsencrypt.org")], None), None);
+        let o =
+            with_caa(Outcome::default(), &caa(Some("example.com"), &[(false, "issue", "letsencrypt.org")], None), None);
         assert_eq!(o.records(), ["CAA at example.com: 0 issue \"letsencrypt.org\""]);
-        assert!(o.findings.iter().any(|f| f.code == "caa_ok"), "{:?}", o.findings.iter().map(|f| f.code).collect::<Vec<_>>());
+        assert!(
+            o.findings.iter().any(|f| f.code == "caa_ok"),
+            "{:?}",
+            o.findings.iter().map(|f| f.code).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -512,7 +590,12 @@ mod tests {
             parent: "com".into(),
             parent_ns: BTreeSet::from(["ns1.example.com".to_string()]),
             glue: BTreeMap::new(),
-            servers: vec![zombo_core::delegation::DelegatedServer { name: "ns1.example.com".into(), address: None, state: ServerState::Unreachable, child_ns: None }],
+            servers: vec![zombo_core::delegation::DelegatedServer {
+                name: "ns1.example.com".into(),
+                address: None,
+                state: ServerState::Unreachable,
+                child_ns: None,
+            }],
             glue_served: BTreeMap::new(),
             unresolvable: vec![],
             cnames: vec![],
@@ -545,7 +628,13 @@ mod tests {
         use zombo_core::ports::PortProbe;
         let r = PortsResult {
             addresses: vec!["192.0.2.1".parse().unwrap()],
-            ports: vec![PortProbe { address: "192.0.2.1".parse().unwrap(), port: 25, service: "SMTP", state: PortState::Filtered, banner: None }],
+            ports: vec![PortProbe {
+                address: "192.0.2.1".parse().unwrap(),
+                port: 25,
+                service: "SMTP",
+                state: PortState::Filtered,
+                banner: None,
+            }],
         };
         let o = ports_outcome("mail.example.com", &r);
         assert!(o.records().contains(&"Port 25 SMTP: no answer on 192.0.2.1".to_string()));
@@ -558,8 +647,19 @@ mod tests {
     fn a_banner_and_an_open_port_show_together() {
         use zombo_core::ports::PortProbe;
         let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
-        let r = PortsResult { addresses: vec![ip], ports: vec![PortProbe { address: ip, port: 22, service: "SSH", state: PortState::Open, banner: Some("SSH-2.0-x".into()) }] };
-        assert!(ports_outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string()));
+        let r = PortsResult {
+            addresses: vec![ip],
+            ports: vec![PortProbe {
+                address: ip,
+                port: 22,
+                service: "SSH",
+                state: PortState::Open,
+                banner: Some("SSH-2.0-x".into()),
+            }],
+        };
+        assert!(
+            ports_outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string())
+        );
     }
 
     #[test]
@@ -587,11 +687,26 @@ mod tests {
     #[test]
     fn a_listed_address_is_called_out_and_every_list_is_kept_in_the_details() {
         use zombo_core::blacklist::{BlacklistResult, Subject, Verdict};
-        let verdict = |state| Verdict { zone: "zen.example", delist: "", state, codes: vec!["127.0.0.2".into()], reason: String::new(), error: String::new() };
+        let verdict = |state| Verdict {
+            zone: "zen.example",
+            delist: "",
+            state,
+            codes: vec!["127.0.0.2".into()],
+            reason: String::new(),
+            error: String::new(),
+        };
         let mut r = BlacklistResult::default();
         r.subjects.insert(
             "127.0.0.2".into(),
-            Subject { kind: SubjectKind::Ip, source: "target".into(), lists: [("Spamhaus ZEN".to_string(), verdict(State::Listed)), ("SpamCop".to_string(), verdict(State::Clean))].into() },
+            Subject {
+                kind: SubjectKind::Ip,
+                source: "target".into(),
+                lists: [
+                    ("Spamhaus ZEN".to_string(), verdict(State::Listed)),
+                    ("SpamCop".to_string(), verdict(State::Clean)),
+                ]
+                .into(),
+            },
         );
         let o = blacklist_outcome("127.0.0.2", &r);
         let lines = o.records();
@@ -605,7 +720,11 @@ mod tests {
     fn a_domain_with_no_address_says_why_nothing_was_checked() {
         use zombo_core::blacklist::BlacklistResult;
         let r = BlacklistResult { resolve: Some("no mail host has an address".into()), ..BlacklistResult::default() };
-        assert!(blacklist_outcome("example.com", &r).records().contains(&"Mail host addresses: no mail host has an address".to_string()));
+        assert!(
+            blacklist_outcome("example.com", &r)
+                .records()
+                .contains(&"Mail host addresses: no mail host has an address".to_string())
+        );
     }
 
     #[test]

@@ -22,7 +22,11 @@ impl ResolvesServerCert for Stapled {
     }
 }
 
-pub async fn serve_stapled(chain: Vec<CertificateDer<'static>>, key: PrivatePkcs8KeyDer<'static>, ocsp: Option<Vec<u8>>) -> SocketAddr {
+pub async fn serve_stapled(
+    chain: Vec<CertificateDer<'static>>,
+    key: PrivatePkcs8KeyDer<'static>,
+    ocsp: Option<Vec<u8>>,
+) -> SocketAddr {
     let provider = Arc::new(ring::default_provider());
     let signing = provider.key_provider.load_private_key(PrivateKeyDer::Pkcs8(key)).unwrap();
     let mut certified = CertifiedKey::new(chain, signing);

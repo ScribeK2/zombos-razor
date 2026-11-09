@@ -53,8 +53,20 @@ impl Kind {
 }
 
 const HEADER_NAMES: &[&str] = &[
-    "received", "from", "to", "subject", "date", "message-id", "return-path", "reply-to", "authentication-results",
-    "received-spf", "dkim-signature", "delivered-to", "mime-version", "x-originating-ip",
+    "received",
+    "from",
+    "to",
+    "subject",
+    "date",
+    "message-id",
+    "return-path",
+    "reply-to",
+    "authentication-results",
+    "received-spf",
+    "dkim-signature",
+    "delivered-to",
+    "mime-version",
+    "x-originating-ip",
 ];
 
 fn is_header_line(line: &str) -> bool {
@@ -65,7 +77,9 @@ fn is_header_line(line: &str) -> bool {
 fn is_log_line(line: &str) -> bool {
     let Some(at) = line.find(" postfix/").or_else(|| line.find("/postfix/")) else { return false };
     let rest = &line[at + 1..];
-    rest.find('[').is_some_and(|b| rest[b + 1..].find("]:").is_some_and(|e| rest[b + 1..b + 1 + e].bytes().all(|c| c.is_ascii_digit())))
+    rest.find('[').is_some_and(|b| {
+        rest[b + 1..].find("]:").is_some_and(|e| rest[b + 1..b + 1 + e].bytes().all(|c| c.is_ascii_digit()))
+    })
 }
 
 /// Guess what the text is. `None` when it looks like neither, so the rep chooses.
@@ -93,7 +107,10 @@ pub fn sniff(text: &str) -> Option<Kind> {
 /// `Err` carries the message the rep reads when the paste is too large.
 pub fn check_size(bytes: usize) -> Result<(), String> {
     if bytes > MAX_PASTE {
-        Err(format!("That text is {} KiB. The limit is 1 MiB, so nothing was pasted. Paste only the part you need.", bytes.div_ceil(1024)))
+        Err(format!(
+            "That text is {} KiB. The limit is 1 MiB, so nothing was pasted. Paste only the part you need.",
+            bytes.div_ceil(1024)
+        ))
     } else {
         Ok(())
     }
@@ -268,7 +285,13 @@ pub struct Mark {
 }
 
 /// Header findings that are about the route and the clock, not about who the sender is.
-const PATH_CODES: &[&str] = &["email_headers_delayed", "email_headers_clock_skew", "email_headers_too_many_hops", "email_headers_truncated", "email_headers_multiple_from"];
+const PATH_CODES: &[&str] = &[
+    "email_headers_delayed",
+    "email_headers_clock_skew",
+    "email_headers_too_many_hops",
+    "email_headers_truncated",
+    "email_headers_multiple_from",
+];
 
 /// The warnings and criticals that belong to one rail section. Findings counts them all.
 pub fn section_problems(report: &Report, section: Section) -> usize {
@@ -321,7 +344,15 @@ fn push_if(rows: &mut Vec<Fact>, key: &str, value: &str) {
 fn path_view(a: &HeaderAnalysis) -> View {
     let mut rows = Vec::new();
     let h = &a.headers;
-    for (k, v) in [("From", &h.from), ("To", &h.to), ("Subject", &h.subject), ("Date", &h.date), ("Message-ID", &h.message_id), ("Return-Path", &h.return_path), ("Reply-To", &h.reply_to)] {
+    for (k, v) in [
+        ("From", &h.from),
+        ("To", &h.to),
+        ("Subject", &h.subject),
+        ("Date", &h.date),
+        ("Message-ID", &h.message_id),
+        ("Return-Path", &h.return_path),
+        ("Reply-To", &h.reply_to),
+    ] {
         push_if(&mut rows, k, v);
     }
     let hops: Vec<Fact> = a
@@ -352,9 +383,19 @@ fn path_view(a: &HeaderAnalysis) -> View {
         })
         .collect();
     let (word, why, glyph) = match (a.hops.len(), a.total_transit_s) {
-        (0, _) => ("No Received headers".to_string(), "The pasted headers hold no hop to follow.".to_string(), Glyph::Info),
-        (n, Some(t)) => (format!("{n} hops"), format!("The message took {} from the first server to the last.", secs(t)), Glyph::Info),
-        (n, None) => (if n == 1 { "1 hop".into() } else { format!("{n} hops") }, "The hops carry too few dates to time the journey.".into(), Glyph::Info),
+        (0, _) => {
+            ("No Received headers".to_string(), "The pasted headers hold no hop to follow.".to_string(), Glyph::Info)
+        }
+        (n, Some(t)) => (
+            format!("{n} hops"),
+            format!("The message took {} from the first server to the last.", secs(t)),
+            Glyph::Info,
+        ),
+        (n, None) => (
+            if n == 1 { "1 hop".into() } else { format!("{n} hops") },
+            "The hops carry too few dates to time the journey.".into(),
+            Glyph::Info,
+        ),
     };
     let mut disclosures = Vec::new();
     if hops.len() > OPEN_ROWS {
@@ -399,8 +440,13 @@ fn auth_view(a: &HeaderAnalysis) -> View {
     } else {
         ("Partly passed", Glyph::Triangle)
     };
-    let why = format!("SPF {}, DKIM {}, DMARC {}.", verdict_text(&au.spf), verdict_text(&au.dkim), verdict_text(&au.dmarc));
-    let mut rows = vec![Fact::new("SPF", verdict_text(&au.spf)), Fact::new("DKIM", verdict_text(&au.dkim)), Fact::new("DMARC", verdict_text(&au.dmarc))];
+    let why =
+        format!("SPF {}, DKIM {}, DMARC {}.", verdict_text(&au.spf), verdict_text(&au.dkim), verdict_text(&au.dmarc));
+    let mut rows = vec![
+        Fact::new("SPF", verdict_text(&au.spf)),
+        Fact::new("DKIM", verdict_text(&au.dkim)),
+        Fact::new("DMARC", verdict_text(&au.dmarc)),
+    ];
     if au.compauth.is_some() {
         rows.push(Fact::new("Composite authentication", verdict_text(&au.compauth)));
     }
@@ -411,13 +457,20 @@ fn auth_view(a: &HeaderAnalysis) -> View {
     rows.push(Fact::new("Message-ID", yes_no(al.message_id_aligned)));
     let mut disclosures = Vec::new();
     if !au.dkim_signatures.is_empty() {
-        let rows = au.dkim_signatures.iter().map(|s| Fact::new("DKIM-Signature", format!("d={} s={}", s.domain, s.selector))).collect();
+        let rows = au
+            .dkim_signatures
+            .iter()
+            .map(|s| Fact::new("DKIM-Signature", format!("d={} s={}", s.domain, s.selector)))
+            .collect();
         disclosures.push(Disclosure { id: "ev-dkim", title: "DKIM signatures as written (not verified)".into(), rows });
     }
     let sp = &a.spam;
     let mut spam = Vec::new();
     if let Some(s) = sp.score {
-        spam.push(Fact::new("Spam score", format!("{s}{}", sp.required.map(|r| format!(" of {r}")).unwrap_or_default())));
+        spam.push(Fact::new(
+            "Spam score",
+            format!("{s}{}", sp.required.map(|r| format!(" of {r}")).unwrap_or_default()),
+        ));
     }
     if let Some(n) = sp.scl {
         spam.push(Fact::new("Spam confidence level", n.to_string()));
@@ -460,7 +513,13 @@ fn timeline_view(a: &MailLogAnalysis) -> View {
         };
         lines.push(Fact::new(
             format!("{} {}", m.time, m.queue_id),
-            format!("{verdict}: from {} via {}{}, {} bytes", orunknown(&m.from), orunknown(&m.client_host), ip(m.client_ip), m.size),
+            format!(
+                "{verdict}: from {} via {}{}, {} bytes",
+                orunknown(&m.from),
+                orunknown(&m.client_host),
+                ip(m.client_ip),
+                m.size
+            ),
         ));
         for r in m.recipients.iter().take(RECIPIENTS_PER_MESSAGE) {
             let status = match &r.status {
@@ -485,13 +544,20 @@ fn timeline_view(a: &MailLogAnalysis) -> View {
             lines.push(Fact::new(format!("    to {}", r.to), v));
         }
         if m.recipients.len() > RECIPIENTS_PER_MESSAGE {
-            lines.push(Fact::new("    more", format!("{} more recipients", m.recipients.len() - RECIPIENTS_PER_MESSAGE)));
+            lines.push(Fact::new(
+                "    more",
+                format!("{} more recipients", m.recipients.len() - RECIPIENTS_PER_MESSAGE),
+            ));
         }
     }
     let mut rows = Vec::new();
     let mut disclosures = Vec::new();
     if a.messages.len() > OPEN_ROWS {
-        disclosures.push(Disclosure { id: "ev-messages", title: format!("All {} messages", a.messages.len()), rows: lines });
+        disclosures.push(Disclosure {
+            id: "ev-messages",
+            title: format!("All {} messages", a.messages.len()),
+            rows: lines,
+        });
     } else {
         rows = lines;
     }
@@ -502,13 +568,33 @@ fn timeline_view(a: &MailLogAnalysis) -> View {
             .map(|r| {
                 let code = r.smtp_code.map(|c| format!("{c} ")).unwrap_or_default();
                 let why = r.reason.map(|x| x.text().to_string()).unwrap_or_else(|| r.reply.clone());
-                Fact::new(format!("{} refused", r.time), format!("{}{} from {} to {}: {code}{why}", orunknown(&r.client_host), ip(r.client_ip), orunknown(&r.from), orunknown(&r.to)))
+                Fact::new(
+                    format!("{} refused", r.time),
+                    format!(
+                        "{}{} from {} to {}: {code}{why}",
+                        orunknown(&r.client_host),
+                        ip(r.client_ip),
+                        orunknown(&r.from),
+                        orunknown(&r.to)
+                    ),
+                )
             })
             .collect();
-        disclosures.push(Disclosure { id: "ev-refused", title: format!("{} refused at the door", a.rejections.len()), rows: rej });
+        disclosures.push(Disclosure {
+            id: "ev-refused",
+            title: format!("{} refused at the door", a.rejections.len()),
+            rows: rej,
+        });
     }
     if a.truncated || a.unparsed > 0 {
-        rows.push(Fact::new("Skipped", format!("{} lines were not Postfix lines{}", a.unparsed, if a.truncated { "; some data went over the limits and was left out" } else { "" })));
+        rows.push(Fact::new(
+            "Skipped",
+            format!(
+                "{} lines were not Postfix lines{}",
+                a.unparsed,
+                if a.truncated { "; some data went over the limits and was left out" } else { "" }
+            ),
+        ));
     }
     View { word: word.into(), why, glyph, findings: Vec::new(), rows, disclosures }
 }
@@ -525,8 +611,16 @@ pub fn view(report: &Report, section: Section) -> View {
                 None => "No findings".to_string(),
                 Some(f) => severity_word(f.severity).to_string(),
             };
-            let glyph = report.findings.first().map(|f| crate::diagnosis::severity_glyph(f.severity)).unwrap_or(Glyph::Info);
-            return View { word, why: format!("{n} findings, most serious first."), glyph, findings: report.findings.clone(), rows: Vec::new(), disclosures: Vec::new() };
+            let glyph =
+                report.findings.first().map(|f| crate::diagnosis::severity_glyph(f.severity)).unwrap_or(Glyph::Info);
+            return View {
+                word,
+                why: format!("{n} findings, most serious first."),
+                glyph,
+                findings: report.findings.clone(),
+                rows: Vec::new(),
+                disclosures: Vec::new(),
+            };
         }
     };
     if section == Section::Findings {
@@ -669,7 +763,11 @@ mod tests {
         let r = analyse(Kind::Headers, fixture!("spoofed.txt")).unwrap();
         assert_eq!(view(&r, Section::Authentication).word, "Failed");
         let f = view(&r, Section::Findings).findings;
-        assert!(f.windows(2).all(|w| crate::diagnosis::severity_rank(w[0].severity) <= crate::diagnosis::severity_rank(w[1].severity)));
+        assert!(
+            f.windows(2)
+                .all(|w| crate::diagnosis::severity_rank(w[0].severity)
+                    <= crate::diagnosis::severity_rank(w[1].severity))
+        );
     }
 
     #[test]
@@ -678,7 +776,14 @@ mod tests {
         let t = view(&r, Section::Timeline);
         assert_eq!(t.word, "Delivered");
         assert!(t.rows[0].key.contains("A1B2C3D4"));
-        assert!(t.rows.iter().any(|f| f.key.contains("rcpt@example.net") && f.value.starts_with("sent via mx.example.net [198.51.100.5]")), "{:?}", t.rows);
+        assert!(
+            t.rows
+                .iter()
+                .any(|f| f.key.contains("rcpt@example.net")
+                    && f.value.starts_with("sent via mx.example.net [198.51.100.5]")),
+            "{:?}",
+            t.rows
+        );
     }
 
     #[test]

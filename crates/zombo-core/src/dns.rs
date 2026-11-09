@@ -2,11 +2,11 @@
 
 use std::{net::SocketAddr, time::Duration};
 
+use crate::finding::{Finding, Severity};
 use hickory_proto::{
     op::{Edns, Message, Query},
     rr::{Name, RecordType},
 };
-use crate::finding::{Finding, Severity};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
