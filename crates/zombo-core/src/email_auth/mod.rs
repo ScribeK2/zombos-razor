@@ -4,6 +4,7 @@
 
 mod dkim;
 mod dmarc;
+mod query;
 mod records;
 mod spf;
 
@@ -11,11 +12,33 @@ pub use dkim::{DKIM_COMMON_SELECTORS, DkimFlags, DkimKey, DkimKeyError, KeyType,
 pub use dmarc::{Alignment, DmarcRecord, Policy, parse_dmarc};
 pub use records::{Bimi, MtaSts, TlsRpt, parse_bimi, parse_mta_sts, parse_tls_rpt};
 pub use spf::{
-    EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfError, SpfNode, SpfTerm, effective_all, parse_spf,
+    EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfAudit, SpfError, SpfNode, SpfTerm, effective_all, parse_spf,
     spf_records,
 };
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
+
+use serde::Serialize;
+
+use query::Dns;
+
+/// Everything `email_auth` found for one domain.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct EmailAuthResult {
+    pub spf: SpfAudit,
+    /// The domain's MX hosts, most preferred first: a mail provider shows in them.
+    pub mx_hosts: Vec<String>,
+}
+
+/// Audit one domain's email authentication through one resolver. `limit`
+/// bounds each DNS question, not the whole audit.
+pub async fn email_auth(resolver: SocketAddr, domain: &str, dkim_selectors: &[String], limit: Duration) -> EmailAuthResult {
+    let _ = dkim_selectors;
+    let dns = Dns { server: resolver, limit };
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    let (spf, mx_hosts) = tokio::join!(spf::spf_audit(dns, &domain), dns.mx_hosts(&domain));
+    EmailAuthResult { spf, mx_hosts: mx_hosts.unwrap_or_default() }
+}
 
 /// DKIM and DMARC records are `tag=value; tag=value` lists. Tag names are
 /// case-insensitive, whitespace inside a value is dropped, and a repeated tag

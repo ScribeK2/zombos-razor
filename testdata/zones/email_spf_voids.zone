@@ -1,0 +1,1 @@
+example.com. 300 IN TXT "v=spf1 a:nx1.test mx:nx2.test exists:nx3.test -all"

@@ -108,7 +108,7 @@ pub fn parse_dkim_key(selector: &str, cname: Option<&str>, record: &str) -> Opti
 fn base64(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
     let pad = b.iter().rev().take_while(|&&c| c == b'=').count();
-    if b.len() % 4 != 0 || pad > 2 {
+    if !b.len().is_multiple_of(4) || pad > 2 {
         return None;
     }
     let (mut out, mut acc, mut n) = (Vec::with_capacity(b.len() / 4 * 3), 0u32, 0u32);

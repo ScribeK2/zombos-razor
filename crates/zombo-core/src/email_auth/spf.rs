@@ -5,9 +5,13 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
+use hickory_proto::rr::RecordType;
 use serde::Serialize;
 
-use super::clip;
+use super::{
+    clip,
+    query::{Dns, concurrently},
+};
 
 /// RFC 7208 4.6.4: more DNS-querying terms than this is a permerror.
 pub const MAX_LOOKUPS: usize = 10;
@@ -270,10 +274,34 @@ fn ip_term(v4: bool, value: &str) -> Option<Mechanism> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// What an audit of one domain's SPF found.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SpfAudit {
+    /// Every `v=spf1` record at the domain.
+    pub records: Vec<String>,
+    /// The single record, flattened through its includes and redirects.
+    pub tree: Option<SpfNode>,
+    /// Absent unless there is a tree.
+    pub all: EffectiveAll,
+    /// DNS-querying terms, counted across the tree.
+    pub lookups: usize,
+    /// Lookups that found nothing.
+    pub void_lookups: usize,
+    /// Resolving stopped at the lookup cap, so `lookups` is a lower bound.
+    pub truncated: bool,
+    /// Permerror causes other than the lookup limit.
+    pub errors: Vec<SpfError>,
+    /// Lookups inside the tree that got no answer.
+    pub failed: Vec<String>,
+    /// The domain's own TXT lookup got no answer.
+    pub lookup_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "qualifier")]
 pub enum EffectiveAll {
     /// The record, and any redirect behind it, has no `all`.
+    #[default]
     Absent,
     /// A redirect that was not resolved: a macro, the lookup cap, or a failed or broken target.
     Unknown,
@@ -292,6 +320,200 @@ pub fn effective_all(node: &SpfNode) -> EffectiveAll {
             _ => EffectiveAll::Unknown,
         },
     }
+}
+
+/// One record to walk: the domain it is published at, and the way back to the root.
+struct Slot {
+    domain: String,
+    /// The domains from the root down to this one, to catch loops.
+    path: Vec<String>,
+    record: Option<String>,
+    terms: Vec<SpfTerm>,
+    error: Option<NodeError>,
+    /// (term index, slot index) of each resolved include or redirect.
+    children: Vec<(usize, usize)>,
+}
+
+impl Slot {
+    fn new(domain: String, path: Vec<String>, record: Option<String>) -> Slot {
+        Slot { domain, path, record, terms: vec![], error: None, children: vec![] }
+    }
+}
+
+enum Query {
+    /// The SPF record of an include or redirect target.
+    Fetch(String, RefKind),
+    /// `a`, `mx` or `exists`: does the host have any such record?
+    Count(&'static str, String),
+}
+
+impl Query {
+    fn duplicate(&self) -> Query {
+        match self {
+            Query::Fetch(d, k) => Query::Fetch(d.clone(), *k),
+            Query::Count(n, h) => Query::Count(n, h.clone()),
+        }
+    }
+}
+
+struct Job {
+    slot: usize,
+    term: usize,
+    query: Query,
+}
+
+enum Answer {
+    Txt(Vec<String>),
+    Count(usize),
+}
+
+async fn run(dns: Dns, q: Query) -> Result<Answer, String> {
+    match q {
+        Query::Fetch(domain, _) => dns.txt(&domain).await.map(|t| Answer::Txt(t.records)),
+        Query::Count(name, host) => {
+            let rtype = if name == "mx" { RecordType::MX } else { RecordType::A };
+            let mut n = dns.count(&host, rtype).await?;
+            if n == 0 && name == "a" {
+                n = dns.count(&host, RecordType::AAAA).await?;
+            }
+            Ok(Answer::Count(n))
+        }
+    }
+}
+
+/// Fetch the domain's SPF record and walk it: no address is evaluated, it only
+/// counts lookups and finds what makes the record a permerror. The walk goes
+/// one level of includes at a time. Within a level the lookups run at the same
+/// time, but the lookup count and the cap are applied in record order first, so
+/// the result does not depend on which answer arrives first.
+pub(crate) async fn spf_audit(dns: Dns, domain: &str) -> SpfAudit {
+    let mut audit = SpfAudit::default();
+    match dns.txt(domain).await {
+        Ok(t) => audit.records = spf_records(&t.records),
+        Err(e) => {
+            audit.lookup_error = Some(e);
+            return audit;
+        }
+    }
+    if audit.records.len() != 1 {
+        return audit;
+    }
+    let mut arena = vec![Slot::new(domain.to_string(), vec![domain.to_string()], Some(audit.records[0].clone()))];
+    let mut level = vec![0];
+    while !level.is_empty() {
+        let mut jobs = vec![];
+        for &s in &level {
+            let (here, path) = (arena[s].domain.clone(), arena[s].path.clone());
+            let parsed = parse_spf(&here, arena[s].record.as_deref().unwrap_or_default());
+            audit.errors.extend(parsed.errors);
+            let has_all = parsed.terms.iter().any(|t| t.mechanism == Mechanism::All);
+            for (i, t) in parsed.terms.iter().enumerate() {
+                // RFC 7208 6.1: a redirect next to `all` is ignored.
+                if !t.mechanism.is_lookup() || (has_all && matches!(t.mechanism, Mechanism::Redirect(_))) {
+                    continue;
+                }
+                audit.lookups += 1;
+                if audit.lookups > LOOKUP_CAP {
+                    audit.truncated = true;
+                    continue;
+                }
+                let query = match &t.mechanism {
+                    // A macro expands per message: nothing to resolve.
+                    Mechanism::Include(v) | Mechanism::Redirect(v) if !v.is_empty() && !v.contains('%') => {
+                        let kind = if matches!(t.mechanism, Mechanism::Include(_)) { RefKind::Include } else { RefKind::Redirect };
+                        let target = v.strip_suffix('.').unwrap_or(v).to_ascii_lowercase();
+                        if path.contains(&target) {
+                            audit.errors.push(SpfError::Loop { kind, domain: target.clone() });
+                            let mut slot = Slot::new(target, vec![], None);
+                            slot.error = Some(NodeError::Loop);
+                            arena.push(slot);
+                            let idx = arena.len() - 1;
+                            arena[s].children.push((i, idx));
+                            continue;
+                        }
+                        Query::Fetch(target, kind)
+                    }
+                    Mechanism::A(h) | Mechanism::Mx(h) => {
+                        let name = if matches!(t.mechanism, Mechanism::A(_)) { "a" } else { "mx" };
+                        Query::Count(name, h.domain.clone().unwrap_or_else(|| here.clone()))
+                    }
+                    Mechanism::Exists(v) if !v.is_empty() => Query::Count("exists", v.clone()),
+                    _ => continue,
+                };
+                if matches!(&query, Query::Count(_, h) if h.contains('%')) {
+                    continue;
+                }
+                jobs.push(Job { slot: s, term: i, query });
+            }
+            arena[s].terms = parsed.terms;
+        }
+
+        let answers = concurrently(jobs.iter().map(|j| run(dns, j.query.duplicate())).collect()).await;
+
+        level = vec![];
+        for (job, answer) in jobs.iter().zip(answers) {
+            let answer = answer.unwrap_or_else(|| Err("the lookup task failed".into()));
+            match (&job.query, answer) {
+                (Query::Fetch(target, kind), answer) => {
+                    let mut path = arena[job.slot].path.clone();
+                    path.push(target.clone());
+                    let mut slot = Slot::new(target.clone(), path, None);
+                    match answer {
+                        Err(e) => {
+                            audit.failed.push(format!("{kind}:{target}: {e}"));
+                            slot.error = Some(NodeError::LookupFailed(e));
+                        }
+                        Ok(Answer::Txt(txts)) => {
+                            let mut recs = spf_records(&txts);
+                            match recs.len() {
+                                0 => {
+                                    slot.error = Some(NodeError::NoRecord);
+                                    audit.void_lookups += usize::from(txts.is_empty());
+                                    audit.errors.push(SpfError::NoRecord { kind: *kind, domain: target.clone() });
+                                }
+                                1 => slot.record = recs.pop(),
+                                n => {
+                                    slot.error = Some(NodeError::MultipleRecords);
+                                    audit.errors.push(SpfError::MultipleRecords { kind: *kind, domain: target.clone(), count: n });
+                                }
+                            }
+                        }
+                        Ok(Answer::Count(_)) => {}
+                    }
+                    arena.push(slot);
+                    let idx = arena.len() - 1;
+                    if arena[idx].record.is_some() {
+                        level.push(idx);
+                    }
+                    arena[job.slot].children.push((job.term, idx));
+                }
+                (Query::Count(name, host), Err(e)) => audit.failed.push(format!("{name}:{host}: {e}")),
+                (Query::Count(..), Ok(Answer::Count(0))) => {
+                    arena[job.slot].terms[job.term].void = true;
+                    audit.void_lookups += 1;
+                }
+                (Query::Count(..), Ok(_)) => {}
+            }
+        }
+    }
+
+    let tree = build(&mut arena, 0);
+    audit.all = effective_all(&tree);
+    audit.tree = Some(tree);
+    if audit.void_lookups > MAX_VOIDS {
+        audit.errors.push(SpfError::TooManyVoids(audit.void_lookups));
+    }
+    audit
+}
+
+/// The arena as a tree. Depth is at most the lookup cap, since each level of it took a lookup.
+fn build(arena: &mut [Slot], i: usize) -> SpfNode {
+    let children = std::mem::take(&mut arena[i].children);
+    let mut terms = std::mem::take(&mut arena[i].terms);
+    for (term, child) in children {
+        terms[term].target = Some(Box::new(build(arena, child)));
+    }
+    SpfNode { domain: std::mem::take(&mut arena[i].domain), record: arena[i].record.take(), terms, error: arena[i].error.take() }
 }
 
 #[cfg(test)]

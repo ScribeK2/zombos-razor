@@ -1,0 +1,2 @@
+example.com. 300 IN TXT "v=spf1 include:gone.test include:loop.test ip4:300.1.1.1 bogus ~all"
+loop.test. 300 IN TXT "v=spf1 include:example.com"

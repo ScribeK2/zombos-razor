@@ -1,0 +1,7 @@
+example.com. 300 IN A 93.184.216.34
+example.com. 300 IN MX 0 example-com.mail.protection.outlook.com.
+example.com. 300 IN NS a.iana-servers.net.
+example.com. 300 IN TXT "v=spf1 include:mail.zendesk.com -all"
+mail.zendesk.com. 300 IN TXT "v=spf1 ip4:192.161.144.0/20 -all"
+spf.protection.outlook.com. 300 IN TXT "v=spf1 ip4:40.92.0.0/15 -all"
+_spf.example.com. 300 IN TXT "v=spf1 include:spf.protection.outlook.com -all"
