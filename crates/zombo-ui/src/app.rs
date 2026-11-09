@@ -115,8 +115,7 @@ impl Shell {
         })
         .detach();
         let config = Config::load(Dirs::from_env());
-        let mut ws = Workspace::default();
-        ws.recent = config::to_recent(&config.recent, config::unix_now(), Instant::now());
+        let ws = Workspace { recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()), ..Workspace::default() };
         let toast = [("config.toml", &config.settings_problem), ("recent.toml", &config.recent_problem)]
             .into_iter()
             .filter_map(|(file, p)| p.as_ref().map(|p| format!("{file} has an error: {p}. The app runs without it and leaves the file as it is.")))
