@@ -34,6 +34,7 @@ pub struct Shell {
     pane_focus: FocusHandle,
     rail_focus: Vec<FocusHandle>,
     finding_focus: Vec<FocusHandle>,
+    action_focus: Vec<FocusHandle>,
     palette: Option<usize>,
     open: HashSet<&'static str>,
     watches: Watches,
@@ -132,6 +133,7 @@ impl Shell {
             pane_focus: cx.focus_handle(),
             rail_focus: Section::ALL.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             finding_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            action_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
             open: HashSet::new(),
             watches: Watches::default(),
@@ -740,7 +742,7 @@ impl Shell {
         let show_chips = !findings.is_empty();
         let watchable = checks::watchable(section) && state != zombo_ui::status::CheckState::NotRun;
         let watching = self.watches.is_watching(&tab.target.value, section);
-        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f));
+        let finding_views = findings.iter().enumerate().map(|(i, f)| self.finding_card(i, f, Some(section), cx)).collect::<Vec<_>>();
         let brief = ondemand::brief(section);
         let run_label = ondemand::run_label(section);
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
@@ -925,8 +927,9 @@ impl Shell {
             .when_some(tab.history(section).and_then(|h| h.changes.clone()), |s, d| s.child(self.changes_view(d, cx)))
     }
 
-    fn finding_card(&self, i: usize, f: &zombo_core::Finding) -> Stateful<Div> {
+    fn finding_card(&self, i: usize, f: &zombo_core::Finding, current: Option<Section>, cx: &mut Context<Self>) -> Stateful<Div> {
         let c = severity_color(f.severity);
+        let go = current.and_then(|c| zombo_ui::finding_owner::jump_target(f.code, c));
         let label = dg::finding_label(f);
         div()
             .id(("finding", i))
@@ -974,7 +977,44 @@ impl Shell {
                         s.child(div().text_size(px(t::TEXT_LABEL)).line_height(px(18.)).text_color(color(t::GRAY_800)).child(r.to_string()))
                     }),
             )
-}
+            .when_some(go, |s, target| s.child(self.go_button(i, target, cx)))
+    }
+
+    fn go_button(&self, i: usize, target: Section, cx: &mut Context<Self>) -> impl IntoElement {
+        let jump = move |this: &mut Self, cx: &mut Context<Self>| {
+            this.ws.jump(target.index());
+            cx.notify();
+        };
+        div()
+            .id(("go", i))
+            .track_focus(&self.action_focus[i.min(FINDING_HANDLES - 1)])
+            .flex_none()
+            .h(px(28.))
+            .px(px(12.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .border_1()
+            .border_color(color(t::GRAY_500))
+            .rounded(px(t::RADIUS_SMALL))
+            .bg(color(t::GRAY_100))
+            .text_size(px(t::TEXT_CAPTION))
+            .cursor_pointer()
+            .hover(|s| s.bg(color(t::GRAY_200)))
+            .active(|s| s.bg(color(t::GRAY_300)))
+            .focus_visible(focus_ring)
+            .role(Role::Button)
+            .aria_label(format!("Go to the {} section", target.label()))
+            .on_click(cx.listener(move |this, _, _, cx| jump(this, cx)))
+            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                    jump(this, cx);
+                }
+            }))
+            .child(format!("{} \u{2192}", target.label()))
+            .when_some(zombo_ui::finding_owner::jump_digit(target), |s, d| s.child(kbd(&format!("Ctrl {d}"))))
+    }
 
     fn watch_button(&self, watching: bool, cx: &mut Context<Self>) -> impl IntoElement {
         div()
