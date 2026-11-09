@@ -6,7 +6,15 @@
 //! full. Trust is then judged here, with an injected clock, so every failure
 //! is its own finding.
 
-use std::{borrow::Cow, fmt, io, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    fmt, io,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use rustls::{
     AlertDescription, CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
@@ -110,6 +118,8 @@ pub struct TlsResult {
     pub trust: Trust,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verify_error: Option<String>,
+    /// The server sent an OCSP response in the handshake. Its content is not checked.
+    pub ocsp_stapled: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -147,7 +157,7 @@ fn provider() -> Arc<CryptoProvider> {
 /// (as a weak key) rather than fail to connect. So `verified` does not prove
 /// that the server holds the certificate's private key.
 #[derive(Debug)]
-struct AcceptAnything(WebPkiSupportedAlgorithms);
+struct AcceptAnything(WebPkiSupportedAlgorithms, Arc<AtomicBool>);
 
 impl ServerCertVerifier for AcceptAnything {
     fn verify_server_cert(
@@ -155,9 +165,10 @@ impl ServerCertVerifier for AcceptAnything {
         _: &CertificateDer<'_>,
         _: &[CertificateDer<'_>],
         _: &ServerName<'_>,
-        _: &[u8],
+        ocsp: &[u8],
         _: UnixTime,
     ) -> Result<ServerCertVerified, RustlsError> {
+        self.1.store(!ocsp.is_empty(), Ordering::Relaxed);
         Ok(ServerCertVerified::assertion())
     }
 
@@ -174,14 +185,16 @@ impl ServerCertVerifier for AcceptAnything {
     }
 }
 
-fn client_config() -> Result<ClientConfig, RustlsError> {
+fn client_config() -> Result<(ClientConfig, Arc<AtomicBool>), RustlsError> {
     let p = provider();
-    let verifier = AcceptAnything(p.signature_verification_algorithms);
-    Ok(ClientConfig::builder_with_provider(p)
+    let stapled = Arc::new(AtomicBool::new(false));
+    let verifier = AcceptAnything(p.signature_verification_algorithms, stapled.clone());
+    let config = ClientConfig::builder_with_provider(p)
         .with_safe_default_protocol_versions()?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_no_client_auth())
+        .with_no_client_auth();
+    Ok((config, stapled))
 }
 
 /// Handshake over a stream that is already connected and, for STARTTLS, already
@@ -192,14 +205,30 @@ pub async fn inspect_stream<S>(stream: S, server_name: &str, roots: &RootCertSto
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    inspect_stream_keep(stream, server_name, roots, now, timeout).await.map(|(_, r)| r)
+}
+
+/// `inspect_stream`, but the encrypted stream is handed back so the caller can
+/// keep talking over it (an SMTP greeting after implicit TLS, EHLO after STARTTLS).
+pub async fn inspect_stream_keep<S>(
+    stream: S,
+    server_name: &str,
+    roots: &RootCertStore,
+    now: OffsetDateTime,
+    timeout: Duration,
+) -> Result<(tokio_rustls::client::TlsStream<S>, TlsResult), TlsError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let name = ServerName::try_from(server_name.to_owned()).map_err(|_| TlsError::BadName(server_name.to_owned()))?;
-    let config = client_config().map_err(|e| TlsError::Handshake(e.to_string()))?;
+    let (config, stapled) = client_config().map_err(|e| TlsError::Handshake(e.to_string()))?;
     let connector = TlsConnector::from(Arc::new(config));
     let tls = tokio::time::timeout(timeout, connector.connect(name, stream))
         .await
         .map_err(|_| TlsError::TimedOut)?
         .map_err(handshake_error)?;
     let conn = tls.get_ref().1;
+    let ocsp_stapled = stapled.load(Ordering::Relaxed);
     let version = match conn.protocol_version() {
         Some(rustls::ProtocolVersion::TLSv1_2) => "TLS 1.2".to_string(),
         Some(rustls::ProtocolVersion::TLSv1_3) => "TLS 1.3".to_string(),
@@ -211,7 +240,8 @@ where
         .unwrap_or_default();
     let chain = conn.peer_certificates().ok_or(TlsError::NoCertificate)?;
     let a = assess(chain, server_name, roots, now)?;
-    Ok(TlsResult { version, cipher, chain: a.chain, hostname_match: a.hostname_match, verified: a.verified, trust: a.trust, verify_error: a.verify_error })
+    let result = TlsResult { version, cipher, chain: a.chain, hostname_match: a.hostname_match, verified: a.verified, trust: a.trust, verify_error: a.verify_error, ocsp_stapled };
+    Ok((tls, result))
 }
 
 /// Connect to `addr` (a name is resolved with the system resolver) and inspect
