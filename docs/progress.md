@@ -165,6 +165,10 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Answer column shows every record type in one line; sketch shows one type per column
 - [ ] Not built: On-demand rail group, Watch button and status line, collapsed data rows, "changed since previous run", window shadow and resize handle, motion
 - [ ] `Ctrl+9` mapped but the rail has 8 sections
-- [ ] `cargo deny`: allow `0BSD` (enum-iterator); ignore advisories for unmaintained `instant`, `paste`, `rustybuzz`, `ttf-parser`, `zbus_names`, `zvariant`, `zvariant_derive`, `rustls-pemfile` (each with a reason)
-- [ ] CI: apt `-dev` packages for GPUI builds (take the list from `spike/Dockerfile.build`)
+- [x] (done) `cargo deny`: allow `0BSD` (enum-iterator); ignore advisories for unmaintained `instant`, `paste`, `rustybuzz`, `ttf-parser`, `zbus_names`, `zvariant`, `zvariant_derive`, `rustls-pemfile` (each with a reason)
+- [x] (done, untested on GitHub) CI: apt `-dev` packages for GPUI builds (take the list from `spike/Dockerfile.build`)
 - [ ] Unverified: X11, GNOME, Retry, timeout and failed paths live, screen reader output, full tab order
+
+## Location
+
+The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-11-09 because the old NTFS hard disk made builds take hours. The full workspace test now takes under 2 minutes. 501 tests pass; clippy, `cargo deny` and `cargo audit` clean.
