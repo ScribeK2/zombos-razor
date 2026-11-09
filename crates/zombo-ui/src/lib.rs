@@ -17,6 +17,7 @@ pub mod rail;
 pub mod record;
 pub mod runtime;
 pub mod section;
+pub mod session;
 pub mod settings_model;
 pub mod smtp_plan;
 pub mod status;

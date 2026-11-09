@@ -206,3 +206,11 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [ ] Rail captions ("done · 3 problems", "no received headers") truncate a little in the 132 px caption
 - [ ] Remaining differences from the sketch: no Watch button on Summary, no live "Watching" status line unless a Watch exists, tab height and strip border, propagation table has a type switcher and header summary "TXT · 2 of 10 differ" is missing, DNSSEC rail label ("not signed") is a count line here
 - [ ] Unverified: client-decorated frame on GNOME or KDE, resize drags, motion visually and with animations off, failed-MX fallback, 465 implicit TLS, the lowest MX silent and a later one answering, keyboard-only tab order
+
+## Release work (2026-11-09)
+
+- [x] AppImage packaging merged: `packaging/build-appimage.sh` (Ubuntu 24.04 container, pinned appimagetool and runtime, reproducible), `packaging/smoke.sh`, `.github/workflows/release.yml` (draft release on a `v*` tag; signing step is a placeholder that fails until the minisign step lands), `docs/release.md`. AppImage 17.3 MB, CLI tarball 3.7 MB, smoke test passes on Ubuntu 24.04.5 and 26.04.1 with `fuse3` only. First render 219 ms and 233 ms
+- [x] Fixed: no display variable at all made the app run forever with no window; it now exits 1 with a message (`session.rs`)
+- [ ] Not verified: the AppImage on a stock Arch install without `fuse3` (fallback is `--appimage-extract-and-run`), the FUSE mount path in CI (CI smoke uses extract-and-run), the release workflow itself, a from-scratch build on a second machine
+- [ ] Local builds take their version from `git describe`, which finds the old Go tag `v1.0.0`; tag the Rust release or set VERSION
+- [ ] Metainfo homepage URL still says ScribeK2/Stackwell; change with the rename

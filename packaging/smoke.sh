@@ -45,11 +45,16 @@ echo "ran 8 s without crashing. $(grep -m1 'first render' "$log" || echo 'no fir
 
 : >"$log"
 rc=0
-# A dead DISPLAY, not an unset one: with neither variable set, GPUI starts a headless platform and never exits.
+# A dead DISPLAY first, then no display variable at all.
 env -u WAYLAND_DISPLAY DISPLAY=:77 timeout 20 /app.AppImage >"$log" 2>&1 || rc=$?
 [ "$rc" != 0 ] && [ "$rc" != 124 ] || fail "with no display the app should exit with an error, got status $rc"
 grep -q "the window system could not start" "$log" || fail "with no display the app did not print the graceful-failure message"
-echo "no display: exit $rc with the graceful-failure message"
+echo "dead display: exit $rc with the graceful-failure message"
+rc=0
+env -u WAYLAND_DISPLAY -u DISPLAY timeout 20 /app.AppImage >"$log" 2>&1 || rc=$?
+[ "$rc" != 0 ] && [ "$rc" != 124 ] || fail "with no display variable the app should exit with an error, got status $rc"
+grep -q "no display found" "$log" || fail "with no display variable the app did not say so"
+echo "no display variable: exit $rc with the message"
 
 /app.AppImage --help | grep -q -- "--appimage-extract-and-run" || fail "--help lacks the extract-and-run fallback text"
 echo "OK"

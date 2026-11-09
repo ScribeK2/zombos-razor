@@ -58,6 +58,10 @@ fn launch(started: Instant) {
 }
 
 fn main() -> ExitCode {
+    if !zombo_ui::session::has_display_in_env() {
+        eprintln!("{}", zombo_ui::session::NO_DISPLAY);
+        return ExitCode::FAILURE;
+    }
     let started = Instant::now();
     let panic_text = Arc::new(Mutex::new(None::<String>));
     let sink = panic_text.clone();
