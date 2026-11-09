@@ -75,6 +75,78 @@ pub enum WhoisError {
     Invalid(String),
 }
 
+/// A date as a registry gave it: normalised to UTC when it is in a format we
+/// know, otherwise kept as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegDate {
+    At(OffsetDateTime),
+    Raw(String),
+}
+
+impl fmt::Display for RegDate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RegDate::At(t) => {
+                let t = t.to_offset(time::UtcOffset::UTC).replace_nanosecond(0).unwrap_or(*t);
+                f.write_str(&t.format(&Rfc3339).map_err(|_| fmt::Error)?)
+            }
+            RegDate::Raw(s) => f.write_str(s),
+        }
+    }
+}
+
+impl Serialize for RegDate {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Registration {
+    /// The registrable name looked up.
+    pub domain: String,
+    pub source: Source,
+    /// The server that answered: an RDAP base URL or a WHOIS host:port.
+    pub server: String,
+    pub registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registrar: Option<String>,
+    /// EPP camelCase, sorted, e.g. clientHold.
+    pub statuses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<RegDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated: Option<RegDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires: Option<RegDate>,
+    /// Lowercase, no trailing dot, sorted.
+    pub nameservers: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnssec: Option<bool>,
+    /// Why WHOIS was used instead of RDAP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rdap_error: Option<String>,
+}
+
+impl Registration {
+    pub fn empty(domain: &str, source: Source, server: &str) -> Self {
+        Registration {
+            domain: domain.into(),
+            source,
+            server: server.into(),
+            registered: false,
+            registrar: None,
+            statuses: vec![],
+            created: None,
+            updated: None,
+            expires: None,
+            nameservers: vec![],
+            dnssec: None,
+            rdap_error: None,
+        }
+    }
+}
+
 /// A registry's answer is never bigger than this; anything larger is an attack or a bug.
 const MAX_REPLY: u64 = 1 << 20;
 const MAX_REDIRECTS: u32 = 3;
@@ -436,78 +508,6 @@ async fn whois_query(server: &str, query: &str, deadline: Instant) -> Result<Str
         return Err(WhoisError::Empty(server.into()));
     }
     Ok(text)
-}
-
-/// A date as a registry gave it: normalised to UTC when it is in a format we
-/// know, otherwise kept as written.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RegDate {
-    At(OffsetDateTime),
-    Raw(String),
-}
-
-impl fmt::Display for RegDate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RegDate::At(t) => {
-                let t = t.to_offset(time::UtcOffset::UTC).replace_nanosecond(0).unwrap_or(*t);
-                f.write_str(&t.format(&Rfc3339).map_err(|_| fmt::Error)?)
-            }
-            RegDate::Raw(s) => f.write_str(s),
-        }
-    }
-}
-
-impl Serialize for RegDate {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_str(self)
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Registration {
-    /// The registrable name looked up.
-    pub domain: String,
-    pub source: Source,
-    /// The server that answered: an RDAP base URL or a WHOIS host:port.
-    pub server: String,
-    pub registered: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registrar: Option<String>,
-    /// EPP camelCase, sorted, e.g. clientHold.
-    pub statuses: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<RegDate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated: Option<RegDate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires: Option<RegDate>,
-    /// Lowercase, no trailing dot, sorted.
-    pub nameservers: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dnssec: Option<bool>,
-    /// Why WHOIS was used instead of RDAP.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rdap_error: Option<String>,
-}
-
-impl Registration {
-    pub fn empty(domain: &str, source: Source, server: &str) -> Self {
-        Registration {
-            domain: domain.into(),
-            source,
-            server: server.into(),
-            registered: false,
-            registrar: None,
-            statuses: vec![],
-            created: None,
-            updated: None,
-            expires: None,
-            nameservers: vec![],
-            dnssec: None,
-            rdap_error: None,
-        }
-    }
 }
 
 // Problem statuses and what they mean for the rep.

@@ -212,7 +212,8 @@ async fn rdap_follows_a_few_redirects_and_no_more() {
 
 #[tokio::test]
 async fn an_rdap_server_error_or_garbage_is_an_error_not_a_panic() {
-    let big = vec![b' '; 2 << 20];
+    // Valid JSON, so only the size cap can reject it.
+    let big = format!(r#"{{"status": ["active"], "notes": "{}"}}"#, "x".repeat(2 << 20)).into_bytes();
     let nested = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
     for (name, status, body) in [
         ("500", 500, b"".to_vec()),
@@ -386,11 +387,13 @@ async fn a_silent_server_ends_at_the_deadline() {
 
 #[tokio::test]
 async fn an_oversized_or_binary_whois_reply_is_capped_not_fatal() {
-    let mut huge = b"Registrar: Big Registrar\n".to_vec();
-    huge.extend(std::iter::repeat_n(b'x', 3 << 20));
+    let mut huge = b"Registrar: Early Registrar\n".to_vec();
+    huge.extend(std::iter::repeat_n(b'x', 2 << 20));
+    huge.extend(b"\nExpires: 2030-01-02\n");
     let whois = FakeWhois::reply(huge).await;
     let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
-    assert_eq!(r.registrar.as_deref(), Some("Big Registrar"));
+    assert_eq!(r.registrar.as_deref(), Some("Early Registrar"));
+    assert_eq!(r.expires, None, "read past the 1 MiB cap");
 
     let whois = FakeWhois::reply(vec![0xff, 0xfe, b'\n', 0x00, b':', b'\n', b'S', b't', b'a', b't', b'u', b's', b':', b' ', 0xc3, 0x28, b'\n']).await;
     let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
