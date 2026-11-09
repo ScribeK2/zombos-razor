@@ -4,11 +4,18 @@ use std::{net::SocketAddr, process::ExitCode, time::Duration};
 
 use zombo_core::{
     Severity,
-    propagation::{PublicResolver, ResolverAnswer, Scope, default_resolvers, propagation_findings, propagation_with},
+    propagation::{Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings, propagation_with},
     target::{Kind, parse_target},
 };
 
-const USAGE: &str = "usage: zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+
+fn addr(v: &str) -> Result<SocketAddr, String> {
+    v.parse()
+        .or_else(|_| format!("{v}:53").parse())
+        .or_else(|_| format!("[{v}]:53").parse())
+        .map_err(|_| format!("{v:?} is not an IP address"))
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -27,7 +34,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         return Err(USAGE.into());
     }
     let (mut target, mut scope, mut json, mut timeout) = (None, Scope::All, false, Duration::from_secs(4));
-    let mut resolvers: Vec<PublicResolver> = vec![];
+    let (mut resolvers, mut nameservers, mut no_auth) = (vec![], vec![], false);
     while let Some(a) = it.next() {
         let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
         match a.as_str() {
@@ -36,14 +43,14 @@ async fn run(args: Vec<String>) -> Result<(), String> {
             "--timeout-ms" => {
                 timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
             }
+            "--no-authoritative" => no_auth = true,
             "--resolver" => {
                 let v = value("--resolver")?;
-                let address: SocketAddr = v
-                    .parse()
-                    .or_else(|_| format!("{v}:53").parse())
-                    .or_else(|_| format!("[{v}]:53").parse())
-                    .map_err(|_| format!("{v:?} is not an IP address"))?;
-                resolvers.push(PublicResolver { name: v, location: "custom".into(), address });
+                resolvers.push(Vantage::resolver(&v, "custom", addr(&v)?));
+            }
+            "--nameserver" => {
+                let v = value("--nameserver")?;
+                nameservers.push(Vantage::nameserver(&v, addr(&v)?));
             }
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
             _ if target.is_none() => target = Some(a),
@@ -58,26 +65,35 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         resolvers = default_resolvers();
     }
 
-    let show = |a: &ResolverAnswer| {
+    if !no_auth && nameservers.is_empty() {
+        let bootstrap: Vec<SocketAddr> = resolvers.iter().map(|r| r.address).collect();
+        match discover_nameservers(&bootstrap, &t.value, 53, timeout).await {
+            Ok(found) => nameservers = found,
+            Err(e) => eprintln!("zombo: skipping the authoritative nameservers: {e}"),
+        }
+    }
+
+    let show = |a: &VantageAnswer| {
         if json {
             return;
         }
-        let r = &a.resolver;
+        let r = &a.vantage;
         match (&a.error, a.rcode) {
             (Some(e), _) => println!("  {:<14} {:<16} {e}", r.name, r.location),
             (None, rcode) => println!(
-                "  {:<14} {:<16} {:?}  {} record types answered",
+                "  {:<14} {:<16} {:?}  {} record types answered{}",
                 r.name,
                 r.location,
                 rcode.unwrap(),
-                a.answers.len()
+                a.answers.len(),
+                if a.authoritative == Some(false) && r.kind == VantageKind::Authoritative { "  (NOT authoritative)" } else { "" }
             ),
         }
     };
     if !json {
-        println!("{} ({:?}), {} resolvers", t.value, t.kind, resolvers.len());
+        println!("{} ({:?}): {} resolvers, {} authoritative nameservers", t.value, t.kind, resolvers.len(), nameservers.len());
     }
-    let res = propagation_with(&resolvers, &t.value, scope, timeout, show).await.map_err(|e| e.to_string())?;
+    let res = propagation_with(&resolvers, &nameservers, &t.value, scope, timeout, show).await.map_err(|e| e.to_string())?;
     let findings = propagation_findings(&t.value, &res);
     if json {
         let out = serde_json::json!({ "result": res, "findings": findings });
@@ -87,11 +103,11 @@ async fn run(args: Vec<String>) -> Result<(), String> {
     println!();
     for ty in &res.types {
         let mut variants: Vec<(Vec<String>, Vec<&str>)> = vec![];
-        for a in res.resolvers.iter().filter(|a| a.error.is_none() && !a.failed.contains(ty)) {
+        for a in res.nameservers.iter().chain(&res.resolvers).filter(|a| a.error.is_none() && !a.failed.contains(ty)) {
             let vals = a.answers.get(ty).cloned().unwrap_or_default();
             match variants.iter_mut().find(|(v, _)| *v == vals) {
-                Some((_, who)) => who.push(&a.resolver.name),
-                None => variants.push((vals, vec![&a.resolver.name])),
+                Some((_, who)) => who.push(&a.vantage.name),
+                None => variants.push((vals, vec![&a.vantage.name])),
             }
         }
         let mark = if res.disagree.contains(ty) { "DIFFERS" } else { "agree" };

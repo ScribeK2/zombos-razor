@@ -24,13 +24,20 @@ pub enum ExchangeError {
     Bad(String),
 }
 
-/// Send a recursive query: UDP first, then TCP when the UDP answer is
+/// Send a query (recursive unless `recursion_desired` is false, as when asking
+/// an authoritative nameserver directly): UDP first, then TCP when the UDP answer is
 /// truncated or unusable. Some public resolvers cut an oversized UDP reply
 /// mid-record instead of setting TC, which fails to parse; TCP gets it whole.
 /// `limit` covers both attempts.
-pub async fn exchange(server: SocketAddr, name: &Name, rtype: RecordType, limit: Duration) -> Result<Message, ExchangeError> {
+pub async fn exchange(
+    server: SocketAddr,
+    name: &Name,
+    rtype: RecordType,
+    recursion_desired: bool,
+    limit: Duration,
+) -> Result<Message, ExchangeError> {
     let mut q = Message::query();
-    q.metadata.recursion_desired = true;
+    q.metadata.recursion_desired = recursion_desired;
     q.add_query(Query::query(name.clone(), rtype));
     let mut edns = Edns::new();
     edns.set_max_payload(EDNS_PAYLOAD);

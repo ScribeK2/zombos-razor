@@ -39,6 +39,8 @@ pub struct Value {
 #[derive(Debug, Clone, Serialize)]
 pub struct LookupResult {
     pub rcode: Rcode,
+    /// Every answer carried the authoritative-answer (AA) flag.
+    pub authoritative: bool,
     pub records: BTreeMap<String, Vec<Value>>,
     /// Record type -> why that query failed.
     pub errors: BTreeMap<String, String>,
@@ -52,22 +54,23 @@ pub enum LookupError {
     NoAnswer { server: SocketAddr, why: String },
 }
 
-/// Query every given record type concurrently against one resolver. A failed
+/// Query every given record type concurrently against one server. A failed
 /// query for one type goes under `errors`; the lookup fails only if no query
 /// got an answer.
 pub async fn dns_lookup(
     server: SocketAddr,
     target: &str,
     types: &[RecordType],
+    recursion_desired: bool,
     limit: Duration,
 ) -> Result<LookupResult, LookupError> {
     let name = Name::from_ascii(target).map_err(|_| LookupError::BadName(target.into()))?;
     let mut set = JoinSet::new();
     for &t in types {
         let name = name.clone();
-        set.spawn(async move { (t, exchange(server, &name, t, limit).await) });
+        set.spawn(async move { (t, exchange(server, &name, t, recursion_desired, limit).await) });
     }
-    let mut res = LookupResult { rcode: Rcode::NoError, records: BTreeMap::new(), errors: BTreeMap::new() };
+    let mut res = LookupResult { rcode: Rcode::NoError, authoritative: true, records: BTreeMap::new(), errors: BTreeMap::new() };
     let (mut answers, mut first_err) = (0, String::new());
     while let Some(Ok((t, out))) = set.join_next().await {
         let typ = t.to_string();
@@ -80,6 +83,7 @@ pub async fn dns_lookup(
             }
             Ok(m) => {
                 answers += 1;
+                res.authoritative &= m.metadata.authoritative;
                 match m.metadata.response_code {
                     ResponseCode::NoError => {}
                     ResponseCode::NXDomain => res.rcode = Rcode::NxDomain,

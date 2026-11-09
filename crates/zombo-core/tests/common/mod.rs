@@ -28,6 +28,7 @@ struct State {
     records: Vec<Record>,
     silent: bool,
     refuse: Vec<RecordType>,
+    authoritative: bool,
 }
 
 pub struct FakeDns {
@@ -107,6 +108,13 @@ impl FakeDns {
         s
     }
 
+    /// Behave like an authoritative nameserver: set the AA flag, and refuse
+    /// queries that ask it to recurse (as some real nameservers do).
+    pub fn authoritative(self) -> Self {
+        self.state.lock().unwrap().authoritative = true;
+        self
+    }
+
     /// Answer REFUSED to queries of this type.
     pub fn refuse(self, t: RecordType) -> Self {
         self.state.lock().unwrap().refuse.push(t);
@@ -124,9 +132,10 @@ fn answer(state: &Mutex<State>, query: &[u8], udp: bool) -> Option<Vec<u8>> {
     let mut m = Message::response(req.metadata.id, OpCode::Query);
     m.metadata.message_type = MessageType::Response;
     m.metadata.recursion_desired = req.metadata.recursion_desired;
-    m.metadata.recursion_available = true;
+    m.metadata.recursion_available = !st.authoritative;
+    m.metadata.authoritative = st.authoritative;
     m.add_query(q.clone());
-    if st.refuse.contains(&q.query_type()) {
+    if st.refuse.contains(&q.query_type()) || (st.authoritative && req.metadata.recursion_desired) {
         m.metadata.response_code = ResponseCode::Refused;
         return m.to_vec().ok();
     }

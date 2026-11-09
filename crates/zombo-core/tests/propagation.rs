@@ -2,10 +2,10 @@ mod common;
 
 use common::{FakeDns, zone};
 use std::time::Duration;
-use zombo_core::propagation::{PublicResolver, Scope, propagation, propagation_findings};
+use zombo_core::propagation::{Scope, Vantage, propagation, propagation_findings};
 
-fn resolver(name: &str, s: &FakeDns) -> PublicResolver {
-    PublicResolver { name: name.into(), location: "Test".into(), address: s.addr }
+fn resolver(name: &str, s: &FakeDns) -> Vantage {
+    Vantage::resolver(name, "Test", s.addr)
 }
 
 fn codes(fs: &[zombo_core::Finding]) -> Vec<&str> {
@@ -129,8 +129,8 @@ async fn reports_the_ttl_each_resolver_returned() {
 async fn reports_each_resolver_as_it_answers() {
     let (a, down) = (FakeDns::start(&zone("example")).await, FakeDns::silent().await);
     let mut seen = vec![];
-    propagation_with(&[resolver("Down", &down), resolver("Fast", &a)], "example.com", Scope::Web, Duration::from_millis(400), |r| {
-        seen.push(r.resolver.name.clone())
+    propagation_with(&[resolver("Down", &down), resolver("Fast", &a)], &[], "example.com", Scope::Web, Duration::from_millis(400), |r| {
+        seen.push(r.vantage.name.clone())
     })
     .await
     .unwrap();
