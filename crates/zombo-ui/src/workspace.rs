@@ -30,7 +30,7 @@ pub fn relative(elapsed: Duration) -> String {
 /// A tab is a Diagnosis of one target or an Evidence analysis of pasted text.
 #[derive(Debug)]
 pub enum Slot {
-    Diagnosis(Tab),
+    Diagnosis(Box<Tab>),
     Evidence(EvidenceTab),
 }
 
@@ -135,7 +135,7 @@ impl Workspace {
         let index = match self.tabs.iter().position(|t| t.diagnosis().is_some_and(|t| t.target.value == target.value)) {
             Some(i) => i,
             None => {
-                self.tabs.push(Slot::Diagnosis(Tab::new(target)));
+                self.tabs.push(Slot::Diagnosis(Box::new(Tab::new(target))));
                 self.tabs.len() - 1
             }
         };
