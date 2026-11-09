@@ -25,6 +25,9 @@ pub struct Answer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
     pub headers: BTreeMap<&'static str, HeaderState>,
+    /// The server answered TLS but its certificate was refused, and why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_rejected: Option<String>,
 }
 
 impl Answer {
@@ -39,6 +42,7 @@ impl Answer {
             server: f.header("server").map(str::to_string),
             content_type: f.header("content-type").map(str::to_string),
             headers: if f.error.is_none() { security_headers(f) } else { BTreeMap::new() },
+            cert_rejected: f.cert_rejected.clone(),
         }
     }
 
@@ -52,6 +56,7 @@ impl Answer {
             server: r.server.clone(),
             content_type: r.content_type.clone(),
             headers: r.headers.clone(),
+            cert_rejected: None,
         }
     }
 
@@ -80,6 +85,15 @@ fn find(code: &'static str, severity: Severity, title: &'static str, message: St
 /// point: they say which side holds the problem.
 pub(crate) fn origin_findings(ip: IpAddr, public: &Answer, origin: &Answer) -> Vec<Finding> {
     let (p, o) = (public.describe(), origin.describe());
+    if let Some(reason) = &origin.cert_rejected {
+        return vec![find(
+            "website_origin_cert_rejected",
+            Severity::Warning,
+            "Origin certificate rejected",
+            format!("For the origin {ip}: the origin answered but its certificate was rejected: {reason}, try --insecure-origin. The public site answers {p}."),
+            Some("The origin may present a certificate for another name, a self-signed one or an expired one. Fix it, or rerun with --insecure-origin to compare the answers anyway."),
+        )];
+    }
     if public.status.is_none() && origin.status.is_none() {
         return vec![find(
             "website_origin_unreachable",

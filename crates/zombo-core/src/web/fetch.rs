@@ -6,10 +6,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+use std::sync::Arc;
+
+use rustls::CertificateError;
+
 use serde::Serialize;
 use ureq::{
     Agent,
     config::Config,
+    tls::{Certificate, RootCerts, TlsConfig},
     http::Uri,
     unversioned::{
         resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
@@ -34,6 +39,23 @@ pub struct Hop {
     pub status: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
+}
+
+/// Whether a fetch checks the server certificate. `SkipVerification` is only ever
+/// built by the caller who asked for it (`--insecure-origin`), never by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum CertCheck {
+    #[default]
+    Verify,
+    SkipVerification,
+}
+
+/// How a fetch treats TLS. `roots` are DER certificates trusted in place of the bundled
+/// ones (a test seam).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TlsMode {
+    pub check: CertCheck,
+    pub roots: Vec<Vec<u8>>,
 }
 
 /// Makes one host name resolve to a chosen address, whatever DNS says. The URL keeps
@@ -81,6 +103,8 @@ pub(crate) struct Fetch {
     /// Until the last response's headers arrived, across every redirect.
     pub elapsed: Duration,
     pub error: Option<String>,
+    /// Set with `error` when the server answered TLS but its certificate was refused.
+    pub cert_rejected: Option<String>,
 }
 
 impl Fetch {
@@ -89,8 +113,18 @@ impl Fetch {
     }
 }
 
-fn agent(pin: Option<&Pin>) -> Agent {
+fn tls_config(tls: &TlsMode) -> TlsConfig {
+    let mut b = TlsConfig::builder().disable_verification(tls.check == CertCheck::SkipVerification);
+    if !tls.roots.is_empty() {
+        let certs = tls.roots.iter().map(|d| Certificate::from_der(d).to_owned()).collect();
+        b = b.root_certs(RootCerts::Specific(Arc::new(certs)));
+    }
+    b.build()
+}
+
+fn agent(pin: Option<&Pin>, tls: &TlsMode) -> Agent {
     let config = Agent::config_builder()
+        .tls_config(tls_config(tls))
         .max_redirects(0)
         .http_status_as_error(false)
         .https_only(false)
@@ -109,6 +143,25 @@ fn clean(bytes: &[u8]) -> String {
     printable(s)
 }
 
+/// The reason, when the failure is a certificate the client refused.
+fn cert_rejection(e: &ureq::Error) -> Option<String> {
+    let rustls = match e {
+        ureq::Error::Rustls(r) => r,
+        ureq::Error::Io(io) => io.get_ref()?.downcast_ref::<rustls::Error>()?,
+        _ => return None,
+    };
+    match rustls {
+        rustls::Error::InvalidCertificate(reason) => Some(match reason {
+            CertificateError::Expired | CertificateError::ExpiredContext { .. } => "it has expired".to_string(),
+            CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => "it is not valid yet".to_string(),
+            CertificateError::UnknownIssuer => "it is not signed by a trusted authority".to_string(),
+            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => "it is not valid for the site name".to_string(),
+            other => printable(&format!("{other:?}")),
+        }),
+        _ => None,
+    }
+}
+
 fn describe(e: &ureq::Error) -> String {
     match e {
         ureq::Error::Timeout(_) => "timed out".into(),
@@ -119,10 +172,10 @@ fn describe(e: &ureq::Error) -> String {
 /// GET `start`, following 301/302/303/307/308 itself: stops at a URL already
 /// visited (a loop) and after `MAX_REDIRECTS` requests. A redirect to a scheme
 /// other than http or https is never followed. `limit` covers the whole chain.
-pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration) -> Fetch {
+pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration, tls: &TlsMode) -> Fetch {
     let started = Instant::now();
     let deadline = started + limit;
-    let agent = agent(pin);
+    let agent = agent(pin, tls);
     let mut f = Fetch::default();
     let mut url = match url::Url::parse(start) {
         Ok(u) => u.to_string(),
@@ -142,6 +195,7 @@ pub(crate) fn fetch_chain(start: &str, pin: Option<&Pin>, limit: Duration) -> Fe
         let mut resp = match request.call() {
             Ok(r) => r,
             Err(e) => {
+                f.cert_rejected = cert_rejection(&e);
                 f.error = Some(describe(&e));
                 return f;
             }

@@ -12,7 +12,7 @@ use zombo_core::{
 };
 use zombo_core::{ports::{FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for}, tls::{Trust, check_tls, tls_findings}};
 use zombo_core::evidence::{headers, maillog};
-use zombo_core::web::{WebOptions, check_web, parse_web_target, web_findings};
+use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
     blacklist::{Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist},
     rdns::{RdnsResult, check_rdns, rdns_findings},
@@ -425,7 +425,7 @@ async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> 
     Ok(())
 }
 
-const WEB_USAGE: &str = "usage: zombo web <url|host> [--origin IP] [--resolver ip[:port]] [--timeout-ms N] [--json]";
+const WEB_USAGE: &str = "usage: zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]";
 
 async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (mut target, mut json, mut opts) = (None, false, WebOptions::default());
@@ -440,11 +440,15 @@ async fn web(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
                 let v = value("--origin")?;
                 opts.origin = Some(v.trim_matches(['[', ']']).parse().map_err(|_| format!("{v:?} is not an IP address"))?);
             }
+            "--insecure-origin" => opts.origin_cert = CertCheck::SkipVerification,
             "--resolver" => opts.resolver = Some(addr(&value("--resolver")?)?),
             f if f.starts_with("--") => return Err(format!("unknown option {f}\n{WEB_USAGE}")),
             _ if target.is_none() => target = Some(a),
             _ => return Err(WEB_USAGE.into()),
         }
+    }
+    if opts.origin_cert == CertCheck::SkipVerification && opts.origin.is_none() {
+        return Err(format!("--insecure-origin only applies with --origin\n{WEB_USAGE}"));
     }
     let (host, path) = parse_web_target(&target.ok_or(WEB_USAGE)?).map_err(|e| e.to_string())?;
     let r = check_web(&host, &path, &opts).await;
