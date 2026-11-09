@@ -8,7 +8,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 Three workers running (started 2026-11-09), each in its own worktree:
 
-- [ ] **SMTP and TLS extras:** SMTP banner and STARTTLS Check, CAA lookup, OCSP stapling detection (`smtp.rs`, `tls_extras.rs`)
+- [x] **SMTP and TLS extras** merged: SMTP banner and STARTTLS (`smtp/`, `zombo smtp`), CAA (`zombo caa`), OCSP stapling flag. Live from the dev machine: Gmail 587, 465 and 25 all passed. Not seen: a silent firewall on port 25, CAA from a clean network (rerun from the VPS). No MX resolution: a domain target is dialled by name
 - [x] **Web follow-ups** merged: `web_redirect_downgrade` warning, `--insecure-origin` (`CertCheck` enum), `website_origin_cert_rejected` and `web_origin_cert_not_verified` findings. Cert-read path covered by the local test only, not live
 - [x] **`zombo-ui` slice 1** merged (screenshot reviewed 2026-11-09). Follow-ups: see "UI follow-ups"
 
