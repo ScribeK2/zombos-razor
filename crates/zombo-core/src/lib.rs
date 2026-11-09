@@ -9,5 +9,6 @@ pub mod lookup;
 pub mod propagation;
 pub mod registration;
 pub mod target;
+pub mod tls;
 
 pub use finding::{Finding, Severity};
