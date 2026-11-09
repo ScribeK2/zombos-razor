@@ -1,0 +1,1 @@
+{"objectClassName": "domain", "status": null, "events": null, "nameservers": null, "entities": [{"roles": ["registrar"], "vcardArray": ["vcard", "not rows"]}, {"roles": ["registrar"], "vcardArray": []}, {"roles": ["registrar"], "vcardArray": ["vcard", [["fn", {}, "text"], 7, ["fn", {}, "text", 42]]]}]}

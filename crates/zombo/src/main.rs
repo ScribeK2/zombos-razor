@@ -6,10 +6,11 @@ use zombo_core::{
     Finding, Severity,
     delegation::{Ports, ServerState, check_delegation, delegation_findings},
     propagation::{Scope, Vantage, VantageAnswer, VantageKind, default_resolvers, discover_nameservers, propagation_findings, propagation_with},
+    registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     v.parse()
@@ -34,6 +35,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
     match it.next().as_deref() {
         Some("propagation") => propagation(it).await,
         Some("delegation") => delegation(it).await,
+        Some("registration") => registration(it).await,
         _ => Err(USAGE.into()),
     }
 }
@@ -188,6 +190,56 @@ async fn propagation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     println!();
     println!("Agreement: {} - {}", res.agreement.label(), res.agreement.reason());
+    println!();
+    print_findings(&findings);
+    Ok(())
+}
+
+async fn registration(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout) = (None, false, Duration::from_secs(10));
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname) {
+        return Err(format!("registration needs a domain or host name, not {:?}", t.kind));
+    }
+    let r = check_registration(&t.value, &Endpoints::default(), timeout).await.map_err(|e| e.to_string())?;
+    let findings = registration_findings(&t.value, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    let via = match r.source {
+        Source::Rdap => "RDAP",
+        Source::Whois => "WHOIS",
+    };
+    println!("{}: {} (via {via}, {})", r.domain, if r.registered { "registered" } else { "not registered" }, r.server);
+    if let Some(why) = &r.rdap_error {
+        println!("  RDAP was not used: {why}");
+    }
+    let row = |label: &str, v: Option<String>| {
+        if let Some(v) = v.filter(|v| !v.is_empty()) {
+            println!("  {label:<12} {v}");
+        }
+    };
+    row("Registrar", r.registrar.clone());
+    row("Created", r.created.as_ref().map(ToString::to_string));
+    row("Updated", r.updated.as_ref().map(ToString::to_string));
+    row("Expires", r.expires.as_ref().map(ToString::to_string));
+    row("Status", Some(r.statuses.join(", ")));
+    row("Nameservers", Some(r.nameservers.join(", ")));
+    row("DNSSEC", r.dnssec.map(|s| if s { "signed" } else { "unsigned" }.to_string()));
     println!();
     print_findings(&findings);
     Ok(())

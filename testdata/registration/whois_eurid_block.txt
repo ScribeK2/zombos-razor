@@ -1,0 +1,5 @@
+Domain: nope.test
+
+Registrar:
+        Name: Example Registrar SA
+        Website: https://registrar.example
