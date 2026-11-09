@@ -158,6 +158,19 @@ impl FakeWhois {
     }
 }
 
+/// A server that accepts connections and never answers.
+pub async fn silent() -> String {
+    let ln = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = ln.local_addr().unwrap().to_string();
+    tokio::spawn(async move {
+        let mut held = vec![];
+        while let Ok((s, _)) = ln.accept().await {
+            held.push(s);
+        }
+    });
+    addr
+}
+
 /// An address nothing listens on.
 pub async fn closed_port() -> String {
     let ln = TcpListener::bind("127.0.0.1:0").await.unwrap();

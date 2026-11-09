@@ -1,0 +1,2 @@
+Domain: xn--bcher-kva.de
+Status: invalid

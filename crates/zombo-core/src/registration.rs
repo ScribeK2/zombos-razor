@@ -57,8 +57,22 @@ pub enum RegistrationError {
     BadName(String),
     #[error("timed out")]
     TimedOut,
-    #[error("RDAP: {0}")]
-    Rdap(RdapError),
+    #[error("RDAP: {rdap}; WHOIS: {whois}")]
+    Unavailable { rdap: RdapError, whois: WhoisError },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhoisError {
+    #[error("{0}")]
+    Io(String),
+    #[error("empty reply from WHOIS server {0}")]
+    Empty(String),
+    #[error("IANA knows no WHOIS server for this TLD")]
+    NoReferral,
+    #[error("IANA named a WHOIS server that cannot be used: {0:?}")]
+    BadReferral(String),
+    #[error("the registry answered that the query for {0} is invalid")]
+    Invalid(String),
 }
 
 /// A registry's answer is never bigger than this; anything larger is an attack or a bug.
@@ -66,7 +80,8 @@ const MAX_REPLY: u64 = 1 << 20;
 const MAX_REDIRECTS: u32 = 3;
 
 /// Look up who registered `target` (a domain or a name below one), asking RDAP
-/// first. The whole lookup, however many servers it asks, takes at most `limit`.
+/// first and WHOIS when RDAP has no service or fails. An RDAP 404 is authoritative:
+/// the domain is not registered, and WHOIS is not asked. The whole lookup, however many servers it asks, takes at most `limit`.
 pub async fn check_registration(target: &str, endpoints: &Endpoints, limit: Duration) -> Result<Registration, RegistrationError> {
     let name = registrable_domain(&clean_name(target)?);
     let deadline = Instant::now() + limit;
@@ -80,7 +95,15 @@ pub async fn check_registration(target: &str, endpoints: &Endpoints, limit: Dura
                 Err(e) => e,
             },
         };
-        Err(RegistrationError::Rdap(rdap))
+        let server = endpoints.whois.get(tld).map(String::as_str).or_else(|| whois_server(tld));
+        match whois_lookup(endpoints, server, &name, deadline).await {
+            Ok(mut r) => {
+                r.rdap_error = Some(rdap.to_string());
+                Ok(r)
+            }
+            Err(_) if Instant::now() >= deadline => Err(RegistrationError::TimedOut),
+            Err(whois) => Err(RegistrationError::Unavailable { rdap, whois }),
+        }
     })
     .await
     .map_err(|_| RegistrationError::TimedOut)?
@@ -241,6 +264,178 @@ fn rdap_get(url: &str, https_only: bool, limit: Duration) -> Result<(ureq::http:
     }
     let body = resp.body_mut().with_config().limit(MAX_REPLY).read_to_vec().map_err(fail)?;
     Ok((status, body))
+}
+
+// WHOIS
+
+/// Bundled WHOIS servers for common TLDs; any other TLD asks whois.iana.org for a referral.
+const WHOIS_SERVERS: [(&str, &str); 16] = [
+    ("com", "whois.verisign-grs.com:43"),
+    ("net", "whois.verisign-grs.com:43"),
+    ("org", "whois.publicinterestregistry.org:43"),
+    ("info", "whois.nic.info:43"),
+    ("io", "whois.nic.io:43"),
+    ("co", "whois.nic.co:43"),
+    ("me", "whois.nic.me:43"),
+    ("us", "whois.nic.us:43"),
+    ("biz", "whois.nic.biz:43"),
+    ("uk", "whois.nic.uk:43"),
+    ("de", "whois.denic.de:43"),
+    ("nl", "whois.domain-registry.nl:43"),
+    ("eu", "whois.eu:43"),
+    ("ca", "whois.cira.ca:43"),
+    ("au", "whois.auda.org.au:43"),
+    ("fr", "whois.nic.fr:43"),
+];
+
+/// Registries that answer a bare name with too little. DENIC (.de) replies only
+/// "Domain:" and "Status:" unless asked with `-T dn,ace`, which adds the
+/// nameservers and the last change date; the ",ace" is what makes
+/// internationalised names (xn--...) work instead of "invalid".
+const WHOIS_QUERY_PREFIX: [(&str, &str); 1] = [("de", "-T dn,ace ")];
+
+fn whois_server(tld: &str) -> Option<&'static str> {
+    WHOIS_SERVERS.iter().find(|(t, _)| *t == tld).map(|(_, s)| *s)
+}
+
+fn whois_query_for(name: &str) -> String {
+    let tld = name.rsplit('.').next().unwrap_or_default();
+    let prefix = WHOIS_QUERY_PREFIX.iter().find(|(t, _)| *t == tld).map_or("", |(_, p)| p);
+    format!("{prefix}{name}")
+}
+
+const REGISTRAR: &[&str] = &["Registrar", "Registrar Name", "Registrar Organization"];
+const EXPIRES: &[&str] =
+    &["Registry Expiry Date", "Registrar Registration Expiration Date", "Expiration Date", "Expiry Date", "Expires", "Expires On", "paid-till"];
+const CREATED: &[&str] = &["Creation Date", "Created Date", "Created", "Created On", "Registration Date", "Registered On"];
+const UPDATED: &[&str] = &["Updated Date", "Last Updated", "Last Modified", "Modified", "Changed"];
+const NAMESERVERS: &[&str] = &["Name Server", "Nameserver", "nserver"];
+const STATUS: &[&str] = &["Domain Status", "Status"];
+const DNSSEC: &[&str] = &["DNSSEC"];
+const REFER: &[&str] = &["refer", "whois"];
+
+/// The non-empty values of every "Key: value" line whose key is one of `keys`, in order.
+fn field_values<'a>(text: &'a str, keys: &'static [&'static str]) -> impl Iterator<Item = &'a str> {
+    text.lines().filter_map(move |line| {
+        let (key, value) = line.trim_start().split_once(':')?;
+        let value = value.trim();
+        (!value.is_empty() && keys.iter().any(|k| key.eq_ignore_ascii_case(k))).then_some(value)
+    })
+}
+
+/// EURid and others put the registrar in an indented block under "Registrar:".
+fn registrar_block(text: &str) -> Option<&str> {
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some((key, rest)) = line.trim_start().split_once(':') else { continue };
+        if !key.eq_ignore_ascii_case("registrar") || !rest.trim().is_empty() {
+            continue;
+        }
+        let mut gap = 0;
+        while lines.peek().is_some_and(|l| l.trim().is_empty()) {
+            lines.next();
+            gap += 1;
+        }
+        let next = lines.peek()?;
+        let indented = next.starts_with(char::is_whitespace);
+        if let Some((k, v)) = next.trim_start().split_once(':')
+            && (indented || gap > 0)
+            && ["name", "organisation", "organization"].iter().any(|n| k.eq_ignore_ascii_case(n))
+            && !v.trim().is_empty()
+        {
+            return Some(v.trim());
+        }
+    }
+    None
+}
+
+/// Best-effort parse of a registry's free-text reply.
+fn parse_whois(name: &str, server: &str, text: &str) -> Registration {
+    let mut r = Registration::empty(name, Source::Whois, server);
+    let first = |keys: &'static [&'static str]| field_values(text, keys).next();
+    r.registrar = first(REGISTRAR).or_else(|| registrar_block(text)).map(String::from);
+    r.expires = first(EXPIRES).map(normalize_date);
+    r.created = first(CREATED).map(normalize_date);
+    r.updated = first(UPDATED).map(normalize_date);
+    for v in field_values(text, NAMESERVERS) {
+        let Some(host) = v.split_whitespace().next() else { continue };
+        let ns = host.strip_suffix('.').unwrap_or(host).to_lowercase();
+        if !r.nameservers.contains(&ns) {
+            r.nameservers.push(ns);
+        }
+    }
+    for v in field_values(text, STATUS) {
+        let s = epp_status(v);
+        if !s.is_empty() && !r.statuses.contains(&s) {
+            r.statuses.push(s);
+        }
+    }
+    r.dnssec = first(DNSSEC).map(|v| {
+        let v = v.to_lowercase();
+        v.contains("signed") && !v.contains("unsigned")
+    });
+    r.statuses.sort();
+    r.nameservers.sort();
+    // WHOIS has no common "no match" signal; a reply with no registrar, dates or
+    // nameservers is the closest proxy. DENIC is explicit both ways: "Status:
+    // free" is unregistered and "Status: connect" is active (it gives no
+    // registrar or dates for registered names). Only applied to WHOIS: a sparse
+    // RDAP record is still a registered domain.
+    // ponytail: a heavily redacted WHOIS record for a registered domain could trip this.
+    let has = |s: &str| r.statuses.iter().any(|x| x == s);
+    r.registered = !has("free")
+        && (has("connect")
+            || r.registrar.is_some()
+            || r.expires.is_some()
+            || r.created.is_some()
+            || r.updated.is_some()
+            || !r.nameservers.is_empty());
+    r
+}
+
+/// Ask a port-43 server, following one IANA referral when `server` is unknown,
+/// and parse the reply.
+async fn whois_lookup(ep: &Endpoints, server: Option<&str>, name: &str, deadline: Instant) -> Result<Registration, WhoisError> {
+    let server = match server {
+        Some(s) => s.to_string(),
+        None => {
+            let text = whois_query(&ep.whois_iana, name, deadline).await?;
+            let value = field_values(&text, REFER).next().ok_or(WhoisError::NoReferral)?;
+            // The referral is untrusted text from the network: take a bare host name or nothing.
+            if !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+                return Err(WhoisError::BadReferral(value.into()));
+            }
+            format!("{value}:{}", ep.whois_referral_port)
+        }
+    };
+    let text = whois_query(&server, &whois_query_for(name), deadline).await?;
+    let r = parse_whois(name, &server, &text);
+    if r.statuses.iter().any(|s| s == "invalid") {
+        // The registry rejected the query itself: that says nothing about whether
+        // the domain exists, so fail rather than report it free.
+        return Err(WhoisError::Invalid(name.into()));
+    }
+    Ok(r)
+}
+
+async fn whois_query(server: &str, query: &str, deadline: Instant) -> Result<String, WhoisError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let io = |e: std::io::Error| WhoisError::Io(e.to_string());
+    let ask = async {
+        let mut conn = tokio::net::TcpStream::connect(server).await.map_err(io)?;
+        conn.write_all(format!("{query}\r\n").as_bytes()).await.map_err(io)?;
+        let mut buf = vec![];
+        let read = (&mut conn).take(MAX_REPLY).read_to_end(&mut buf).await;
+        if buf.is_empty() {
+            read.map_err(io)?;
+        }
+        Ok(String::from_utf8_lossy(&buf).into_owned())
+    };
+    let text = tokio::time::timeout_at(deadline.into(), ask).await.map_err(|_| WhoisError::Io("timed out".into()))??;
+    if text.trim().is_empty() {
+        return Err(WhoisError::Empty(server.into()));
+    }
+    Ok(text)
 }
 
 /// A date as a registry gave it: normalised to UTC when it is in a format we

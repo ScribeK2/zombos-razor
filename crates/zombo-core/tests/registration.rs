@@ -3,7 +3,7 @@ mod registry;
 
 use std::time::Duration as Wait;
 
-use registry::{FakeHttp, Reply, fixture, rdap_domain};
+use registry::{FakeHttp, FakeWhois, Reply, closed_port, fixture, rdap_domain, silent, whois_verisign};
 use time::{Duration, OffsetDateTime};
 use zombo_core::{
     Finding, Severity,
@@ -12,8 +12,27 @@ use zombo_core::{
 
 const T: Wait = Wait::from_secs(5);
 
+/// The real endpoints with every WHOIS server pointed at a closed port, so no test reaches the network.
+const CLOSED: &str = "127.0.0.1:1";
+
+fn offline() -> Endpoints {
+    Endpoints { whois_iana: CLOSED.into(), ..Endpoints::default() }
+}
+
 fn rdap_only(tld: &str, base: &str) -> Endpoints {
-    Endpoints { rdap: [(tld.into(), base.into())].into(), ..Endpoints::default() }
+    Endpoints { rdap: [(tld.into(), base.into())].into(), whois: [(tld.into(), CLOSED.into())].into(), ..offline() }
+}
+
+fn rdap_whois(tld: &str, base: &str, whois: &str) -> Endpoints {
+    Endpoints { rdap: [(tld.into(), base.into())].into(), whois: [(tld.into(), whois.into())].into(), ..offline() }
+}
+
+fn whois_only(tld: &str, whois: &str) -> Endpoints {
+    Endpoints { whois: [(tld.into(), whois.into())].into(), ..offline() }
+}
+
+fn expires_in(days: i64) -> OffsetDateTime {
+    OffsetDateTime::now_utc() + Duration::days(days)
 }
 
 fn rfc3339(t: OffsetDateTime) -> String {
@@ -187,7 +206,7 @@ async fn rdap_follows_a_few_redirects_and_no_more() {
 
     let endless = FakeHttp::start(|_| Reply::redirect("/again")).await;
     let err = check_registration("example.com", &rdap_only("com", &endless.base), T).await.unwrap_err();
-    assert!(matches!(err, RegistrationError::Rdap(_)), "{err}");
+    assert!(matches!(err, RegistrationError::Unavailable { .. }), "{err}");
     assert!(endless.hits() <= 6, "followed {} redirects", endless.hits());
 }
 
@@ -206,20 +225,233 @@ async fn an_rdap_server_error_or_garbage_is_an_error_not_a_panic() {
     ] {
         let rdap = FakeHttp::domain(status, body).await;
         let err = check_registration("example.com", &rdap_only("com", &rdap.base), T).await.unwrap_err();
-        assert!(matches!(err, RegistrationError::Rdap(_)), "{name}: {err}");
+        assert!(matches!(err, RegistrationError::Unavailable { .. }), "{name}: {err}");
     }
 }
 
 #[tokio::test]
 async fn a_tld_without_rdap_is_an_error_when_there_is_no_whois() {
-    let err = check_registration("nope.test", &Endpoints::default(), T).await.unwrap_err();
+    let err = check_registration("nope.test", &offline(), T).await.unwrap_err();
     assert!(err.to_string().contains("no RDAP service for .test"), "{err}");
 }
 
 #[tokio::test]
 async fn names_that_could_smuggle_a_query_are_refused() {
     for bad in ["", "example", "exa mple.com", "example.com\r\nevil", "a/b.com", "-T dn example.de"] {
-        let err = check_registration(bad, &Endpoints::default(), T).await.unwrap_err();
+        let err = check_registration(bad, &offline(), T).await.unwrap_err();
         assert!(matches!(err, RegistrationError::BadName(_)), "{bad:?}: {err}");
     }
+}
+
+// WHOIS and the fallback
+
+const IANA_NAME: &str = "RESERVED-Internet Assigned Numbers Authority";
+
+#[tokio::test]
+async fn rdap_that_answers_is_not_second_guessed_by_whois() {
+    let rdap = FakeHttp::domain(200, rdap_domain(expires_in(365), &[])).await;
+    let whois = FakeWhois::reply("should not be asked").await;
+    let r = check_registration("example.com", &rdap_whois("com", &rdap.base, &whois.addr), T).await.unwrap();
+    assert_eq!(r.source, Source::Rdap);
+    assert!(whois.queries().is_empty());
+}
+
+#[tokio::test]
+async fn an_authoritative_rdap_404_does_not_ask_whois() {
+    let rdap = FakeHttp::domain(404, "").await;
+    let whois = FakeWhois::reply("should not be asked").await;
+    let r = check_registration("example.com", &rdap_whois("com", &rdap.base, &whois.addr), T).await.unwrap();
+    assert!(!r.registered);
+    assert!(whois.queries().is_empty());
+}
+
+#[tokio::test]
+async fn whois_answers_when_rdap_fails() {
+    let expires = expires_in(20).replace_nanosecond(0).unwrap();
+    let rdap = FakeHttp::domain(500, "").await;
+    let whois = FakeWhois::reply(whois_verisign(&rfc3339(expires))).await;
+    let r = check_registration("example.com", &rdap_whois("com", &rdap.base, &whois.addr), T).await.unwrap();
+
+    assert!(rdap.hits() > 0, "RDAP was not tried first");
+    assert!(r.rdap_error.as_deref().is_some_and(|e| e.contains("500")), "{:?}", r.rdap_error);
+    assert_eq!(r.source, Source::Whois);
+    assert_eq!(r.server, whois.addr);
+    assert!(r.registered);
+    assert_eq!(r.registrar.as_deref(), Some(IANA_NAME));
+    assert_eq!(r.expires.clone().unwrap().to_string(), rfc3339(expires));
+    assert_eq!(r.created.clone().unwrap().to_string(), "1995-08-14T04:00:00Z");
+    assert_eq!(r.updated.clone().unwrap().to_string(), "2024-08-14T07:01:34Z");
+    assert_eq!(r.statuses, ["clientDeleteProhibited", "clientHold"]);
+    assert_eq!(r.nameservers, ["a.iana-servers.net", "b.iana-servers.net"]);
+    assert_eq!(r.dnssec, Some(true));
+    assert_eq!(whois.queries(), ["example.com"]);
+    // Findings apply to a WHOIS result just the same.
+    let fs = registration_findings("example.com", &r);
+    assert_eq!(code(&fs, "registration_on_hold").unwrap().severity, Severity::Critical);
+    assert_eq!(code(&fs, "registration_expiring_soon").unwrap().severity, Severity::Warning);
+}
+
+#[tokio::test]
+async fn whois_serves_a_tld_without_rdap() {
+    // .test is in no RDAP bootstrap.
+    let whois = FakeWhois::reply(whois_verisign(&rfc3339(expires_in(700)))).await;
+    let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+    assert_eq!((r.source, r.registered, r.domain.as_str()), (Source::Whois, true, "nope.test"));
+    assert!(r.rdap_error.unwrap().contains("no RDAP service for .test"));
+}
+
+#[tokio::test]
+async fn an_iana_referral_is_followed_once() {
+    let registry = FakeWhois::reply(whois_verisign(&rfc3339(expires_in(700)))).await;
+    let iana = FakeWhois::reply(fixture("whois_iana_refer.txt").replace("__SERVER__", "127.0.0.1")).await;
+    let port: u16 = registry.addr.rsplit(':').next().unwrap().parse().unwrap();
+    let ep = Endpoints { whois_iana: iana.addr.clone(), whois_referral_port: port, ..Endpoints::default() };
+    let r = check_registration("nope.test", &ep, T).await.unwrap();
+    assert_eq!(r.registrar.as_deref(), Some(IANA_NAME));
+    assert_eq!(r.server, registry.addr);
+    assert_eq!(iana.queries(), ["nope.test"]);
+    assert_eq!(registry.queries(), ["nope.test"]);
+}
+
+#[tokio::test]
+async fn an_unusable_iana_referral_is_an_error() {
+    for (name, reply) in [
+        ("none", "domain: TEST\n".to_string()),
+        ("junk after the host", fixture("whois_iana_refer.txt").replace("__SERVER__", "host.example:1 ; junk")),
+        ("a port", fixture("whois_iana_refer.txt").replace("__SERVER__", "host.example:25")),
+    ] {
+        let iana = FakeWhois::reply(reply).await;
+        let ep = Endpoints { whois_iana: iana.addr.clone(), ..Endpoints::default() };
+        let err = check_registration("nope.test", &ep, T).await.unwrap_err();
+        assert!(matches!(err, RegistrationError::Unavailable { .. }), "{name}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn an_empty_looking_whois_reply_means_not_registered() {
+    let whois = FakeWhois::reply(fixture("whois_no_match.txt")).await;
+    let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+    assert_eq!(r.source, Source::Whois);
+    assert!(!r.registered);
+    assert_eq!(code(&registration_findings("nope.test", &r), "registration_not_registered").unwrap().severity, Severity::Critical);
+}
+
+#[tokio::test]
+async fn registry_formats_without_a_registrar_or_dates() {
+    for (name, file, registrar, registered) in [
+        // DENIC gives no registrar or dates for a registered .de name.
+        ("denic connect", "whois_denic_connect.txt", None, true),
+        ("denic free", "denic_free.txt", None, false),
+        // EURid puts the registrar on the next line.
+        ("eurid block", "whois_eurid_block.txt", Some("Example Registrar SA"), true),
+    ] {
+        let whois = FakeWhois::reply(fixture(file)).await;
+        let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+        assert_eq!((r.registered, r.registrar.as_deref()), (registered, registrar), "{name}");
+        let fs = registration_findings("nope.test", &r);
+        assert_eq!(code(&fs, "registration_not_registered").is_some(), !registered, "{name}: {:?}", codes(&fs));
+    }
+}
+
+#[tokio::test]
+async fn whois_dates_in_other_formats_are_normalised() {
+    let whois = FakeWhois::reply("Registrar: X\nCreated On: 14-Aug-1995\nExpires: 2030.01.02\nLast Updated: whenever\n").await;
+    let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+    assert_eq!(r.created.unwrap().to_string(), "1995-08-14T00:00:00Z");
+    assert_eq!(r.expires.unwrap().to_string(), "2030-01-02T00:00:00Z");
+    assert_eq!(r.updated, Some(RegDate::Raw("whenever".into())));
+}
+
+#[tokio::test]
+async fn it_fails_when_neither_rdap_nor_whois_answers() {
+    let rdap = FakeHttp::domain(502, "").await;
+    let closed = closed_port().await;
+    let err = check_registration("example.com", &rdap_whois("com", &rdap.base, &closed), T).await.unwrap_err();
+    assert!(matches!(err, RegistrationError::Unavailable { .. }), "{err}");
+    assert!(err.to_string().starts_with("RDAP: RDAP server answered 502 Bad Gateway; WHOIS: "), "{err}");
+}
+
+#[tokio::test]
+async fn a_silent_server_ends_at_the_deadline() {
+    let rdap = silent().await;
+    let started = std::time::Instant::now();
+    let err = check_registration("example.com", &rdap_only("com", &format!("http://{rdap}/")), Wait::from_millis(400)).await.unwrap_err();
+    assert!(matches!(err, RegistrationError::TimedOut), "{err}");
+    assert!(started.elapsed() < Wait::from_secs(3), "took {:?}", started.elapsed());
+
+    let whois = silent().await;
+    let err = check_registration("nope.test", &whois_only("test", &whois), Wait::from_millis(400)).await.unwrap_err();
+    assert!(matches!(err, RegistrationError::TimedOut), "{err}");
+}
+
+#[tokio::test]
+async fn an_oversized_or_binary_whois_reply_is_capped_not_fatal() {
+    let mut huge = b"Registrar: Big Registrar\n".to_vec();
+    huge.extend(std::iter::repeat_n(b'x', 3 << 20));
+    let whois = FakeWhois::reply(huge).await;
+    let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+    assert_eq!(r.registrar.as_deref(), Some("Big Registrar"));
+
+    let whois = FakeWhois::reply(vec![0xff, 0xfe, b'\n', 0x00, b':', b'\n', b'S', b't', b'a', b't', b'u', b's', b':', b' ', 0xc3, 0x28, b'\n']).await;
+    let r = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap();
+    assert_eq!(r.source, Source::Whois);
+}
+
+#[tokio::test]
+async fn an_empty_whois_reply_is_an_error() {
+    let whois = FakeWhois::reply("  \r\n").await;
+    let err = check_registration("nope.test", &whois_only("test", &whois.addr), T).await.unwrap_err();
+    assert!(err.to_string().contains("empty reply from WHOIS server"), "{err}");
+}
+
+// DENIC (.de) answers a bare name with too little, so it is asked in its own form.
+
+/// Like whois.denic.de: the detailed reply for "-T dn,ace <name>", the plain one otherwise.
+async fn fake_denic(detailed: &str, plain: &str) -> FakeWhois {
+    let (detailed, plain) = (detailed.to_string(), plain.to_string());
+    FakeWhois::start(move |q| if q.starts_with("-T dn,ace ") { detailed.clone().into() } else { plain.clone().into() }).await
+}
+
+#[tokio::test]
+async fn a_registered_de_domain_is_registered() {
+    let denic = fake_denic(&fixture("denic_detailed.txt"), &fixture("denic_plain.txt")).await;
+    let r = check_registration("example.de", &whois_only("de", &denic.addr), T).await.unwrap();
+    assert_eq!(denic.queries(), ["-T dn,ace example.de"]);
+    assert!(r.registered);
+    assert_eq!(r.nameservers.len(), 4);
+    assert_eq!(r.nameservers[0], "ns1.denic.de");
+    let fs = registration_findings("example.de", &r);
+    assert_eq!(codes(&fs), ["registration_ok"]);
+    assert!(!fs[0].message.contains(" with ") && !fs[0].message.contains(" until "), "{}", fs[0].message);
+}
+
+#[tokio::test]
+async fn status_connect_alone_means_registered() {
+    let denic = fake_denic(&fixture("denic_plain.txt"), &fixture("denic_plain.txt")).await;
+    let r = check_registration("example.de", &whois_only("de", &denic.addr), T).await.unwrap();
+    assert!(r.registered);
+}
+
+#[tokio::test]
+async fn a_free_de_domain_is_not_registered() {
+    let denic = fake_denic(&fixture("denic_free.txt"), &fixture("denic_free.txt")).await;
+    let r = check_registration("example.de", &whois_only("de", &denic.addr), T).await.unwrap();
+    assert!(!r.registered);
+    assert!(code(&registration_findings("example.de", &r), "registration_not_registered").is_some());
+}
+
+#[tokio::test]
+async fn an_internationalised_de_domain_is_queried_in_ace_form() {
+    // DENIC answers "Status: invalid" to a bare xn-- name; "-T dn,ace" is the form that works.
+    let denic = fake_denic(&fixture("denic_idn_detailed.txt"), &fixture("denic_idn_plain.txt")).await;
+    let r = check_registration("xn--bcher-kva.de", &whois_only("de", &denic.addr), T).await.unwrap();
+    assert_eq!(denic.queries(), ["-T dn,ace xn--bcher-kva.de"]);
+    assert!(r.registered);
+}
+
+#[tokio::test]
+async fn an_invalid_answer_fails_rather_than_saying_not_registered() {
+    let denic = fake_denic(&fixture("denic_invalid.txt"), &fixture("denic_invalid.txt")).await;
+    let err = check_registration("example.de", &whois_only("de", &denic.addr), T).await.unwrap_err();
+    assert!(err.to_string().contains("is invalid"), "{err}");
 }

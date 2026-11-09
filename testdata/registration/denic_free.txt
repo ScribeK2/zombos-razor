@@ -1,0 +1,2 @@
+Domain: example.de
+Status: free
