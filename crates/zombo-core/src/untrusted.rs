@@ -74,11 +74,6 @@ pub fn web_page(head: &str, body: &[u8]) -> web::WebResult {
     web::inspect_with("https://example.com/", "http://example.com/", &|_| page())
 }
 
-/// Touch every byte a finding would show, so a target notices a slow or panicking formatter.
-pub fn digest(findings: &[Finding]) -> usize {
-    findings.iter().map(|f| f.code.len() + f.title.len() + f.message.len()).sum()
-}
-
 /// Every reply a server could read out of `wire`. The server side closes after the bytes.
 pub async fn smtp_replies(wire: Vec<u8>) -> usize {
     use tokio::io::AsyncWriteExt;
