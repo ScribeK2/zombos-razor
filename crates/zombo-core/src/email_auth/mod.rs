@@ -4,12 +4,14 @@
 
 mod dkim;
 mod dmarc;
+mod findings;
 mod query;
 mod records;
 mod spf;
 
 pub use dkim::{DKIM_COMMON_SELECTORS, DkimAudit, DkimFlags, DkimKey, DkimKeyError, KeyType, parse_dkim_key, parse_selectors};
 pub use dmarc::{Alignment, DmarcAudit, DmarcRecord, Policy, parse_dmarc};
+pub use findings::{dkim_findings, dmarc_findings, email_findings, spf_findings, spf_missing_provider};
 pub use records::{Bimi, MtaSts, TlsRpt, parse_bimi, parse_mta_sts, parse_tls_rpt};
 pub use spf::{
     EffectiveAll, HostSpec, MAX_LOOKUPS, Mechanism, NodeError, ParsedSpf, Qualifier, RefKind, SpfAudit, SpfError, SpfNode, SpfTerm, effective_all, parse_spf,
