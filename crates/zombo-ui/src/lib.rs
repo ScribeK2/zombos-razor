@@ -1,5 +1,6 @@
 pub mod checks;
 pub mod diagnosis;
+pub mod evidence_model;
 pub mod keys;
 pub mod ondemand;
 pub mod outcome;
