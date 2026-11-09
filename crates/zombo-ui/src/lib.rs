@@ -16,6 +16,7 @@ pub mod open_state;
 pub mod outcome;
 pub mod rail;
 pub mod record;
+pub mod record_findings;
 pub mod runtime;
 pub mod section;
 pub mod session;

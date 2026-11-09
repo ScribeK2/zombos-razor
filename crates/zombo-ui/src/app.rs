@@ -250,7 +250,8 @@ impl Shell {
                     if this
                         .update(cx, |app, cx| {
                             if let Some(tab) = app.ws.diagnosis_mut_for(&key) {
-                                tab.propagation.apply(&key, event);
+                                let target = tab.target.clone();
+                                tab.propagation.apply(&target, event);
                                 cx.notify();
                             }
                             app.after_run(&key, Section::Dns);

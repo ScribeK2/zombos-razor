@@ -212,7 +212,7 @@ impl Propagation {
         }
     }
 
-    pub fn apply(&mut self, target: &str, event: PropEvent) {
+    pub fn apply(&mut self, target: &Target, event: PropEvent) {
         match event {
             PropEvent::Started => {
                 let history = std::mem::take(&mut self.history);
@@ -238,7 +238,10 @@ impl Propagation {
                         self.stale = r.stale.clone();
                         self.settled = true;
                         self.history.settle(propagation_records(&r));
-                        self.findings = ordered(&zombo_core::propagation::propagation_findings(target, &r));
+                        let name = crate::checks::check_name(target).unwrap_or_else(|| target.value.clone());
+                        let mut findings = zombo_core::propagation::propagation_findings(&name, &r);
+                        findings.extend(crate::record_findings::record_findings(target, &name, &r, &findings));
+                        self.findings = ordered(&findings);
                         self.agreement = Some(r.agreement);
                         self.state = CheckState::Done { problems: problems(&self.findings) };
                     }
@@ -477,6 +480,10 @@ mod tests {
         }
     }
 
+    fn tgt(value: &str) -> Target {
+        Target { value: value.into(), kind: Kind::Domain }
+    }
+
     fn tab() -> Tab {
         Tab::new(Target { value: "example.com".into(), kind: Kind::Domain })
     }
@@ -516,8 +523,8 @@ mod tests {
     #[test]
     fn answers_stream_into_rows_before_the_result_exists() {
         let mut p = Propagation::new();
-        p.apply("example.com", PropEvent::Started);
-        p.apply("example.com", PropEvent::Answer(Box::new(answer("Google", false, "v"))));
+        p.apply(&tgt("example.com"), PropEvent::Started);
+        p.apply(&tgt("example.com"), PropEvent::Answer(Box::new(answer("Google", false, "v"))));
         assert_eq!(p.state, CheckState::Running);
         let rows = p.view(RecordKind::Txt);
         assert_eq!(rows.len(), 1);
@@ -529,8 +536,8 @@ mod tests {
     #[test]
     fn the_table_shows_one_record_type_at_a_time() {
         let mut p = Propagation::new();
-        p.apply("example.com", PropEvent::Started);
-        p.apply("example.com", PropEvent::Answer(Box::new(answer("Google", false, "v"))));
+        p.apply(&tgt("example.com"), PropEvent::Started);
+        p.apply(&tgt("example.com"), PropEvent::Answer(Box::new(answer("Google", false, "v"))));
         let a = p.view(RecordKind::A);
         assert_eq!(a[0].answer, "no record");
         assert_eq!(a[0].ttl, None);
@@ -540,8 +547,8 @@ mod tests {
     #[test]
     fn staleness_is_judged_per_record_type() {
         let mut p = Propagation::new();
-        p.apply("example.com", PropEvent::Started);
-        p.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        p.apply(&tgt("example.com"), PropEvent::Started);
+        p.apply(&tgt("example.com"), PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
         let status = |ty| p.view(ty).iter().map(|r| r.status.clone()).collect::<Vec<_>>();
         assert_eq!(status(RecordKind::Txt), [RowStatus::Truth, RowStatus::Match, RowStatus::Stale]);
         assert_eq!(status(RecordKind::A), [RowStatus::Truth, RowStatus::Match, RowStatus::Match]);
@@ -550,9 +557,9 @@ mod tests {
     #[test]
     fn a_late_answer_after_a_timeout_is_ignored() {
         let mut p = Propagation::new();
-        p.apply("e", PropEvent::Started);
-        p.apply("e", PropEvent::TimedOut);
-        p.apply("e", PropEvent::Answer(Box::new(answer("Google", false, "v"))));
+        p.apply(&tgt("e"), PropEvent::Started);
+        p.apply(&tgt("e"), PropEvent::TimedOut);
+        p.apply(&tgt("e"), PropEvent::Answer(Box::new(answer("Google", false, "v"))));
         assert_eq!(p.state, CheckState::TimedOut);
         assert!(p.rows.is_empty());
     }
@@ -560,8 +567,8 @@ mod tests {
     #[test]
     fn finishing_settles_every_row_against_the_authoritative_answer() {
         let mut p = Propagation::new();
-        p.apply("example.com", PropEvent::Started);
-        p.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        p.apply(&tgt("example.com"), PropEvent::Started);
+        p.apply(&tgt("example.com"), PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
         let view = p.view(RecordKind::Txt);
         let status: Vec<_> = view.iter().map(|r| (r.resolver.as_str(), r.status.clone())).collect();
         assert_eq!(status, [("ns1", RowStatus::Truth), ("Google", RowStatus::Match), ("Quad9", RowStatus::Stale)]);
@@ -572,8 +579,8 @@ mod tests {
     #[test]
     fn a_failure_keeps_its_reason() {
         let mut p = Propagation::new();
-        p.apply("e", PropEvent::Started);
-        p.apply("e", PropEvent::Finished(Box::new(Err("none of the resolvers answered".into()))));
+        p.apply(&tgt("e"), PropEvent::Started);
+        p.apply(&tgt("e"), PropEvent::Finished(Box::new(Err("none of the resolvers answered".into()))));
         assert_eq!(p.state, CheckState::Failed { reason: "none of the resolvers answered".into() });
     }
 
@@ -584,8 +591,8 @@ mod tests {
         let mut r = result(&[]);
         r.resolvers.push(a);
         let mut p = Propagation::new();
-        p.apply("e", PropEvent::Started);
-        p.apply("e", PropEvent::Finished(Box::new(Ok(r))));
+        p.apply(&tgt("e"), PropEvent::Started);
+        p.apply(&tgt("e"), PropEvent::Finished(Box::new(Ok(r))));
         assert_eq!(p.view(RecordKind::Txt).last().map(|r| r.status.clone()), Some(RowStatus::NoAnswer));
     }
 
@@ -678,14 +685,14 @@ mod tests {
     #[test]
     fn a_propagation_rerun_reports_records_added_and_removed() {
         let mut p = Propagation::new();
-        p.apply("e", PropEvent::Started);
-        p.apply("e", PropEvent::Finished(Box::new(Ok(result(&[])))));
+        p.apply(&tgt("e"), PropEvent::Started);
+        p.apply(&tgt("e"), PropEvent::Finished(Box::new(Ok(result(&[])))));
         assert_eq!(p.history.changes, None);
         let mut second = result(&[]);
         second.resolvers = vec![answer("Google", false, "newer")];
         second.nameservers = vec![answer("ns1", true, "newer")];
-        p.apply("e", PropEvent::Started);
-        p.apply("e", PropEvent::Finished(Box::new(Ok(second))));
+        p.apply(&tgt("e"), PropEvent::Started);
+        p.apply(&tgt("e"), PropEvent::Finished(Box::new(Ok(second))));
         let d = p.history.changes.clone().unwrap();
         assert_eq!(d.added, ["TXT: newer"]);
         assert_eq!(d.removed, ["TXT: new", "TXT: old"]);
@@ -695,17 +702,17 @@ mod tests {
     fn the_dns_verdict_is_the_agreement_after_the_check_finishes() {
         let mut t = tab();
         assert_eq!(t.verdict(Section::Dns).word, "NOT RUN");
-        t.propagation.apply("example.com", PropEvent::Started);
+        t.propagation.apply(&tgt("example.com"), PropEvent::Started);
         assert_eq!(t.verdict(Section::Dns).word, "RUNNING");
-        t.propagation.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        t.propagation.apply(&tgt("example.com"), PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
         assert_eq!(t.verdict(Section::Dns).word, "CACHED");
     }
 
     #[test]
     fn the_dns_rail_mark_follows_the_agreement_not_the_problem_count() {
         let mut t = tab();
-        t.propagation.apply("example.com", PropEvent::Started);
-        t.propagation.apply("example.com", PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
+        t.propagation.apply(&tgt("example.com"), PropEvent::Started);
+        t.propagation.apply(&tgt("example.com"), PropEvent::Finished(Box::new(Ok(result(&["Quad9"])))));
         assert_eq!(t.verdict_glyph(Section::Dns), Glyph::Info);
         assert_eq!(t.verdict_glyph(Section::Web), Glyph::Ring);
     }
@@ -729,9 +736,9 @@ mod tests {
     fn summary_follows_the_checks_that_ran_and_never_claims_a_pass_for_none() {
         let mut t = tab();
         assert_eq!(t.state(Section::Summary), CheckState::NotRun);
-        t.propagation.apply("e", PropEvent::Started);
+        t.propagation.apply(&tgt("e"), PropEvent::Started);
         assert_eq!(t.state(Section::Summary), CheckState::Running);
-        t.propagation.apply("e", PropEvent::TimedOut);
+        t.propagation.apply(&tgt("e"), PropEvent::TimedOut);
         assert!(matches!(t.state(Section::Summary), CheckState::Failed { .. }));
     }
 
