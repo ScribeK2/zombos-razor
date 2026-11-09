@@ -6,6 +6,7 @@ pub mod dns_data;
 pub mod evidence_model;
 pub mod finding_owner;
 pub mod keys;
+pub mod motion;
 pub mod notice;
 pub mod ondemand;
 pub mod open_state;

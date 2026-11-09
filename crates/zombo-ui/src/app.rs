@@ -11,6 +11,7 @@ use zombo_ui::{
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
     notice, ondemand,
+    motion::{self, Fade, Feedback, Level, Motion},
     open_state::OpenState,
     outcome::{CheckEvent, Fact},
     record::RecordKind,
@@ -42,6 +43,11 @@ pub struct Shell {
     open: HashSet<&'static str>,
     tab_open: OpenState,
     row_focus: Vec<FocusHandle>,
+    motion: Motion,
+    fx: Feedback<(&'static str, usize)>,
+    fade: Fade<(String, Section, &'static str)>,
+    pane_opacity: f32,
+    toast_leave: Option<Instant>,
     watches: Watches,
     pastes: HashMap<u64, Entity<TextareaState>>,
     toast: Option<(String, Instant)>,
@@ -124,6 +130,14 @@ impl Shell {
             }
         })
         .detach();
+        cx.spawn(async move |this, cx| {
+            let motion = cx.background_executor().spawn(async { zombo_ui::motion::read_system_motion() }).await;
+            let _ = this.update(cx, |app, cx| {
+                app.motion = motion;
+                cx.notify();
+            });
+        })
+        .detach();
         let config = Config::load(Dirs::from_env());
         let ws = Workspace { recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()), ..Workspace::default() };
         let toast = [("config.toml", &config.settings_problem), ("recent.toml", &config.recent_problem)]
@@ -141,6 +155,11 @@ impl Shell {
             action_focus: (0..FINDING_HANDLES).map(|_| cx.focus_handle().tab_stop(true)).collect(),
             palette: None,
             open: HashSet::new(),
+            motion: Motion::default(),
+            fx: Feedback::new(),
+            fade: Fade::default(),
+            pane_opacity: 1.0,
+            toast_leave: None,
             tab_open: OpenState::default(),
             row_focus: DISCLOSURES.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             watches: Watches::default(),
@@ -272,8 +291,14 @@ impl Shell {
         for (target, section) in self.watches.due(now) {
             self.start_section_for(&target, section, cx);
         }
-        if self.toast.as_ref().is_some_and(|(_, at)| now.duration_since(*at) > TOAST_FOR) {
-            self.toast = None;
+        if let Some((_, at)) = self.toast {
+            if now.duration_since(at) > TOAST_FOR && self.toast_leave.is_none_or(|l| l < at) {
+                self.toast_leave = Some(now);
+            }
+            if self.toast_leave.is_some_and(|l| l >= at && !self.motion.running(now.duration_since(l), motion::TOAST_OUT)) {
+                self.toast = None;
+                self.toast_leave = None;
+            }
         }
         if !self.watches.is_empty() || self.toast.is_some() {
             cx.notify();
@@ -697,8 +722,7 @@ impl Shell {
                 .border_color(color(t::BG_200))
                 .text_size(px(t::TEXT_BODY))
                 .text_color(color(if selected { t::GRAY_1000 } else { t::GRAY_900 }))
-                .when(selected, |s| s.bg(color(t::GRAY_300)))
-                .hover(|s| s.bg(color(t::GRAY_200)))
+                .map(|s| if selected { s.bg(color(t::GRAY_300)) } else { self.fx(s, ("rail", i), t::BG_200, t::GRAY_200, t::GRAY_300, cx) })
                 .focus_visible(focus_ring)
                 .cursor_pointer()
                 .role(Role::Tab)
@@ -756,6 +780,7 @@ impl Shell {
         let can_run = brief.is_some() && !state.can_retry() && state != zombo_ui::status::CheckState::Running;
         div()
             .id("pane")
+            .opacity(self.pane_opacity)
             .track_focus(&self.pane_focus)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| window.focus(&this.pane_focus, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
@@ -878,8 +903,7 @@ impl Shell {
                                     .text_size(px(t::TEXT_LABEL))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(color(t::GRAY_200)))
-                                    .active(|s| s.bg(color(t::GRAY_300)))
+                                    .map(|s| self.fx(s, ("run", 0), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                                     .focus_visible(focus_ring)
                                     .role(Role::Button)
                                     .aria_label(run_label.unwrap_or("Run this Check"))
@@ -906,8 +930,7 @@ impl Shell {
                         .bg(color(t::GRAY_100))
                         .text_size(px(t::TEXT_CAPTION))
                         .cursor_pointer()
-                        .hover(|s| s.bg(color(t::GRAY_200)))
-                        .active(|s| s.bg(color(t::GRAY_300)))
+                        .map(|s| self.fx(s, ("retry", 0), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                         .focus_visible(focus_ring)
                         .role(Role::Button)
                         .aria_label("Retry this Check")
@@ -1005,11 +1028,9 @@ impl Shell {
             .border_1()
             .border_color(color(t::GRAY_500))
             .rounded(px(t::RADIUS_SMALL))
-            .bg(color(t::GRAY_100))
             .text_size(px(t::TEXT_CAPTION))
             .cursor_pointer()
-            .hover(|s| s.bg(color(t::GRAY_200)))
-            .active(|s| s.bg(color(t::GRAY_300)))
+            .map(|s| self.fx(s, ("go", i), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
             .focus_visible(focus_ring)
             .role(Role::Button)
             .aria_label(format!("Go to the {} section", target.label()))
@@ -1035,11 +1056,9 @@ impl Shell {
             .border_1()
             .border_color(color(if watching { t::ACCENT } else { t::GRAY_500 }))
             .rounded(px(t::RADIUS_SMALL))
-            .bg(color(if watching { t::GRAY_300 } else { t::GRAY_100 }))
             .text_size(px(t::TEXT_CAPTION))
             .cursor_pointer()
-            .hover(|s| s.bg(color(t::GRAY_200)))
-            .active(|s| s.bg(color(t::GRAY_300)))
+            .map(|s| self.fx(s, ("watch", 0), if watching { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
             .focus_visible(focus_ring)
             .role(Role::Button)
             .aria_label(if watching { "Stop watching this Check" } else { "Watch this Check until its answer changes" })
@@ -1049,6 +1068,24 @@ impl Shell {
             }))
             .child(if watching { "Watching" } else { "Watch" })
             .child(kbd("W"))
+    }
+
+    /// Hover and press feedback: the element's background blends between the three colors over
+    /// 80 ms, and its mouse events feed `Feedback`.
+    fn fx(&self, el: Stateful<Div>, key: (&'static str, usize), rest: u32, hover: u32, press: u32, cx: &mut Context<Self>) -> Stateful<Div> {
+        let set = move |level: Level| {
+            move |this: &mut Self, cx: &mut Context<Self>| {
+                this.fx.set(key, level, Instant::now());
+                cx.notify();
+            }
+        };
+        let hovered = set(Level::Hover);
+        let rested = set(Level::Rest);
+        let pressed = set(Level::Press);
+        el.bg(color(self.fx.color(&key, Instant::now(), self.motion, rest, hover, press)))
+            .on_hover(cx.listener(move |this, h: &bool, _, cx| if *h { hovered(this, cx) } else { rested(this, cx) }))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| pressed(this, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(move |this, _, _, cx| hovered(this, cx)))
     }
 
     fn toggle_row(&mut self, id: &'static str, cx: &mut Context<Self>) {
@@ -1105,7 +1142,7 @@ impl Shell {
                     .items_center()
                     .gap(px(8.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .map(|s| self.fx(s, ("disc", slot), t::GRAY_100, t::GRAY_200, t::GRAY_300, cx))
                     .focus_visible(focus_ring)
                     .role(Role::Button)
                     .aria_expanded(open)
@@ -1263,13 +1300,11 @@ impl Shell {
                     .rounded(px(t::RADIUS_SMALL))
                     .border_1()
                     .border_color(color(if on { t::ACCENT } else { t::GRAY_400 }))
-                    .bg(color(if on { t::GRAY_300 } else { t::GRAY_100 }))
                     .text_color(color(if on { t::GRAY_1000 } else { t::GRAY_900 }))
                     .font_family(t::FONT_MONO)
                     .text_size(px(t::TEXT_LABEL))
                     .cursor_pointer()
-                    .hover(|s| s.bg(color(t::GRAY_200)))
-                    .active(|s| s.bg(color(t::GRAY_300)))
+                    .map(|s| self.fx(s, ("rtype", i), if on { t::GRAY_300 } else { t::GRAY_100 }, t::GRAY_200, t::GRAY_300, cx))
                     .role(Role::Tab)
                     .aria_selected(on)
                     .aria_label(format!("Compare {} records", kind.code()))
@@ -1409,6 +1444,13 @@ impl Render for Shell {
             self.rendered = true;
             eprintln!("first render {:?} after main()", self.started.elapsed());
         }
+        let now = Instant::now();
+        if let Some((key, word)) = self.ws.current().map(|t| (t.target.value.clone(), (t.section, t.state(t.section).word()))) {
+            self.pane_opacity = self.fade.opacity((key, word.0, word.1), now, self.motion);
+        }
+        if self.fx.animating(now, self.motion) || self.fade.animating(now, self.motion) || self.toast.as_ref().is_some_and(|&(_, at)| self.motion.running(now.saturating_duration_since(at), motion::TOAST_IN) || self.toast_leave.is_some_and(|l| l >= at && self.motion.running(now.saturating_duration_since(l), motion::TOAST_OUT))) {
+            window.request_animation_frame();
+        }
         let body = if self.ws.is_empty_state() {
             div().flex_1().flex().flex_col().child(self.empty_state(cx).into_any_element())
         } else if self.ws.current_evidence().is_some() {
@@ -1434,12 +1476,16 @@ impl Render for Shell {
             .when(!self.ws.tabs.is_empty(), |s| s.child(self.tab_strip(cx)))
             .child(body)
             .child(self.status_bar())
-            .when_some(self.toast.clone(), |s, (text, _)| {
+            .when_some(self.toast.clone().and_then(|(text, at)| {
+                let left = self.toast_leave.filter(|&l| l >= at).map(|l| now.saturating_duration_since(l));
+                motion::toast_frame(self.motion, now.saturating_duration_since(at), left).map(|(o, y)| (text, o, y))
+            }), |s, (text, opacity, drop)| {
                 s.child(
                     div()
                         .id("toast")
                         .absolute()
-                        .bottom(px(t::STATUS_BAR_HEIGHT + 12.))
+                        .opacity(opacity)
+                        .bottom(px(t::STATUS_BAR_HEIGHT + 12. - drop))
                         .right(px(16.))
                         .w(px(420.))
                         .flex()
@@ -1456,7 +1502,7 @@ impl Render for Shell {
                         .role(Role::Alert)
                         .aria_label(text.clone())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.toast = None;
+                            this.toast_leave = Some(Instant::now());
                             cx.notify();
                         }))
                         .child(glyph(Glyph::Info, 16.))
