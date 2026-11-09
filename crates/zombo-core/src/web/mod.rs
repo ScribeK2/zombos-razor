@@ -18,9 +18,9 @@ use std::{
 use serde::Serialize;
 
 use crate::email_auth::printable;
-use fetch::{Fetch, fetch_chain};
+use fetch::{Fetch, TlsMode, fetch_chain};
 
-pub use fetch::{Hop, MAX_REDIRECTS, Pin};
+pub use fetch::{CertCheck, Hop, MAX_REDIRECTS, Pin};
 pub use findings::web_findings;
 pub use origin::Answer;
 pub use providers::{AsnInfo, Detection, Hosting, ProviderKind, cymru_origin_name, detect_hosting, parse_cymru_name, parse_cymru_origin, system_resolver};
@@ -78,11 +78,15 @@ pub struct WebOptions {
     pub ports: Ports,
     /// Make the target resolve here instead of through DNS (a test seam).
     pub pin: Option<IpAddr>,
+    /// Whether the origin's certificate is checked. The public name is always checked.
+    pub origin_cert: CertCheck,
+    /// DER certificates trusted instead of the bundled roots (a test seam).
+    pub trusted_roots: Vec<Vec<u8>>,
 }
 
 impl Default for WebOptions {
     fn default() -> Self {
-        WebOptions { timeout: Duration::from_secs(10), origin: None, resolver: None, ports: Ports::default(), pin: None }
+        WebOptions { timeout: Duration::from_secs(10), origin: None, resolver: None, ports: Ports::default(), pin: None, origin_cert: CertCheck::Verify, trusted_roots: vec![] }
     }
 }
 
@@ -112,6 +116,9 @@ pub struct WebResult {
     pub chain: Vec<Hop>,
     pub redirect_loop: bool,
     pub too_many_redirects: bool,
+    /// The first step of the chain from https:// to http://.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downgrade: Option<Downgrade>,
     /// Why HTTPS failed, when it fell back to HTTP.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub https_error: Option<String>,
@@ -135,6 +142,39 @@ pub struct WebResult {
 pub struct OriginAnswer {
     pub ip: IpAddr,
     pub answer: Answer,
+    /// The origin certificate was not verified because `--insecure-origin` was given.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub verification_skipped: bool,
+    /// What the origin presented, read only when verification was skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<OriginCert>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OriginCert {
+    pub subject: String,
+    pub issuer: String,
+    pub not_after: String,
+    /// Why a verifying client would refuse it, when it would.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub would_fail: Option<String>,
+}
+
+/// A redirect that moved from https:// to http://.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Downgrade {
+    pub from: String,
+    pub to: String,
+}
+
+/// The first hop whose URL is https and whose next URL (the next hop, or the last
+/// hop's Location) is http.
+pub fn redirect_downgrade(chain: &[Hop]) -> Option<Downgrade> {
+    let next = chain.iter().skip(1).map(|h| Some(h.url.as_str())).chain([chain.last().and_then(|h| h.location.as_deref())]);
+    chain.iter().zip(next).find_map(|(h, to)| {
+        let to = to?;
+        (h.url.starts_with("https://") && to.starts_with("http://")).then(|| Downgrade { from: h.url.clone(), to: to.to_string() })
+    })
 }
 
 /// Split what the rep typed into a host and the path to ask for. Scheme and
@@ -168,9 +208,10 @@ pub async fn check_web(host: &str, path: &str, opts: &WebOptions) -> WebResult {
     let deadline = started + opts.timeout;
     let pin = opts.pin.map(|ip| Pin { host: host.to_string(), ip });
     let (https_url, http_url) = (site_url("https", host, opts.ports.https, path), site_url("http", host, opts.ports.http, path));
+    let public_tls = TlsMode { check: CertCheck::Verify, roots: opts.trusted_roots.clone() };
     let fetch = {
         let pin = pin.clone();
-        move |url: &str| fetch_chain(url, pin.as_ref(), deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT))
+        move |url: &str| fetch_chain(url, pin.as_ref(), deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT), &public_tls)
     };
     let (public_urls, public_fetch) = ((https_url.clone(), http_url.clone()), fetch.clone());
     let site = tokio::task::spawn_blocking(move || inspect_with(&public_urls.0, &public_urls.1, &public_fetch));
@@ -190,13 +231,27 @@ pub async fn check_web(host: &str, path: &str, opts: &WebOptions) -> WebResult {
         let ip = opts.origin?;
         let pin = Pin { host: host.to_string(), ip };
         let limit = deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT);
-        let f = tokio::task::spawn_blocking(move || fetch_chain(&origin_url, Some(&pin), limit)).await.ok()?;
-        Some(OriginAnswer { ip, answer: Answer::from_fetch(&f) })
+        let tls = TlsMode { check: opts.origin_cert, roots: opts.trusted_roots.clone() };
+        let url = origin_url.clone();
+        let f = tokio::task::spawn_blocking(move || fetch_chain(&url, Some(&pin), limit, &tls)).await.ok()?;
+        let skipped = opts.origin_cert == CertCheck::SkipVerification && origin_url.starts_with("https://");
+        let certificate = if skipped { origin_cert(&origin_url, ip, host, deadline).await } else { None };
+        Some(OriginAnswer { ip, answer: Answer::from_fetch(&f), verification_skipped: skipped, certificate })
     };
     let (hosting, origin) = tokio::join!(hosting, origin);
     res.hosting = hosting;
     res.origin = origin;
     res
+}
+
+/// Read what the origin presents, in a handshake that sends nothing but the hello.
+async fn origin_cert(url: &str, ip: IpAddr, host: &str, deadline: Instant) -> Option<OriginCert> {
+    let port = url::Url::parse(url).ok()?.port_or_known_default()?;
+    let left = deadline.saturating_duration_since(Instant::now()).min(FETCH_LIMIT);
+    let r = crate::tls::check_tls_via((ip, port), host, &crate::tls::public_roots(), time::OffsetDateTime::now_utc(), left).await.ok()?;
+    let c = r.chain.first()?;
+    let not_after = c.not_after.format(&time::format_description::well_known::Rfc3339).ok()?;
+    Some(OriginCert { subject: c.subject.clone(), issuer: c.issuer.clone(), not_after, would_fail: r.verify_error })
 }
 
 fn failed(url: &str, error: String) -> WebResult {
@@ -219,6 +274,7 @@ fn inspect_with(https_url: &str, http_url: &str, fetch: &dyn Fn(&str) -> Fetch) 
         }
     }
     res.time_ms = u64::try_from(f.elapsed.as_millis()).unwrap_or(u64::MAX);
+    res.downgrade = redirect_downgrade(&f.chain);
     res.redirect_loop = f.redirect_loop;
     res.too_many_redirects = f.too_many;
     if let Some(e) = &f.error {
@@ -361,6 +417,48 @@ mod tests {
             Fetch { chain: broken.chain.clone(), error: broken.error.clone(), ..Fetch::default() }
         });
         assert_eq!((asked.get(), r.https_error, r.chain.len()), (1, None, 1));
+    }
+
+    fn hop(url: &str, status: u16, location: Option<&str>) -> Hop {
+        Hop { url: url.into(), status, location: location.map(Into::into) }
+    }
+
+    #[test]
+    fn a_redirect_from_https_to_http_is_found_and_the_reverse_is_not() {
+        let down = [hop("https://x.test/", 301, Some("http://x.test/a")), hop("http://x.test/a", 200, None)];
+        assert_eq!(redirect_downgrade(&down), Some(Downgrade { from: "https://x.test/".into(), to: "http://x.test/a".into() }));
+        let up = [hop("http://x.test/", 301, Some("https://x.test/")), hop("https://x.test/", 200, None)];
+        assert_eq!(redirect_downgrade(&up), None);
+        assert_eq!(redirect_downgrade(&[hop("https://x.test/", 200, None)]), None);
+        assert_eq!(redirect_downgrade(&[]), None);
+        // The target failed, so only the Location of the last hop shows the downgrade.
+        assert!(redirect_downgrade(&[hop("https://x.test/", 302, Some("http://x.test/"))]).is_some());
+        // Downgrade in the middle of a longer chain.
+        let mid = [hop("http://x.test/", 301, Some("https://x.test/")), hop("https://x.test/", 301, Some("http://y.test/")), hop("http://y.test/", 200, None)];
+        assert_eq!(redirect_downgrade(&mid).unwrap().to, "http://y.test/");
+    }
+
+    #[test]
+    fn the_downgrade_finding_names_both_urls() {
+        use crate::finding::Severity;
+        let r = WebResult { status: Some(200), final_url: Some("http://y.test/".into()), downgrade: Some(Downgrade { from: "https://x.test/".into(), to: "http://y.test/".into() }), ..WebResult::default() };
+        let fs = web_findings("x.test", &r);
+        let f = fs.iter().find(|f| f.code == "web_redirect_downgrade").unwrap();
+        assert_eq!(f.severity, Severity::Warning);
+        assert!(f.title.contains("https://x.test/") && f.title.contains("http://y.test/"), "{}", f.title);
+        assert!(f.message.contains("https://x.test/") && f.message.contains("http://y.test/"));
+        assert!(f.recommendation.as_deref().is_some_and(|r| r.contains("https")));
+        assert!(!web_findings("x.test", &WebResult { status: Some(200), ..WebResult::default() }).iter().any(|f| f.code == "web_redirect_downgrade"));
+    }
+
+    #[test]
+    fn inspect_records_the_downgrade_it_saw() {
+        let mut f = page("https://x.test/", 301);
+        f.chain[0].location = Some("http://x.test/".into());
+        f.chain.push(Hop { url: "http://x.test/".into(), status: 200, location: None });
+        let r = inspect_with("https://x.test/", "http://x.test/", &|u| if u.starts_with("https") { Fetch { chain: f.chain.clone(), ..Fetch::default() } } else { page(u, 200) });
+        assert_eq!(r.downgrade.unwrap().to, "http://x.test/");
+        assert_eq!(r.chain.len(), 2);
     }
 
     #[test]

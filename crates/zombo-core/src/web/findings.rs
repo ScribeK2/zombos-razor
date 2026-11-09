@@ -2,7 +2,7 @@
 //! codes, titles and wording are the Go Check's; the `website_cdn_*`, `website_host_*`,
 //! `website_asn` and `website_origin_*` ones are new.
 
-use super::{Answer, MAX_REDIRECTS, ProviderKind, SECURITY_HEADERS, WebResult, origin::origin_findings};
+use super::{Answer, MAX_REDIRECTS, OriginAnswer, ProviderKind, SECURITY_HEADERS, WebResult, origin::origin_findings};
 use crate::finding::{Finding, Severity};
 
 const SLOW_MS: u64 = 3000;
@@ -13,11 +13,47 @@ fn finding(code: &'static str, severity: Severity, title: impl Into<std::borrow:
 
 pub fn web_findings(target: &str, r: &WebResult) -> Vec<Finding> {
     let mut out = inspection_findings(target, r);
+    out.extend(downgrade_finding(r));
     out.extend(provider_findings(r));
     if let Some(o) = &r.origin {
         out.extend(origin_findings(o.ip, &Answer::of_public(r), &o.answer));
+        out.extend(unverified_origin_finding(o));
     }
     out
+}
+
+fn downgrade_finding(r: &WebResult) -> Option<Finding> {
+    let d = r.downgrade.as_ref()?;
+    Some(Finding {
+        code: "web_redirect_downgrade",
+        severity: Severity::Warning,
+        title: format!("Redirect from HTTPS to HTTP: {} to {}", d.from, d.to).into(),
+        message: format!("{} redirects to {}, which drops the connection from HTTPS to plain HTTP. Anything sent after that hop is readable and changeable on the network.", d.from, d.to),
+        recommendation: Some("Redirect to https:// URLs only.".into()),
+    })
+}
+
+fn unverified_origin_finding(o: &OriginAnswer) -> Option<Finding> {
+    if !o.verification_skipped {
+        return None;
+    }
+    let seen = match &o.certificate {
+        Some(c) => format!(
+            "It presented a certificate for {} issued by {}, valid until {}{}.",
+            c.subject,
+            c.issuer,
+            c.not_after,
+            c.would_fail.as_deref().map_or(String::new(), |w| format!("; a verifying client would refuse it ({w})"))
+        ),
+        None => "The certificate could not be read.".to_string(),
+    };
+    Some(Finding {
+        code: "web_origin_cert_not_verified",
+        severity: Severity::Info,
+        title: "Origin certificate was not verified".into(),
+        message: format!("The origin {} was asked with --insecure-origin, so its certificate was not verified. {seen}", o.ip),
+        recommendation: None,
+    })
 }
 
 fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
