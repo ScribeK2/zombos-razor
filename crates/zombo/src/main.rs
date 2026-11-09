@@ -872,10 +872,10 @@ async fn smtp(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         if resolvers.is_empty() {
             resolvers = system_resolvers();
         }
-        if !resolvers.is_empty() {
-            if let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await {
-                expect.extend(ptrs.into_iter().map(|p| p.name));
-            }
+        if !resolvers.is_empty()
+            && let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
+        {
+            expect.extend(ptrs.into_iter().map(|p| p.name));
         }
     }
     let findings = smtp_findings(&r, &expect);
