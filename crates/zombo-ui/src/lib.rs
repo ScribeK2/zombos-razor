@@ -1,6 +1,7 @@
 pub mod checks;
 pub mod diagnosis;
 pub mod keys;
+pub mod record;
 pub mod runtime;
 pub mod section;
 pub mod status;

@@ -106,6 +106,12 @@ impl Workspace {
         }
     }
 
+    pub fn step_record(&mut self, delta: isize) {
+        if let Some(tab) = self.current_mut() {
+            tab.record = tab.record.step(delta);
+        }
+    }
+
     pub fn move_recent(&mut self, delta: isize) {
         let n = self.recent.len() as isize;
         if n > 0 {

@@ -11,6 +11,8 @@ pub enum Action {
     CloseTab,
     NextTab,
     PrevTab,
+    NextRecord,
+    PrevRecord,
     Cheatsheet,
     Dismiss,
     MoveUp,
@@ -74,6 +76,8 @@ const BINDINGS: &[Binding] = &[
     bind("w", true, false, false, When::Always, Action::CloseTab, "Close tab"),
     bind("tab", true, false, false, When::Always, Action::NextTab, "Next tab"),
     bind("tab", true, false, true, When::Always, Action::PrevTab, "Previous tab"),
+    bind("]", false, false, false, When::NotTyping, Action::NextRecord, "Next record type"),
+    bind("[", false, false, false, When::NotTyping, Action::PrevRecord, "Previous record type"),
     bind("?", false, false, false, When::NotTyping, Action::Cheatsheet, "Shortcut cheat sheet"),
 ];
 
@@ -201,6 +205,13 @@ mod tests {
             assert_eq!(action_for(Mode::Browse, false, p), Some(want), "{p:?}");
             assert_eq!(action_for(Mode::Omnibox, false, p), Some(want), "{p:?} in the omnibox");
         }
+    }
+
+    #[test]
+    fn brackets_step_the_record_type_unless_typing() {
+        assert_eq!(action_for(Mode::Browse, false, plain("]")), Some(Action::NextRecord));
+        assert_eq!(action_for(Mode::Browse, false, plain("[")), Some(Action::PrevRecord));
+        assert_eq!(action_for(Mode::Omnibox, false, plain("]")), None);
     }
 
     #[test]

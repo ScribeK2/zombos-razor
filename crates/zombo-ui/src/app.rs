@@ -6,6 +6,7 @@ use gpui_kit::*;
 use zombo_ui::{
     checks, diagnosis as dg,
     keys::{self, Action, Mode, Press},
+    record::RecordKind,
     runtime,
     section::Section,
     status::Glyph,
@@ -188,6 +189,11 @@ impl Shell {
             Action::Rerun => {
                 if self.ws.current().is_some_and(|t| t.section == Section::Dns || t.section == Section::Summary) {
                     self.start_propagation(cx);
+                }
+            }
+            Action::NextRecord | Action::PrevRecord => {
+                if self.ws.current().is_some_and(|t| t.section == Section::Dns) {
+                    self.ws.step_record(if action == Action::NextRecord { 1 } else { -1 });
                 }
             }
             Action::Jump(n) => self.ws.jump(n),
@@ -605,15 +611,17 @@ impl Shell {
                     .w_full()
                     .min_w_0()
                     .flex()
+                    .flex_wrap()
                     .justify_between()
                     .items_end()
-                    .gap(px(24.))
+                    .gap_x(px(24.))
+                    .gap_y(px(8.))
                     .role(Role::Group)
                     .aria_label(format!("Verdict: {}. {}", verdict.word, verdict.why))
                     .child(
                         div()
                             .flex_1()
-                            .min_w_0()
+                            .min_w(px(280.))
                             .flex()
                             .flex_col()
                             .child(
@@ -697,11 +705,11 @@ impl Shell {
                         .children(finding_views),
                 )
             })
-            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab)))
+            .when(section == Section::Dns, |s| s.child(self.resolver_table(tab, cx)))
     }
 
-    fn resolver_table(&self, tab: &dg::Tab) -> impl IntoElement {
-        let rows = &tab.propagation.rows;
+    fn resolver_table(&self, tab: &dg::Tab, cx: &mut Context<Self>) -> impl IntoElement {
+        let rows = tab.propagation.view(tab.record);
         let cell = |w: Option<f32>| {
             let c = div().px(px(12.)).truncate();
             match w {
@@ -719,7 +727,7 @@ impl Shell {
             .text_color(color(t::GRAY_900))
             .child(cell(Some(150.)).child("Resolver"))
             .child(cell(Some(140.)).child("Location"))
-            .child(cell(None).child("Answer"))
+            .child(cell(None).child(format!("{} answer", tab.record.code())))
             .child(cell(Some(70.)).child("TTL"))
             .child(cell(Some(100.)).child("Status"));
         let body = rows.iter().enumerate().map(|(i, r)| {
@@ -760,6 +768,43 @@ impl Shell {
             (_, 0) => "Propagation by resolver: waiting for the first answer".to_string(),
             (_, n) => format!("Propagation by resolver: {n} answers"),
         };
+        let switcher = div()
+            .id("record-types")
+            .flex()
+            .flex_wrap()
+            .gap(px(4.))
+            .role(Role::TabList)
+            .aria_label("Record type")
+            .children(RecordKind::ALL.iter().enumerate().map(|(i, &kind)| {
+                let on = kind == tab.record;
+                div()
+                    .id(("rtype", i))
+                    .h(px(28.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(t::RADIUS_SMALL))
+                    .border_1()
+                    .border_color(color(if on { t::ACCENT } else { t::GRAY_400 }))
+                    .bg(color(if on { t::GRAY_300 } else { t::GRAY_100 }))
+                    .text_color(color(if on { t::GRAY_1000 } else { t::GRAY_900 }))
+                    .font_family(t::FONT_MONO)
+                    .text_size(px(t::TEXT_LABEL))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(color(t::GRAY_200)))
+                    .active(|s| s.bg(color(t::GRAY_300)))
+                    .role(Role::Tab)
+                    .aria_selected(on)
+                    .aria_label(format!("Compare {} records", kind.code()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(tab) = this.ws.current_mut() {
+                            tab.record = kind;
+                        }
+                        cx.notify();
+                    }))
+                    .child(kind.code())
+            }))
+            .child(div().h(px(28.)).flex().items_center().gap(px(6.)).pl(px(8.)).text_size(px(t::TEXT_CAPTION)).text_color(color(t::GRAY_800)).child(kbd("[")).child(kbd("]")).child("switch"));
         div()
             .w_full()
             .min_w_0()
@@ -767,6 +812,7 @@ impl Shell {
             .flex_col()
             .gap(px(8.))
             .child(div().text_size(px(t::TEXT_LABEL)).font_weight(FontWeight::SEMIBOLD).child(heading))
+            .child(switcher)
             .when(!rows.is_empty(), |s| {
                 s.child(
                     div()
