@@ -8,7 +8,6 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 | Work | Owner | Branch | Notes |
 |---|---|---|---|
-| DNS-interception Finding | lead | `rewrite` | Small. `propagation.rs` only. |
 | WHOIS/RDAP (`zombo-core::registration`, `zombo registration`) | worker | worktree branch off `rewrite` | Port of `internal/app/registration.go`. Does not touch `main.rs` wiring beyond its subcommand, or any docs. |
 
 ## Done
@@ -24,12 +23,13 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 - [x] SOA serial comparison (behind vs serial not bumped)
 - [x] Agreement verdict
 - [x] Delegation and glue checks (`delegation.rs`, `zombo delegation`)
+- [x] DNS-interception Finding (`dns_network_intercepts`) and `Agreement::Intercepted`, for propagation and delegation. Passive: at least two nameservers at different addresses all answering without AA but with RA
 - [x] Shared zone fixtures in `testdata/zones` for Go and Rust tests
 - [x] Verified live from a clean network (VPS) for propagation, stale cache, delegation
 
 ## To do: DNS and domain registration
 
-- [ ] DNS-interception Finding and downgraded Agreement (in progress)
+- [ ] Interception canary probe for resolver-only runs (`--no-authoritative`): needs a short extra probe to an address that must never answer, so it is opt-in to keep clean runs fast
 - [ ] WHOIS/RDAP: registrar, status, expiry, nameservers, holds, deletion states (in progress)
 - [ ] DNSSEC validation (DS at parent vs DNSKEY, RRSIG expiry, chain)
 - [ ] More record types in lookup (SRV, PTR, DNSKEY, DS) if needed by the UI

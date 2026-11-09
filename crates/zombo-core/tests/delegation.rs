@@ -75,7 +75,7 @@ fn a_server_that_does_not_answer_is_unreachable() {
 #[test]
 fn a_server_that_answers_but_does_not_serve_the_zone_is_lame() {
     let mut r = healthy();
-    r.servers[0].state = ServerState::Lame { why: "REFUSED (authoritative flag not set)".into() };
+    r.servers[0].state = ServerState::Lame { why: "REFUSED (authoritative flag not set)".into(), recursive: false };
     r.servers[0].child_ns = None;
     let fs = delegation_findings(&r);
     let f = code(&fs, "dns_delegation_lame").expect("lame");
@@ -147,6 +147,30 @@ fn a_nameserver_that_is_a_cname_is_critical() {
     let mut r = healthy();
     r.cnames = vec!["ns1.example.com".into()];
     assert_eq!(code(&delegation_findings(&r), "dns_ns_is_cname").unwrap().severity, Severity::Critical);
+}
+
+#[test]
+fn servers_that_all_answer_like_a_forwarder_mean_the_network_intercepts_dns() {
+    let mut r = healthy();
+    for (i, s) in r.servers.iter_mut().enumerate() {
+        s.address = Some(format!("192.0.2.{}:53", i + 1).parse().unwrap());
+        s.state = ServerState::Lame { why: "No Error (authoritative flag not set)".into(), recursive: true };
+        s.child_ns = None;
+    }
+    let fs = delegation_findings(&r);
+    let f = code(&fs, "dns_network_intercepts").expect("interception finding");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(code(&fs, "dns_delegation_lame").is_none(), "one alarm, not two: {fs:?}");
+}
+
+#[test]
+fn one_lame_server_that_recurses_is_just_lame() {
+    let mut r = healthy();
+    r.servers[0].address = Some("192.0.2.1:53".parse().unwrap());
+    r.servers[0].state = ServerState::Lame { why: "No Error (authoritative flag not set)".into(), recursive: true };
+    r.servers[0].child_ns = None;
+    let fs = delegation_findings(&r);
+    assert!(code(&fs, "dns_delegation_lame").is_some() && code(&fs, "dns_network_intercepts").is_none(), "{fs:?}");
 }
 
 // The IO: ask a parent for the referral, then each delegated nameserver.

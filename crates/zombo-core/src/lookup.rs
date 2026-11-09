@@ -41,6 +41,8 @@ pub struct LookupResult {
     pub rcode: Rcode,
     /// Every answer carried the authoritative-answer (AA) flag.
     pub authoritative: bool,
+    /// Any answer offered recursion (the RA flag). Real authoritative servers rarely do.
+    pub recursion_available: bool,
     pub records: BTreeMap<String, Vec<Value>>,
     /// Record type -> why that query failed.
     pub errors: BTreeMap<String, String>,
@@ -70,7 +72,7 @@ pub async fn dns_lookup(
         let name = name.clone();
         set.spawn(async move { (t, exchange(server, &name, t, recursion_desired, limit).await) });
     }
-    let mut res = LookupResult { rcode: Rcode::NoError, authoritative: true, records: BTreeMap::new(), errors: BTreeMap::new() };
+    let mut res = LookupResult { rcode: Rcode::NoError, authoritative: true, recursion_available: false, records: BTreeMap::new(), errors: BTreeMap::new() };
     let (mut answers, mut first_err) = (0, String::new());
     while let Some(Ok((t, out))) = set.join_next().await {
         let typ = t.to_string();
@@ -84,6 +86,7 @@ pub async fn dns_lookup(
             Ok(m) => {
                 answers += 1;
                 res.authoritative &= m.metadata.authoritative;
+                res.recursion_available |= m.metadata.recursion_available;
                 match m.metadata.response_code {
                     ResponseCode::NoError => {}
                     ResponseCode::NXDomain => res.rcode = Rcode::NxDomain,

@@ -6,6 +6,7 @@ use hickory_proto::{
     op::{Edns, Message, Query},
     rr::{Name, RecordType},
 };
+use crate::finding::{Finding, Severity};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
@@ -84,4 +85,20 @@ async fn tcp(server: SocketAddr, wire: &[u8], id: u16) -> Result<Message, Exchan
         return Err(ExchangeError::Bad("answer id does not match the query".into()));
     }
     Ok(m)
+}
+
+/// Nameservers that all answer without the authoritative flag but offering
+/// recursion are not nameservers: something on the path (a router, a firewall,
+/// an ISP) is answering DNS queries itself.
+pub fn interception_finding(servers: &[&str]) -> Finding {
+    Finding {
+        code: "dns_network_intercepts",
+        severity: Severity::Warning,
+        title: "This network appears to intercept DNS",
+        message: format!(
+            "{} are different nameservers, yet all answered without the authoritative flag and offered recursion, which real authoritative servers do not do. A router, firewall or ISP is probably answering DNS queries itself, so these results do not show what the rest of the internet sees.",
+            servers.join(", ")
+        ),
+        recommendation: Some("Re-run from another network (a phone hotspot or a server), or ask the network owner to stop redirecting port 53."),
+    }
 }

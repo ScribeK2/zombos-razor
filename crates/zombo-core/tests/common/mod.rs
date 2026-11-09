@@ -30,6 +30,7 @@ struct State {
     refuse: Vec<RecordType>,
     authoritative: bool,
     referral: bool,
+    ra: Option<bool>,
 }
 
 pub struct FakeDns {
@@ -116,6 +117,12 @@ impl FakeDns {
         self
     }
 
+    /// Override the recursion-available flag (by default it is set unless the server is authoritative).
+    pub fn recursion_available(self, ra: bool) -> Self {
+        self.state.lock().unwrap().ra = Some(ra);
+        self
+    }
+
     /// Behave like a parent zone: answer NS queries with a referral (the NS
     /// records in the authority section, their addresses as glue in the
     /// additional section) instead of an answer.
@@ -141,7 +148,7 @@ fn answer(state: &Mutex<State>, query: &[u8], udp: bool) -> Option<Vec<u8>> {
     let mut m = Message::response(req.metadata.id, OpCode::Query);
     m.metadata.message_type = MessageType::Response;
     m.metadata.recursion_desired = req.metadata.recursion_desired;
-    m.metadata.recursion_available = !st.authoritative;
+    m.metadata.recursion_available = st.ra.unwrap_or(!st.authoritative);
     m.metadata.authoritative = st.authoritative;
     m.add_query(q.clone());
     if st.refuse.contains(&q.query_type()) || (st.authoritative && req.metadata.recursion_desired) {

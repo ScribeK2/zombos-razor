@@ -40,7 +40,7 @@ pub enum ServerState {
     /// Did not answer at all.
     Unreachable,
     /// Answered, but not as an authoritative nameserver for the zone.
-    Lame { why: String },
+    Lame { why: String, recursive: bool },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,7 +219,10 @@ async fn ask_server(addr: SocketAddr, apex_name: &Name, apex: &str, limit: Durat
     });
     let state = match (soa.metadata.response_code, soa.metadata.authoritative, serial) {
         (ResponseCode::NoError, true, Some(serial)) => ServerState::Ok { serial },
-        (rc, aa, _) => ServerState::Lame { why: format!("{} (authoritative flag {})", rc.to_str(), if aa { "set" } else { "not set" }) },
+        (rc, aa, _) => ServerState::Lame {
+            why: format!("{} (authoritative flag {})", rc.to_str(), if aa { "set" } else { "not set" }),
+            recursive: soa.metadata.recursion_available,
+        },
     };
     let child_ns = match exchange(addr, apex_name, RecordType::NS, false, limit).await {
         Ok(m) if matches!(state, ServerState::Ok { .. }) => Some(ns_set(&m, apex)),
@@ -258,11 +261,20 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         .servers
         .iter()
         .filter_map(|s| match &s.state {
-            ServerState::Lame { why } => Some(format!("{} ({why})", s.name)),
+            ServerState::Lame { why, .. } => Some(format!("{} ({why})", s.name)),
             _ => None,
         })
         .collect();
-    if !lame.is_empty() {
+    // Every server that answered did so like a forwarder, and they are not all one address:
+    // the network is answering, not the nameservers.
+    let answering: Vec<&DelegatedServer> = r.servers.iter().filter(|s| s.state != ServerState::Unreachable).collect();
+    let distinct: BTreeSet<SocketAddr> = answering.iter().filter_map(|s| s.address).collect();
+    let intercepted = distinct.len() >= 2 && answering.iter().all(|s| matches!(s.state, ServerState::Lame { recursive: true, .. }));
+    if intercepted {
+        let names: Vec<&str> = answering.iter().map(|s| s.name.as_str()).collect();
+        let f = crate::dns::interception_finding(&names);
+        push(f.code, f.severity, f.title, f.message, f.recommendation);
+    } else if !lame.is_empty() {
         push(
             "dns_delegation_lame",
             Severity::Critical,

@@ -121,6 +121,8 @@ pub struct VantageAnswer {
     pub rcode: Option<Rcode>,
     /// Whether the answer carried the authoritative flag; `None` if it didn't answer.
     pub authoritative: Option<bool>,
+    /// Whether any answer offered recursion; `None` if it didn't answer.
+    pub recursion_available: Option<bool>,
     /// Record type -> sorted record texts.
     pub answers: BTreeMap<String, Vec<String>>,
     /// TTL of each answered record type: the smallest across its records.
@@ -149,6 +151,8 @@ pub enum Agreement {
     ResolversDiffer,
     /// Too few Vantages answered to compare.
     Inconclusive,
+    /// The network answers DNS itself, so the Vantages are not independent.
+    Intercepted,
 }
 
 impl Agreement {
@@ -159,6 +163,7 @@ impl Agreement {
             Agreement::NameserversDiffer => "NAMESERVERS DIFFER",
             Agreement::ResolversDiffer => "RESOLVERS DIFFER",
             Agreement::Inconclusive => "INCONCLUSIVE",
+            Agreement::Intercepted => "DNS INTERCEPTED",
         }
     }
 
@@ -169,6 +174,7 @@ impl Agreement {
             Agreement::NameserversDiffer => "The authoritative nameservers disagree with each other.",
             Agreement::ResolversDiffer => "Resolvers disagree, and there is no authoritative answer to compare against.",
             Agreement::Inconclusive => "Too few vantages answered to compare.",
+            Agreement::Intercepted => "This network answers DNS itself, so the vantages are not independent and the comparison proves nothing.",
         }
     }
 }
@@ -176,6 +182,8 @@ impl Agreement {
 #[derive(Debug, Clone, Serialize)]
 pub struct PropagationResult {
     pub agreement: Agreement,
+    /// The nameservers all answered like a forwarder: see `network_intercepted`.
+    pub intercepted: bool,
     pub types: Vec<String>,
     pub resolvers: Vec<VantageAnswer>,
     pub nameservers: Vec<VantageAnswer>,
@@ -244,7 +252,10 @@ pub async fn propagation_with(
     let stale = if ns_disagree.is_empty() { stale(&res_answers, &ns_answers, &types) } else { BTreeMap::new() };
     // Only nameservers that answered with the AA flag count: an interceptor's answer proves nothing.
     let usable = answered(&res_answers) + ns_answers.iter().filter(|n| n.error.is_none() && n.authoritative == Some(true)).count();
-    let agreement = if !ns_disagree.is_empty() {
+    let intercepted = network_intercepted(&ns_answers);
+    let agreement = if intercepted {
+        Agreement::Intercepted
+    } else if !ns_disagree.is_empty() {
         Agreement::NameserversDiffer
     } else if !stale.is_empty() {
         Agreement::Cached
@@ -257,6 +268,7 @@ pub async fn propagation_with(
     };
     Ok(PropagationResult {
         agreement,
+        intercepted,
         types: types.iter().map(ToString::to_string).collect(),
         resolvers: res_answers,
         nameservers: ns_answers,
@@ -264,6 +276,15 @@ pub async fn propagation_with(
         ns_disagree,
         stale,
     })
+}
+
+/// At least two nameservers at different addresses, every one of which answered
+/// without the authoritative flag and offered recursion. One odd server could be
+/// lame; all of them being forwarders points at the network.
+fn network_intercepted(nameservers: &[VantageAnswer]) -> bool {
+    let answered: Vec<&VantageAnswer> = nameservers.iter().filter(|n| n.error.is_none()).collect();
+    let distinct: std::collections::BTreeSet<SocketAddr> = answered.iter().map(|n| n.vantage.address).collect();
+    distinct.len() >= 2 && answered.iter().all(|n| n.authoritative == Some(false) && n.recursion_available == Some(true))
 }
 
 /// Types on which the answering Vantages differ, plus "existence" when some
@@ -318,6 +339,7 @@ async fn ask(v: Vantage, target: &str, types: &[RecordType], limit: Duration) ->
         vantage: v.clone(),
         rcode: None,
         authoritative: None,
+        recursion_available: None,
         answers: BTreeMap::new(),
         ttl: BTreeMap::new(),
         failed: vec![],
@@ -332,6 +354,7 @@ async fn ask(v: Vantage, target: &str, types: &[RecordType], limit: Duration) ->
         Ok(l) => {
             a.rcode = Some(l.rcode);
             a.authoritative = Some(l.authoritative);
+            a.recursion_available = Some(l.recursion_available);
             a.soa = l.records.get("SOA").and_then(|v| v.first()).and_then(|v| Soa::parse(&v.text));
             for t in types {
                 let t = t.to_string();
@@ -573,7 +596,7 @@ fn resolver_findings(target: &str, r: &PropagationResult) -> Vec<Finding> {
             message: "Only one resolver answered, so there is nothing to compare it with.".into(),
             recommendation: Some("Re-run; if resolvers keep failing, outbound DNS may be filtered on this network."),
         });
-    } else if records.is_empty() && addrs.is_empty() && r.stale.is_empty() {
+    } else if records.is_empty() && addrs.is_empty() && r.stale.is_empty() && !r.intercepted {
         out.push(Finding {
             code: "dns_propagation_consistent",
             severity: Severity::Ok,
@@ -606,7 +629,10 @@ fn authoritative_findings(r: &PropagationResult) -> Vec<Finding> {
         });
     }
     let faking = names(&|n| n.authoritative == Some(false));
-    if !faking.is_empty() {
+    if r.intercepted {
+        let who: Vec<&str> = r.nameservers.iter().filter(|n| n.error.is_none()).map(|n| n.vantage.name.as_str()).collect();
+        out.push(crate::dns::interception_finding(&who));
+    } else if !faking.is_empty() {
         out.push(Finding {
             code: "dns_authoritative_not_authoritative",
             severity: Severity::Warning,

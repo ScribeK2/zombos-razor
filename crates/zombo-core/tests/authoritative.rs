@@ -190,3 +190,46 @@ async fn resolvers_that_disagree_with_no_trusted_nameserver_are_just_different()
     let (res, _) = run(&[r("New", &a), r("Old", &b)], &[]).await;
     assert_eq!(res.agreement, Agreement::ResolversDiffer);
 }
+
+// A network that answers DNS itself looks like nameservers that answer without the
+// authoritative flag and offer recursion. The default fake server does exactly that.
+
+#[tokio::test]
+async fn nameservers_that_all_answer_like_a_forwarder_mean_the_network_intercepts_dns() {
+    let (ns1, ns2) = (FakeDns::start(&zone("example")).await, FakeDns::start(&zone("example")).await);
+    let (a, b) = (FakeDns::start(&zone("example")).await, FakeDns::start(&zone("example")).await);
+    let (res, fs) = run(&[r("A", &a), r("B", &b)], &[ns("ns1", &ns1), ns("ns2", &ns2)]).await;
+    assert!(res.intercepted);
+    assert_eq!(res.agreement, Agreement::Intercepted);
+    let f = code(&fs, "dns_network_intercepts").expect("interception finding");
+    assert_eq!(f.severity, Severity::Warning);
+    assert!(f.message.contains("ns1") && f.message.contains("ns2"), "{}", f.message);
+    assert!(code(&fs, "dns_authoritative_not_authoritative").is_none(), "one alarm, not two");
+    assert!(code(&fs, "dns_propagation_consistent").is_none(), "must not call it Propagated when the resolvers are one box: {fs:?}");
+}
+
+#[tokio::test]
+async fn one_odd_nameserver_is_not_a_whole_network() {
+    let one = FakeDns::start(&zone("example")).await;
+    let a = FakeDns::start(&zone("example")).await;
+    let (res, fs) = run(&[r("A", &a)], &[ns("ns1", &one)]).await;
+    assert!(!res.intercepted);
+    assert!(code(&fs, "dns_authoritative_not_authoritative").is_some());
+}
+
+#[tokio::test]
+async fn a_real_nameserver_among_them_rules_interception_out() {
+    let (real, odd) = (FakeDns::start(&zone("example")).await.authoritative(), FakeDns::start(&zone("example")).await);
+    let a = FakeDns::start(&zone("example")).await;
+    let (res, _) = run(&[r("A", &a)], &[ns("ns1", &real), ns("ns2", &odd)]).await;
+    assert!(!res.intercepted);
+}
+
+#[tokio::test]
+async fn nameservers_that_are_not_authoritative_but_do_not_recurse_are_not_interception() {
+    // Lame, not a forwarder: no recursion offered.
+    let (n1, n2) = (FakeDns::start(&zone("example")).await.recursion_available(false), FakeDns::start(&zone("example")).await.recursion_available(false));
+    let a = FakeDns::start(&zone("example")).await;
+    let (res, _) = run(&[r("A", &a)], &[ns("ns1", &n1), ns("ns2", &n2)]).await;
+    assert!(!res.intercepted);
+}

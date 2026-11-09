@@ -92,7 +92,7 @@ async fn delegation(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
         let state = match &s.state {
             ServerState::Ok { serial } => format!("authoritative, serial {serial}"),
             ServerState::Unreachable => "no answer".to_string(),
-            ServerState::Lame { why } => format!("LAME: {why}"),
+            ServerState::Lame { why, .. } => format!("LAME: {why}"),
         };
         println!("  {:<32} glue: {:<24} {state}", s.name, glue.unwrap_or_else(|| "-".into()));
     }
