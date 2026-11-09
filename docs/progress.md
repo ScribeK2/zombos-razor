@@ -50,6 +50,7 @@ Go sources to port: `email_auth.go`, `blacklist.go`, `headers.go`, `maillog.go`.
 - [ ] SMTP banner and STARTTLS test
 - [ ] Blacklist lookup
 - [ ] Reverse DNS and forward-confirmed reverse DNS
+- [ ] SMTP banner and STARTTLS test (no Go source; new)
 - [ ] Header analysis (Evidence)
 - [ ] Mail-log analysis (Evidence)
 
@@ -107,6 +108,14 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Email: the SPF walk is breadth-first with a 30-lookup cap, so which subtree is cut when the cap bites can differ from Go; DMARC "partial" and similar titles are fixed text because `Finding.title` is `&'static str` (same root cause as the registrar suffix below)
 - [ ] `Finding.recommendation` is `Option<&'static str>`, so the registration Check dropped Go's " (Registrar)" suffix on three recommendations (the registrar is printed above the findings instead). Widening to `Cow<'static, str>` would restore it but touches every `Some("...")` literal. Decide after workers B and C merge, to avoid conflicts.
 - [ ] ureq honours `HTTP_PROXY`/`HTTPS_PROXY`; keep (corporate networks) or turn off
+
+## Live-verified from a clean network (VPS, 2026-11-09)
+
+- [x] `dnssec`: cloudflare.com SECURE on all 4 validating resolvers, DS matches; dnssec-failed.org BOGUS on all 4 with `dnssec_ds_mismatch` (DS tag 42069 vs served key 50719)
+- [x] `registration`: registered and not-registered domains over RDAP
+- [x] `email`: google.com, github.com, etsy.com (11 lookups), the test domain
+- [x] Earlier: propagation, stale cache, delegation
+- [ ] UI note: the `dnssec` nameserver list repeats identical lines per address; collapse identical rows in the UI
 
 ## Still unverified
 
