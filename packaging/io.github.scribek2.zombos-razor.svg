@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Zombo's Razor</title>
+  <rect width="256" height="256" rx="56" fill="#0B0B0C"/>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="54.5" fill="none" stroke="#2E2E34" stroke-width="3"/>
+  <path d="M60 188 L196 60 L196 100 L100 188 Z" fill="#EDEDEF"/>
+  <path d="M60 188 L196 60" fill="none" stroke="#5B8DEF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M112 188 L196 108" fill="none" stroke="#3A3A41" stroke-width="6" stroke-linecap="round"/>
+</svg>
