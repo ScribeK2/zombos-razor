@@ -10,8 +10,9 @@ use zombo_core::{
     registration::{Endpoints, Source, check_registration, registration_findings},
     target::{Kind, parse_target},
 };
+use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     v.parse()
@@ -38,8 +39,104 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("delegation") => delegation(it).await,
         Some("registration") => registration(it).await,
         Some("dnssec") => dnssec(it).await,
+        Some("email") => email(it).await,
         _ => Err(USAGE.into()),
     }
+}
+
+const EMAIL_USAGE: &str = "usage: zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]";
+
+async fn email(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut target, mut json, mut timeout, mut resolver) = (None, false, Duration::from_secs(4), None);
+    let mut selectors = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                timeout = Duration::from_millis(value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?)
+            }
+            "--resolver" => resolver = Some(addr(&value("--resolver")?)?),
+            "--selector" => selectors.push(value("--selector")?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{EMAIL_USAGE}")),
+            _ if target.is_none() => target = Some(a),
+            _ => return Err(EMAIL_USAGE.into()),
+        }
+    }
+    let t = parse_target(&target.ok_or(EMAIL_USAGE)?)?;
+    if !matches!(t.kind, Kind::Domain | Kind::Hostname) {
+        return Err(format!("email needs a domain or host name, not {:?}", t.kind));
+    }
+    let selectors = parse_selectors(&selectors)?;
+    let resolver = resolver.unwrap_or_else(|| default_resolvers()[0].address);
+    let r = email_auth(resolver, &t.value, &selectors, timeout).await;
+    if !r.answered() {
+        return Err(format!("no answer from DNS resolver {resolver}"));
+    }
+    let findings = email_findings(&t.value, &r);
+    if json {
+        let out = serde_json::json!({ "result": r, "findings": findings });
+        println!("{}", serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    let list = |v: &[String]| if v.is_empty() { "-".to_string() } else { v.join(", ") };
+    let records = |v: &[String], err: &Option<String>| match (v, err) {
+        (_, Some(e)) => format!("lookup failed: {e}"),
+        ([], _) => "none".to_string(),
+        ([one], _) => one.clone(),
+        (many, _) => format!("{} records (receivers ignore them)", many.len()),
+    };
+    println!("{} ({:?}) via {resolver}", t.value, t.kind);
+    let s = &r.spf;
+    println!("  {:<8} {}", "SPF", records(&s.records, &s.lookup_error));
+    if s.tree.is_some() {
+        let all = match s.all {
+            EffectiveAll::All(q) => format!("{}all", q.symbol()),
+            EffectiveAll::Absent => "no all".to_string(),
+            EffectiveAll::Unknown => "unknown (behind an unresolved redirect)".to_string(),
+        };
+        let more = if s.truncated { "more than " } else { "" };
+        println!("  {:<8} {more}{}/10 DNS lookups, {} void; {all}", "", s.lookups, s.void_lookups);
+    }
+    // A wildcard `*._domainkey` null record revokes every selector at once, so revoked keys are counted, not listed.
+    let revoked = r.dkim.keys.iter().filter(|k| k.revoked).count();
+    let mut keys: Vec<String> = r
+        .dkim
+        .keys
+        .iter()
+        .filter(|k| !k.revoked)
+        .map(|k| match (&k.error, k.bits) {
+            (Some(e), _) => format!("{} ({e})", k.selector),
+            (_, Some(bits)) => format!("{} ({} {bits}-bit)", k.selector, k.key_type),
+            _ if k.key_type == KeyType::Rsa => k.selector.clone(),
+            _ => format!("{} ({})", k.selector, k.key_type),
+        })
+        .collect();
+    if revoked > 0 {
+        keys.push(format!("{revoked} revoked"));
+    }
+    let dkim = if keys.is_empty() { format!("none found among {} selectors", r.dkim.checked.len()) } else { keys.join(", ") };
+    println!("  {:<8} {dkim}", "DKIM");
+    let d = &r.dmarc;
+    let dmarc = match &d.parsed {
+        Some(p) => {
+            let sp = p.subdomain_policy.map_or(String::new(), |sp| format!("; sp={sp}"));
+            let policy = p.policy.map_or("no valid policy".to_string(), |p| format!("p={p}"));
+            let strict = |a: Alignment| if a == Alignment::Strict { "s" } else { "r" };
+            format!("{policy}{sp}; pct={}; adkim={}; aspf={}; rua={}", p.pct, strict(p.adkim), strict(p.aspf), list(&p.rua))
+        }
+        None => records(&d.records, &d.lookup_error),
+    };
+    println!("  {:<8} {dmarc}", "DMARC");
+    println!("  {:<8} {}", "TLS-RPT", records(&r.tls_rpt.records, &r.tls_rpt.lookup_error));
+    println!("  {:<8} {}", "BIMI", records(&r.bimi.records, &r.bimi.lookup_error));
+    println!("  {:<8} {}", "MTA-STS", records(&r.mta_sts.records, &r.mta_sts.lookup_error));
+    if !r.mta_sts.records.is_empty() {
+        println!("  {:<8} (the policy file is not fetched)", "");
+    }
+    println!();
+    print_findings(&findings);
+    Ok(())
 }
 
 fn print_findings(findings: &[Finding]) {

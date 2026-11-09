@@ -8,13 +8,12 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 | Work | Owner | Branch | Notes |
 |---|---|---|---|
-| Email auth (`zombo-core::email_auth`, `zombo email`): SPF, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record | worker B | worktree branch off `rewrite` (`24f3ef6`) | Port of `internal/app/email_auth.go`. MTA-STS policy fetch waits for worker A's HTTP client. |
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
 
 ## Done
 
-- [x] Workers A (registration) and C (DNSSEC) reviewed and merged. Worker B (email) still running
+- [x] Workers A (registration), B (email) and C (DNSSEC) reviewed and merged into `rewrite`. 236 tests pass; clippy, `cargo deny` and `cargo audit` clean. Email auth (`email_auth/`, `zombo email`): SPF walker with the 10-lookup count, DKIM, DMARC, TLS-RPT, BIMI, MTA-STS record. MX comes from the lookup inside `email_auth`
 
 - [x] Planning session, ADR-0006 and ADR-0007, `CONTEXT.md` rewritten
 - [x] GPUI spike passed (Ubuntu 24.04.5 laptop with Orca, 24.04 and 26.04 containers, AMD, Intel)
@@ -43,11 +42,11 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 
 Go sources to port: `email_auth.go`, `blacklist.go`, `headers.go`, `maillog.go`.
 
-- [ ] MX
-- [ ] SPF with the 10-lookup count
-- [ ] DKIM by selector
-- [ ] DMARC
-- [ ] MTA-STS, TLS-RPT, BIMI
+- [x] MX
+- [x] SPF with the 10-lookup count
+- [x] DKIM by selector
+- [x] DMARC
+- [x] MTA-STS, TLS-RPT, BIMI: DNS records only. The MTA-STS policy file over HTTPS is not fetched yet (the HTTP client from `registration` can do it)
 - [ ] SMTP banner and STARTTLS test
 - [ ] Blacklist lookup
 - [ ] Reverse DNS and forward-confirmed reverse DNS
@@ -105,6 +104,7 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 - [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
 - [ ] DNSSEC expiry warning is `min(3 days, lifetime / 4)`, not a flat 3 days (Cloudflare signs for about 2 days). Accepted as a deliberate deviation; unsigned-yet (not-before) signatures have no finding
+- [ ] Email: the SPF walk is breadth-first with a 30-lookup cap, so which subtree is cut when the cap bites can differ from Go; DMARC "partial" and similar titles are fixed text because `Finding.title` is `&'static str` (same root cause as the registrar suffix below)
 - [ ] `Finding.recommendation` is `Option<&'static str>`, so the registration Check dropped Go's " (Registrar)" suffix on three recommendations (the registrar is printed above the findings instead). Widening to `Cow<'static, str>` would restore it but touches every `Some("...")` literal. Decide after workers B and C merge, to avoid conflicts.
 - [ ] ureq honours `HTTP_PROXY`/`HTTPS_PROXY`; keep (corporate networks) or turn off
 

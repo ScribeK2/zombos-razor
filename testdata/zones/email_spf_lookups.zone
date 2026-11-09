@@ -1,0 +1,12 @@
+example.com. 300 IN TXT "v=spf1 include:one.test include:two.test -all"
+one.test. 300 IN TXT "v=spf1 a mx include:three.test ?all"
+one.test. 300 IN A 192.0.2.1
+one.test. 300 IN MX 10 one.test.
+two.test. 300 IN TXT "v=spf1 a:x.test mx:x.test/24 ptr exists:x.test -all"
+x.test. 300 IN A 192.0.2.2
+x.test. 300 IN MX 10 x.test.
+three.test. 300 IN TXT "v=spf1 include:four.test a"
+three.test. 300 IN A 192.0.2.3
+four.test. 300 IN TXT "v=spf1 mx a"
+four.test. 300 IN A 192.0.2.4
+four.test. 300 IN MX 10 four.test.
