@@ -668,6 +668,7 @@ impl Shell {
             let state = tab.state(section);
             let selected = tab.section == section;
             let g = state.glyph();
+            let count_line = zombo_ui::rail::count_line(section, &state, &tab.findings(section));
             let group = match i {
                 1 => Some("CHECKS"),
                 Section::FIRST_ON_DEMAND => Some("ON DEMAND"),
@@ -711,7 +712,7 @@ impl Shell {
                         .truncate()
                         .text_size(px(t::TEXT_CAPTION))
                         .text_color(color(t::GRAY_900))
-                        .child(state.label()),
+                        .child(count_line),
                 );
             div().flex().flex_col().when_some(group, |s, g| s.child(heading(g))).child(item)
         });

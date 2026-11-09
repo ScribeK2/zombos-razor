@@ -6,6 +6,7 @@ pub mod keys;
 pub mod notice;
 pub mod ondemand;
 pub mod outcome;
+pub mod rail;
 pub mod record;
 pub mod runtime;
 pub mod section;
