@@ -388,6 +388,17 @@ async fn ask(v: Vantage, target: &str, types: &[RecordType], limit: Duration) ->
     a
 }
 
+/// Ask one Vantage the same questions `propagation_with` asks, without entering the comparison.
+/// For a Vantage that is shown beside the result but must not decide it, such as this machine's
+/// own resolver.
+pub async fn ask_vantage(v: Vantage, target: &str, scope: Scope, limit: Duration) -> VantageAnswer {
+    let mut types = scope.types();
+    if v.kind == VantageKind::Authoritative {
+        types.push(RecordType::SOA);
+    }
+    ask(v, target, &types, limit).await
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
     #[error("no resolver could be asked for the nameservers of {0}")]

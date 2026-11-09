@@ -1492,7 +1492,7 @@ impl Shell {
             .map(|(i, r)| {
                 let status_color = match r.status {
                     dg::RowStatus::Truth | dg::RowStatus::Match => t::OK,
-                    dg::RowStatus::Stale => t::WARNING,
+                    dg::RowStatus::Stale | dg::RowStatus::Differs => t::WARNING,
                     dg::RowStatus::NoAnswer => t::CRITICAL,
                     dg::RowStatus::Answered => t::GRAY_900,
                 };

@@ -25,6 +25,7 @@ pub mod settings_model;
 pub mod smtp_plan;
 pub mod status;
 pub mod theme;
+pub mod this_machine;
 pub mod tls_port;
 pub mod update_model;
 pub mod watch;

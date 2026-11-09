@@ -12,7 +12,7 @@ use zombo_core::{
     dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
-    propagation::{Scope, default_resolvers, discover_nameservers, propagation_with},
+    propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
     registration::{Endpoints, Registration, check_registration, registration_findings},
     resolver::{Resolver, system_resolvers},
@@ -88,11 +88,20 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
         let resolvers = propagation_resolvers(&settings.resolvers);
         let bootstrap: Vec<SocketAddr> = resolvers.iter().map(|r| r.address).collect();
         let nameservers = discover_nameservers(&bootstrap, &target, 53, limits.query).await.unwrap_or_default();
-        propagation_with(&resolvers, &nameservers, &target, Scope::All, limits.query, |a| {
-            let _ = tx.send(PropEvent::Answer(Box::new(a.clone())));
-        })
-        .await
-        .map_err(|e| e.to_string())
+        let ask_local = async {
+            let answer = match crate::this_machine::vantage(&system_resolvers()) {
+                Some(v) => ask_vantage(v, &target, Scope::All, limits.query).await,
+                None => crate::this_machine::unavailable(),
+            };
+            let _ = tx.send(PropEvent::Local(Box::new(answer)));
+        };
+        let (result, ()) = tokio::join!(
+            propagation_with(&resolvers, &nameservers, &target, Scope::All, limits.query, |a| {
+                let _ = tx.send(PropEvent::Answer(Box::new(a.clone())));
+            }),
+            ask_local
+        );
+        result.map_err(|e| e.to_string())
     };
     let event = match tokio::time::timeout(limits.whole, work).await {
         Ok(result) => PropEvent::Finished(Box::new(result)),

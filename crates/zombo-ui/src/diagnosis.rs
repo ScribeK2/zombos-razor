@@ -82,6 +82,8 @@ pub enum RowStatus {
     Truth,
     Match,
     Stale,
+    /// This machine's resolver answered otherwise than the truth. Only that row can show it.
+    Differs,
     NoAnswer,
 }
 
@@ -92,6 +94,7 @@ impl RowStatus {
             RowStatus::Truth => "Truth",
             RowStatus::Match => "Match",
             RowStatus::Stale => "Stale",
+            RowStatus::Differs => "Differs",
             RowStatus::NoAnswer => "No answer",
         }
     }
@@ -173,6 +176,8 @@ impl RowView {
 pub enum PropEvent {
     Started,
     Answer(Box<VantageAnswer>),
+    /// This machine's own resolver. Shown with the others, never part of the verdict.
+    Local(Box<VantageAnswer>),
     Finished(Box<Result<PropagationResult, String>>),
     TimedOut,
 }
@@ -186,6 +191,9 @@ pub struct Propagation {
     pub agreement: Option<Agreement>,
     pub findings: Vec<Finding>,
     pub history: History,
+    local: Option<VantageAnswer>,
+    local_differs: Vec<String>,
+    truth_known: bool,
 }
 
 /// Every record any Vantage returned, as "TYPE: value" lines, for comparing runs.
@@ -209,6 +217,9 @@ impl Propagation {
             agreement: None,
             findings: vec![],
             history: History::default(),
+            local: None,
+            local_differs: vec![],
+            truth_known: false,
         }
     }
 
@@ -221,6 +232,11 @@ impl Propagation {
             PropEvent::Answer(a) => {
                 if self.state == CheckState::Running {
                     self.rows.push(Row::from_answer(&a));
+                }
+            }
+            PropEvent::Local(a) => {
+                if self.state == CheckState::Running {
+                    self.local = Some(*a);
                 }
             }
             PropEvent::TimedOut => {
@@ -241,6 +257,13 @@ impl Propagation {
                         let name = crate::checks::check_name(target).unwrap_or_else(|| target.value.clone());
                         let mut findings = zombo_core::propagation::propagation_findings(&name, &r);
                         findings.extend(crate::record_findings::record_findings(target, &name, &r, &findings));
+                        let truth = crate::record_findings::source(&r);
+                        self.truth_known = truth.is_some();
+                        self.local_differs = match (truth, &self.local) {
+                            (Some(t), Some(l)) => crate::this_machine::differs(t, l, &r.types),
+                            _ => vec![],
+                        };
+                        findings.extend(crate::this_machine::finding(&self.local_differs));
                         self.findings = ordered(&findings);
                         self.agreement = Some(r.agreement);
                         self.state = CheckState::Done { problems: problems(&self.findings) };
@@ -261,7 +284,22 @@ impl Default for Propagation {
 impl Propagation {
     pub fn view(&self, ty: RecordKind) -> Vec<RowView> {
         let stale = self.stale.get(ty.code()).map(Vec::as_slice).unwrap_or(&[]);
-        self.rows.iter().map(|r| r.view(ty, self.settled, stale)).collect()
+        let mut views: Vec<RowView> = self.rows.iter().map(|r| r.view(ty, self.settled, stale)).collect();
+        views.extend(self.local.as_ref().map(|l| self.local_view(l, ty)));
+        views
+    }
+
+    fn local_view(&self, local: &VantageAnswer, ty: RecordKind) -> RowView {
+        let mut view = Row::from_answer(local).view(ty, self.settled, &[]);
+        if self.settled && view.status != RowStatus::NoAnswer {
+            let differs = self.local_differs.iter().any(|t| t == ty.code() || t == "existence");
+            view.status = match (self.truth_known, differs) {
+                (false, _) => RowStatus::Answered,
+                (true, true) => RowStatus::Differs,
+                (true, false) => RowStatus::Match,
+            };
+        }
+        view
     }
 }
 
@@ -596,6 +634,61 @@ mod tests {
         p.apply(&tgt("e"), PropEvent::Started);
         p.apply(&tgt("e"), PropEvent::Finished(Box::new(Err("none of the resolvers answered".into()))));
         assert_eq!(p.state, CheckState::Failed { reason: "none of the resolvers answered".into() });
+    }
+
+    fn finished_with_local(local: VantageAnswer) -> Propagation {
+        let mut r = result(&[]);
+        r.types = zombo_core::propagation::Scope::All.types().iter().map(ToString::to_string).collect();
+        let mut ns = answer("ns1", true, "x");
+        ns.rcode = Some(zombo_core::lookup::Rcode::NoError);
+        ns.authoritative = Some(true);
+        ns.answers = BTreeMap::from([("TXT".to_string(), vec!["v".to_string()])]);
+        r.nameservers = vec![ns];
+        r.agreement = Agreement::Agree;
+        r.stale = BTreeMap::new();
+        r.disagree = vec![];
+        let mut p = Propagation::new();
+        p.apply(&tgt("example.com"), PropEvent::Started);
+        p.apply(&tgt("example.com"), PropEvent::Local(Box::new(local)));
+        p.apply(&tgt("example.com"), PropEvent::Finished(Box::new(Ok(r))));
+        p
+    }
+
+    fn local_answer(txt: &str) -> VantageAnswer {
+        let mut l = answer(crate::this_machine::NAME, false, txt);
+        l.vantage =
+            Vantage::resolver(crate::this_machine::NAME, "Resolver 192.168.1.1", "192.168.1.1:53".parse().unwrap());
+        l.rcode = Some(zombo_core::lookup::Rcode::NoError);
+        l
+    }
+
+    #[test]
+    fn this_machine_is_the_last_row_and_matches_when_it_agrees_with_the_truth() {
+        let p = finished_with_local(local_answer("v"));
+        let last = p.view(RecordKind::Txt).pop().unwrap();
+        assert_eq!((last.resolver.as_str(), last.status), (crate::this_machine::NAME, RowStatus::Match));
+        assert!(p.findings.iter().all(|f| f.code != crate::this_machine::CODE));
+    }
+
+    #[test]
+    fn a_rewriting_router_shows_as_a_differing_row_and_a_finding_but_never_changes_the_verdict() {
+        let p = finished_with_local(local_answer("rewritten"));
+        let last = p.view(RecordKind::Txt).pop().unwrap();
+        assert_eq!(last.status, RowStatus::Differs);
+        assert!(p.findings.iter().any(|f| f.code == crate::this_machine::CODE));
+        assert_eq!(p.agreement, Some(Agreement::Agree), "this machine is not a vote");
+        assert!(p.stale.is_empty());
+        let on_a = p.view(RecordKind::A).pop().unwrap();
+        assert_ne!(on_a.status, RowStatus::Differs, "only the type that differs is flagged");
+    }
+
+    #[test]
+    fn a_machine_with_no_resolver_says_why_in_its_row() {
+        let p = finished_with_local(crate::this_machine::unavailable());
+        let last = p.view(RecordKind::A).pop().unwrap();
+        assert_eq!(last.status, RowStatus::NoAnswer);
+        assert!(last.answer.contains("resolv.conf"), "{}", last.answer);
+        assert!(p.findings.iter().all(|f| f.code != crate::this_machine::CODE));
     }
 
     #[test]
