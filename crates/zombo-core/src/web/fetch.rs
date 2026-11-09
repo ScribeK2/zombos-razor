@@ -22,7 +22,7 @@ use ureq::{
     },
 };
 
-use crate::email_auth::printable;
+use crate::text::printable;
 
 pub const MAX_REDIRECTS: usize = 10;
 /// Nothing is read from a body beyond this: it only feeds the WordPress markers.

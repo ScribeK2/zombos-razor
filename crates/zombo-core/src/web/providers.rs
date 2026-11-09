@@ -14,10 +14,7 @@ use hickory_proto::{
 use serde::Serialize;
 use tokio::task::JoinSet;
 
-use crate::{
-    dns::exchange,
-    email_auth::{clip, printable},
-};
+use crate::{dns::exchange, email_auth::clip, text::printable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

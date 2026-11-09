@@ -94,12 +94,6 @@ pub(crate) fn has_version(record: &str, version: &str) -> bool {
     first.split_whitespace().collect::<String>().eq_ignore_ascii_case(&format!("v={version}"))
 }
 
-/// A record or name read from DNS may hold terminal control characters; the
-/// results get printed, so they are replaced where the text enters.
-pub(crate) fn printable(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect()
-}
-
 /// A hostile token can be 64 KB long; keep the part of it that ends up in a message.
 pub(crate) fn clip(s: &str) -> String {
     const MAX: usize = 80;

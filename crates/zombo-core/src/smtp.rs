@@ -232,7 +232,7 @@ async fn session(
         Err(_) => return r.fail(Stage::Connect, "no answer in time"),
         Ok(Err(e)) => {
             r.reach = classify(&e);
-            return r.fail(Stage::Connect, crate::email_auth::printable(&e.to_string()));
+            return r.fail(Stage::Connect, crate::text::printable(&e.to_string()));
         }
         Ok(Ok(s)) => s,
     };

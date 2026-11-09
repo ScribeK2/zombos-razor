@@ -14,7 +14,10 @@ use std::{
 use serde::Serialize;
 use tokio::{io::AsyncReadExt, net::TcpStream, sync::Semaphore, task::JoinSet};
 
-use crate::finding::{Finding, Severity};
+use crate::{
+    finding::{Finding, Severity},
+    text::strip,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ServicePort {
@@ -177,13 +180,7 @@ fn classify(e: &io::Error) -> PortState {
 
 /// The first line of a greeting, printable characters only: it comes from the network.
 pub(crate) fn clean_banner(raw: &[u8]) -> Option<String> {
-    let line: String = String::from_utf8_lossy(raw)
-        .split('\n')
-        .next()
-        .unwrap_or("")
-        .chars()
-        .filter(|c| !c.is_control() && *c != '\u{fffd}')
-        .collect();
+    let line = strip(String::from_utf8_lossy(raw).split('\n').next().unwrap_or("")).replace('\u{fffd}', "");
     let line = line.trim();
     (!line.is_empty()).then(|| line.to_string())
 }

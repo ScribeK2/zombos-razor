@@ -8,8 +8,9 @@ use hickory_proto::{
 };
 use tokio::task::JoinSet;
 
-use super::{clip, printable};
+use super::clip;
 use crate::dns::exchange;
+use crate::text::printable;
 
 const MAX_CNAMES: usize = 8;
 

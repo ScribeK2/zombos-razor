@@ -17,7 +17,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::email_auth::printable;
+use crate::text::printable;
 use fetch::{Fetch, TlsMode, fetch_chain};
 
 pub use fetch::{CertCheck, Hop, MAX_REDIRECTS, Pin};

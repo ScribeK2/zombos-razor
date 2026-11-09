@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use zombo_core::Finding;
+use zombo_core::{Finding, text::single_line};
 
 use crate::{
     diagnosis::{ordered, problems},
@@ -16,16 +16,12 @@ pub struct Fact {
 
 impl Fact {
     pub fn new(key: impl Into<String>, value: impl AsRef<str>) -> Fact {
-        Fact { key: printable(&key.into()), value: printable(value.as_ref()) }
+        Fact { key: single_line(&key.into()), value: single_line(value.as_ref()) }
     }
 
     pub fn record(&self) -> String {
         format!("{}: {}", self.key, self.value)
     }
-}
-
-fn printable(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 /// What one finished Check hands the UI: findings, a short key-value table that

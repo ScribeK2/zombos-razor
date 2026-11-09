@@ -26,7 +26,7 @@ impl Shell {
     }
 
     pub(super) fn copy_value(&mut self, value: &str, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(copy::value(value)));
+        cx.write_to_clipboard(ClipboardItem::new_string(zombo_core::text::strip(value)));
         self.toast = Some(("Copied the value.".into(), Instant::now()));
         cx.notify();
     }

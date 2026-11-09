@@ -14,11 +14,7 @@ use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 use tokio::{sync::Semaphore, task::JoinSet, time::Instant};
 
-use crate::{
-    Finding, Severity,
-    email_auth::{clip, printable},
-    resolver::Resolver,
-};
+use crate::{Finding, Severity, email_auth::clip, resolver::Resolver, text::printable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

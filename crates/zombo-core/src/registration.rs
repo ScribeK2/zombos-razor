@@ -14,8 +14,8 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use std::borrow::Cow;
 
 use crate::{
-    email_auth::printable,
     finding::{Finding, Severity},
+    text::printable,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

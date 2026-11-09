@@ -11,11 +11,7 @@ use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 use tokio::task::JoinSet;
 
-use crate::{
-    Finding, Severity,
-    email_auth::{clip, printable},
-    resolver::Resolver,
-};
+use crate::{Finding, Severity, email_auth::clip, resolver::Resolver, text::printable};
 
 const MAX_PTR_NAMES: usize = 8;
 const MAX_ADDRESSES: usize = 32;
