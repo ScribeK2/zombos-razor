@@ -1,83 +1,45 @@
-# Stackwell
+# Zombo's Razor
 
-A local desktop workbench a Tier-2 support rep uses to work a support ticket's
-technical side: run diagnostics against domains, hosts and mail, analyse pasted
-evidence, and produce a ticket-ready write-up.
+A local desktop tool a support rep uses to answer "what is wrong with this domain, and is it real or just caching?" It replaces the third-party DNS, domain-registration, email and hosting lookup sites the team opens every day. (Renamed from Stackwell; casework was dropped.)
 
 ## Language
 
-**Case**:
-One support ticket's worth of diagnostic work — its targets, everything run or pasted for it, the findings, and the write-up. The central unit of Stackwell; a single quick lookup is a Case with one step.
-_Avoid_: Investigation, session, ticket (the ticket lives in the external helpdesk; a Case only references it)
-
-**Open** / **Resolved**:
-The only two states of a Case. Resolved Cases drop out of the default list but stay searchable.
-_Avoid_: Closed, done, archived
-
 **Rep**:
-The person running Stackwell. Each rep runs their own copy; there is no shared server.
+The person running Zombo's Razor. Each rep runs their own copy; there is no shared server.
 _Avoid_: User, agent, operator
 
 **Target**:
-A thing a Case examines — a domain, hostname, IP, URL or email address. A Case can hold several; targets discovered mid-Case (an MX host, an origin IP) can be added to it.
+A thing a Check examines: a domain, hostname, IP, URL or email address.
 _Avoid_: Input, subject
 
-**Suggested target**:
-A Target Stackwell spotted in a Step's result or in Evidence and offers to add to the Case; it is not part of the Case until the rep accepts it.
-_Avoid_: Discovered target, related target
-
-**Suggested Check**:
-A Check Stackwell offers to run, on a named Target, because a Finding rule needs its result (e.g. Blacklist on a sending IP found in pasted headers). Like a Suggested target, it can be accepted or dismissed.
-_Avoid_: Recommended check, next step, hint
-
-**Ticket reference**:
-The optional external helpdesk ticket ID a Case is attached to.
-_Avoid_: Ticket ID, case number
-
-### Diagnostics
-
 **Check**:
-One kind of diagnostic Stackwell can perform, such as DNS lookup, SSL inspection or blacklist lookup.
+One kind of diagnostic, such as DNS records, propagation, WHOIS/RDAP, SPF, SMTP banner, blacklist or TLS certificate.
 _Avoid_: Tool, probe, test
 
-**Step**:
-One execution of a Check inside a Case, with its result. Never changes once recorded: re-running a Check adds a new Step, and Stackwell shows what changed since the previous one. The one exception is a Watch, whose re-runs become Steps only when the answer changes.
-_Avoid_: Run, tool run, probe
+**Vantage**:
+The place a Check observes from: the local machine, an authoritative nameserver, or one named public resolver. A Check can run from several Vantages at once.
+_Avoid_: Location, source, node
 
-**Evidence**:
-Material the rep pasted into a Case (email headers, mail logs, bounce messages) rather than something Stackwell fetched.
-_Avoid_: Paste, input, attachment
+**Lookup**:
+One execution of a Check on a Target from one or more Vantages, with its result. A Lookup is live: it is never served from a cache, and re-running it makes a new Lookup.
+_Avoid_: Run, step, query
+
+**Diagnosis**:
+The set of Lookups a Target gets when the rep types it into the one box: every relevant Check, run in parallel, results streaming in as each finishes.
+_Avoid_: Scan, report, investigation
+
+**Agreement**:
+The verdict on whether the Vantages of a Lookup return the same answer. Disagreement is the usual sign of caching or propagation in progress.
+_Avoid_: Consistency, sync status, match
 
 **Finding**:
-A conclusion with a severity, derived from one or more Steps or pieces of Evidence, citing which ones. Only the latest Step of each Check per Target produces Findings; earlier Steps feed the before/after history. A Finding that combines several Steps (possibly on different Targets) still belongs to one Target, the one it is a conclusion about.
+A conclusion with a severity, derived from one Lookup. Every severity is shown with a text label, never by color alone.
 _Avoid_: Issue, result, alert
 
+**Evidence**:
+Material the rep pastes in (email headers, mail logs, bounce messages) rather than something fetched. Evidence analysis is itself a Check.
+_Avoid_: Paste, input, attachment
+
 **Watch**:
-Re-running one Check on one Target at an interval until its result changes. Re-runs that give the same answer record nothing; a changed answer records a new Step and tells the rep.
+Re-running one Check on one Target at an interval until its result changes, then telling the rep. Re-runs that give the same answer record nothing.
 _Avoid_: Monitor, poll, schedule
-
-**Playbook**:
-A named, data-defined sequence of Checks (with dependencies between them) plus boundary notes, run against a Case's Target. Stackwell ships default Playbooks; reps can add or override them. Running a Playbook adds the Targets it derives (e.g. the primary MX host) to the Case.
-_Avoid_: Track, investigation, workflow, recipe
-
-**Saved query**:
-A named, parameterised read-only database query, defined as data, that runs as a Check against a Target (e.g. look up a domain in an internal database).
-_Avoid_: SQL workbench, recipe, report
-
-**Boundary note**:
-A Playbook's statement of what the rep cannot see from outside (e.g. registry back-end, container internals), carried into the write-up.
-_Avoid_: Visibility boundary, black box
-
-### Output
-
-**Write-up**:
-The ticket-ready text generated from a Case's Findings, Steps and Boundary notes plus the rep's notes, copied out to the helpdesk.
-_Avoid_: Report, summary, export
-
-**Customer reply**:
-A plain-language version of the Write-up addressed to the customer: what is wrong and what to do, without Check names, severities or Boundary notes.
-_Avoid_: Customer write-up, email, response
-
-**Rep notes**:
-Free text the rep adds to a Case; saved with it and included in the Write-up.
-_Avoid_: Comments, annotations
