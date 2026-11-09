@@ -8758,6 +8758,7 @@ dependencies = [
  "gpui-kit",
  "notify-rust",
  "serde",
+ "serde_json",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
  "zombo-core",

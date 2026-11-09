@@ -535,13 +535,25 @@ pub fn view(report: &Report, section: Section) -> View {
     v
 }
 
-fn code(s: &str) -> String {
-    format!("`{}`", s.replace('`', "'").replace('\n', " "))
+/// A value as a Markdown code span: no control characters, and no backtick to end the span early.
+pub(crate) fn code(s: &str) -> String {
+    let flat: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    format!("`{}`", flat.replace('`', "'"))
 }
 
-fn fact_lines(out: &mut String, rows: &[Fact]) {
+pub(crate) fn fact_lines(out: &mut String, rows: &[Fact]) {
     for f in rows {
         out.push_str(&format!("- {}: {}\n", f.key.trim(), code(&f.value)));
+    }
+}
+
+pub(crate) fn finding_lines(out: &mut String, findings: &[Finding]) {
+    for f in findings {
+        out.push_str(&format!("- **{}** {}: {}", severity_word(f.severity), f.title, f.message));
+        if let Some(r) = &f.recommendation {
+            out.push_str(&format!(" {r}"));
+        }
+        out.push('\n');
     }
 }
 
@@ -549,13 +561,7 @@ fn fact_lines(out: &mut String, rows: &[Fact]) {
 pub fn section_markdown(report: &Report, section: Section) -> String {
     let v = view(report, section);
     let mut out = format!("## {}\n\n**{}.** {}\n\n", section.label(), v.word, v.why);
-    for f in &v.findings {
-        out.push_str(&format!("- **{}** {}: {}", severity_word(f.severity), f.title, f.message));
-        if let Some(r) = &f.recommendation {
-            out.push_str(&format!(" {r}"));
-        }
-        out.push('\n');
-    }
+    finding_lines(&mut out, &v.findings);
     if !v.findings.is_empty() && !v.rows.is_empty() {
         out.push('\n');
     }

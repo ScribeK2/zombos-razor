@@ -22,6 +22,7 @@ pub enum Action {
     Analyse,
     CopySection,
     CopyAll,
+    CopyJson,
     Settings,
     Dismiss,
     MoveUp,
@@ -80,7 +81,8 @@ const BINDINGS: &[Binding] = &[
     bind("m", true, false, true, When::Always, Action::OpenEvidence(Kind::MailLog), "Analyse pasted mail log"),
     bind("enter", true, false, false, When::Always, Action::Analyse, "Analyse the pasted text"),
     bind("c", true, false, true, When::Always, Action::CopySection, "Copy the section as Markdown"),
-    bind("c", true, true, false, When::Always, Action::CopyAll, "Copy the whole Evidence as Markdown"),
+    bind("c", true, true, false, When::Always, Action::CopyAll, "Copy the whole Diagnosis or Evidence as Markdown"),
+    bind("j", true, false, true, When::Always, Action::CopyJson, "Copy section as JSON"),
     bind("1", true, false, false, When::Always, Action::Jump(0), "Go to Summary"),
     bind("2", true, false, false, When::Always, Action::Jump(1), "Go to DNS"),
     bind("3", true, false, false, When::Always, Action::Jump(2), "Go to Delegation"),
@@ -279,6 +281,13 @@ mod tests {
         assert_eq!(shown(Action::Analyse).map(|s| s.1).as_deref(), Some("Ctrl+Enter"));
         let mut seen = std::collections::HashSet::new();
         assert!(entries.iter().all(|e| seen.insert(e.shortcut.clone())), "two actions share a shortcut");
+    }
+
+    #[test]
+    fn copy_as_json_has_a_key_and_a_palette_entry() {
+        assert_eq!(action_for(Mode::Browse, false, press("j", true, false, true)), Some(Action::CopyJson));
+        let e = entries();
+        assert_eq!(e.iter().find(|e| e.action == Action::CopyJson).map(|e| (e.label, e.shortcut.as_str())), Some(("Copy section as JSON", "Ctrl+Shift+J")));
     }
 
     #[test]

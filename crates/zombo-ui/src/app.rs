@@ -7,6 +7,7 @@ use crate::settings::{PaneEvent, SettingsPane};
 use zombo_ui::{
     checks,
     config::{self, Config, Dirs},
+    copy::Format,
     diagnosis as dg,
     evidence_model as ev,
     keys::{self, Action, Mode, Press},
@@ -22,6 +23,7 @@ use zombo_ui::{
 };
 use zombo_core::Severity;
 
+mod copying;
 mod evidence;
 
 const FINDING_HANDLES: usize = 64;
@@ -360,8 +362,9 @@ impl Shell {
             }
             Action::OpenEvidence(kind) => self.open_evidence(kind, window, cx),
             Action::Analyse => self.analyse_pasted(window, cx),
-            Action::CopySection => self.copy_evidence(false, cx),
-            Action::CopyAll => self.copy_evidence(true, cx),
+            Action::CopySection => self.copy_current(Format::Section, cx),
+            Action::CopyAll => self.copy_current(Format::Whole, cx),
+            Action::CopyJson => self.copy_current(Format::Json, cx),
             Action::Cheatsheet => self.sheet = !self.sheet,
             Action::Settings => self.toggle_settings(window, cx),
             Action::Dismiss => {
@@ -1017,6 +1020,12 @@ impl Shell {
                 .text_size(px(t::TEXT_LABEL))
                 .role(Role::Row)
                 .aria_label(format!("{k} {v}"))
+                .cursor_pointer()
+                .hover(|s| s.bg(color(t::GRAY_200)))
+                .on_click({
+                    let v = v.clone();
+                    cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                })
                 .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(k))
                 .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
         });
@@ -1097,6 +1106,12 @@ impl Shell {
                                     .text_size(px(t::TEXT_LABEL))
                                     .role(Role::Row)
                                     .aria_label(format!("{k}: {v}"))
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(color(t::GRAY_200)))
+                                    .on_click({
+                                        let v = v.clone();
+                                        cx.listener(move |this, _, _, cx| this.copy_value(&v, cx))
+                                    })
                                     .child(div().w(px(200.)).flex_none().text_color(color(t::GRAY_900)).child(shown))
                                     .child(div().flex_1().min_w_0().font_family(t::FONT_MONO).text_color(color(c)).child(v))
                             })),
@@ -1161,6 +1176,12 @@ impl Shell {
                 .when(r.status == dg::RowStatus::Stale, |s| s.bg(color(0x1A1812)))
                 .role(Role::Row)
                 .aria_label(r.label())
+                .cursor_pointer()
+                .hover(|s| s.bg(color(t::GRAY_200)))
+                .on_click({
+                    let answer = r.answer.clone();
+                    cx.listener(move |this, _, _, cx| this.copy_value(&answer, cx))
+                })
                 .child(cell(Some(150.)).child(r.resolver.clone()))
                 .child(cell(Some(140.)).child(r.location.clone()))
                 .child(cell(None).child(r.answer.clone()))
