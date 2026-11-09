@@ -9,7 +9,7 @@ Last updated: 2026-11-09. Branch: `rewrite`.
 Three workers running (started 2026-11-09), each in its own worktree:
 
 - [ ] **SMTP and TLS extras:** SMTP banner and STARTTLS Check, CAA lookup, OCSP stapling detection (`smtp.rs`, `tls_extras.rs`)
-- [ ] **Web follow-ups:** https to http downgrade finding, `--insecure-origin`
+- [x] **Web follow-ups** merged: `web_redirect_downgrade` warning, `--insecure-origin` (`CertCheck` enum), `website_origin_cert_rejected` and `web_origin_cert_not_verified` findings. Cert-read path covered by the local test only, not live
 - [x] **`zombo-ui` slice 1** merged (screenshot reviewed 2026-11-09). Follow-ups: see "UI follow-ups"
 
 **Merge order when workers finish:** review each diff, merge one at a time (A, B, C), resolve the mechanical conflicts in `Cargo.toml`, `lib.rs`, `main.rs`, `tests/common/mod.rs`, run the whole suite plus clippy, `cargo deny check`, then update this file. Live-check each Check from the VPS (clean network).
@@ -117,8 +117,8 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [x] **Proxy policy (decided 2026-11-09, lead's call): keep both, and say so.** Registration (a lookup of public registry data) honours `HTTP_PROXY`/`HTTPS_PROXY`, so it works on corporate networks. The web Check ignores them, because it must show what the site does from this machine, not what a proxy relays. The settings pane and the web section state the rule. The proxy setting in DESIGN.md applies to registration only
 - [x] **Web User-Agent (decided): keep `zombo/<version>`.** A 403 from a WAF is itself a finding about the site
 - [ ] **Web cookies:** no cookie jar (Go kept cookies across hops), so a cookie-dependent redirect reads as a loop. Not decided: the answer "Yes" was read as applying to the downgrade finding. Ask again if a real site shows the loop
-- [ ] **Web follows https to http downgrades** on redirect. Decided: keep following, flag as a warning (in the web follow-ups worker)
-- [ ] **`--insecure-origin`** decided: add (in the web follow-ups worker)
+- [ ] **Web follows https to http downgrades** on redirect. Done: kept following, flagged as a warning
+- [ ] **`--insecure-origin`** done
 - [ ] **`rdns` for a host** lists addresses only, without PTR confirmation per address; add it if the Diagnosis wants it
 
 - [ ] Refactor: DNSSEC has its own zone discovery (`find_zone`, asks with DO and CD set) because `find_apex` asks with CD=0 and a validating bootstrap resolver SERVFAILs on exactly the broken zones. Give `find_apex` the CD flag and delete the duplicate
