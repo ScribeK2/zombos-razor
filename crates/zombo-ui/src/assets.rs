@@ -35,4 +35,9 @@ impl AssetSource for Assets {
     }
 }
 
-pub const FONTS: [&[u8]; 2] = [include_bytes!("../assets/Geist.ttf"), include_bytes!("../assets/GeistMono.ttf")];
+pub const FONTS: [&[u8]; 4] = [
+    include_bytes!("../assets/Geist-Regular.ttf"),
+    include_bytes!("../assets/Geist-Medium.ttf"),
+    include_bytes!("../assets/Geist-SemiBold.ttf"),
+    include_bytes!("../assets/GeistMono-Regular.ttf"),
+];
