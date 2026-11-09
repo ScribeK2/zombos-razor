@@ -28,9 +28,26 @@ const API_BASE: &str = "https://api.github.com";
 ///
 /// The file holds a TEST key now. To replace it, run `minisign -G -p update_key.pub -s <secret key
 /// file>`, keep the secret key out of the repository, and commit the new `update_key.pub`. The
-/// test `release_builds_do_not_embed_the_test_key` fails under `--features release-key-required`
-/// while the test key is still here.
+/// release build refuses every update, with `UpdateError::TestKeyEmbedded`, while the test key is here.
 pub const PUBLIC_KEY: &str = include_str!("../update_key.pub");
+
+/// The public half of the key the tests sign with (its seed is public on purpose). A release
+/// build that still embeds it refuses to check or install anything. See `Endpoints::guard`.
+pub const TEST_KEY_BASE64: &str = "RWRaUlRFU1RLWRCysoPTt6Udjpf4qaLvZZMjZ+nIRYFlX+1Pqps4kifA";
+
+/// Whether the second line of a minisign public key file is the test key.
+pub fn is_test_key(key: &str) -> bool {
+    key.lines().nth(1).is_some_and(|l| l.trim() == TEST_KEY_BASE64)
+}
+
+/// Whether this build may update at all: not a release build holding the test key.
+pub fn available() -> bool {
+    available_in(!cfg!(debug_assertions))
+}
+
+pub fn available_in(release: bool) -> bool {
+    !(release && is_test_key(PUBLIC_KEY))
+}
 
 pub const MAX_METADATA: u64 = 256 * 1024;
 pub const MAX_SUMS: u64 = 64 * 1024;
@@ -61,6 +78,8 @@ pub enum UpdateError {
     WrongVersion { signed: String, wanted: String },
     #[error("SHA256SUMS does not list {0}")]
     NotListed(String),
+    #[error("this build holds a test signing key, so updates are not available")]
+    TestKeyEmbedded,
     #[error("the downloaded file does not match the signed checksum")]
     ChecksumMismatch,
     #[error("the download ended before the whole file arrived")]
@@ -207,6 +226,11 @@ impl Endpoints {
 
     #[cfg(not(debug_assertions))]
     fn apply_debug_hook(&mut self) {}
+
+    /// Fail closed: a release build never trusts the test key, whatever else is configured.
+    fn guard(&self, release: bool) -> Result<(), UpdateError> {
+        if release && is_test_key(&self.key) { Err(UpdateError::TestKeyEmbedded) } else { Ok(()) }
+    }
 
     fn agent(&self, deadline: Duration) -> Result<ureq::Agent, UpdateError> {
         let mut tls = TlsConfig::builder();
@@ -359,6 +383,12 @@ pub fn select(releases: &[u8], current: &Version, ep: &Endpoints) -> Result<Opti
 
 /// Ask the release server whether a newer version exists. Blocking; run it off the UI thread.
 pub fn check(ep: &Endpoints, current: &Version) -> Result<Option<Available>, UpdateError> {
+    check_in(ep, current, !cfg!(debug_assertions))
+}
+
+/// `check` for an explicit build kind, so a release build can be simulated under test.
+pub fn check_in(ep: &Endpoints, current: &Version, release: bool) -> Result<Option<Available>, UpdateError> {
+    ep.guard(release)?;
     let url = format!("{}/repos/{}/releases?per_page=20", ep.api_base.trim_end_matches('/'), ep.repo);
     https(&url)?;
     let mut body = ep.open(&url, ep.metadata_deadline, "application/vnd.github+json")?;
@@ -432,6 +462,11 @@ impl Drop for Temp {
 /// Fetch the signed checksums, verify them, download the AppImage, hash it, and rename it over
 /// `target`. On any error `target` is untouched and no other file is left behind. Blocking.
 pub fn install(ep: &Endpoints, rel: &Available, target: &Path) -> Result<(), UpdateError> {
+    install_in(ep, rel, target, !cfg!(debug_assertions))
+}
+
+pub fn install_in(ep: &Endpoints, rel: &Available, target: &Path, release: bool) -> Result<(), UpdateError> {
+    ep.guard(release)?;
     let write = |e: std::io::Error| UpdateError::Write(e.to_string());
     let sums = ep.fetch(&rel.sums.url, ep.metadata_deadline, ep.max_sums, "SHA256SUMS")?;
     let sig = ep.fetch(&rel.sig.url, ep.metadata_deadline, ep.max_sums, "the signature")?;
@@ -610,18 +645,4 @@ mod tests {
         assert_eq!(e.api_base, API_BASE);
         assert!(e.roots.is_none());
     }
-
-    #[cfg(feature = "release-key-required")]
-    #[test]
-    fn release_builds_do_not_embed_the_test_key() {
-        let embedded = PUBLIC_KEY.lines().nth(1).unwrap_or_default().trim();
-        assert_ne!(
-            embedded, TEST_KEY_BASE64,
-            "update_key.pub still holds the TEST key: generate the real one with `minisign -G` and commit it"
-        );
-    }
-
-    /// The public half of the key the tests sign with. Its seed is public on purpose.
-    #[cfg(feature = "release-key-required")]
-    const TEST_KEY_BASE64: &str = "RWRaUlRFU1RLWRCysoPTt6Udjpf4qaLvZZMjZ+nIRYFlX+1Pqps4kifA";
 }

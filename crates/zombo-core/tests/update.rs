@@ -17,6 +17,10 @@ fn running() -> Version {
     Version::parse("1.2.3").unwrap()
 }
 
+async fn check_in(ep: Endpoints, release: bool) -> Result<Option<Available>, UpdateError> {
+    tokio::task::spawn_blocking(move || update::check_in(&ep, &running(), release)).await.unwrap()
+}
+
 async fn check(ep: Endpoints) -> Result<Option<Available>, UpdateError> {
     tokio::task::spawn_blocking(move || update::check(&ep, &running())).await.unwrap()
 }
@@ -329,7 +333,6 @@ async fn an_unwritable_directory_fails_cleanly_and_leaves_the_old_file() {
     assert_eq!(std::fs::read(&inst.path).unwrap(), OLD);
 }
 
-#[cfg(not(feature = "release-key-required"))]
 #[test]
 fn the_embedded_key_is_the_one_the_tests_sign_with_until_the_real_key_replaces_it() {
     let want = TestKey::embedded().public_file();
@@ -339,4 +342,40 @@ fn the_embedded_key_is_the_one_the_tests_sign_with_until_the_real_key_replaces_i
         "update_key.pub must hold the TEST key; second line should be {:?}",
         want.lines().nth(1)
     );
+}
+
+#[tokio::test]
+async fn a_release_configuration_refuses_the_embedded_test_key_before_any_request() {
+    let test_key = TestKey::embedded();
+    let fx = Fixture::signed("1.4.0", NEW, &test_key);
+    let f2 = fx.clone();
+    let server = serve(move |p, port| f2.reply(p, port)).await;
+    let ep = server.endpoints(&test_key);
+    assert!(update::is_test_key(&ep.key));
+    let r = check_in(ep.clone(), true).await;
+    assert!(matches!(r, Err(UpdateError::TestKeyEmbedded)), "{r:?}");
+    assert!(server.seen.lock().unwrap().is_empty(), "no request may leave a build with the test key");
+    // A debug build may use it, and the same key then verifies.
+    let rel = check_in(ep.clone(), false).await.unwrap().unwrap();
+    let inst = Install::new("testkey");
+    let target = inst.path.clone();
+    let r = tokio::task::spawn_blocking(move || update::install_in(&ep, &rel, &target, true)).await.unwrap();
+    assert!(matches!(r, Err(UpdateError::TestKeyEmbedded)), "{r:?}");
+    assert!(inst.untouched());
+}
+
+#[tokio::test]
+async fn a_release_configuration_accepts_any_other_key() {
+    let key = TestKey::random();
+    assert!(!update::is_test_key(&key.public_file()));
+    let fx = Fixture::signed("1.4.0", NEW, &key);
+    let server = serve(move |p, port| fx.reply(p, port)).await;
+    assert!(check_in(server.endpoints(&key), true).await.unwrap().is_some());
+}
+
+#[test]
+fn updates_are_unavailable_in_a_release_build_that_embeds_the_test_key() {
+    assert!(update::is_test_key(update::PUBLIC_KEY), "update_key.pub holds the test key until the owner replaces it");
+    assert!(!update::available_in(true));
+    assert!(update::available_in(false));
 }

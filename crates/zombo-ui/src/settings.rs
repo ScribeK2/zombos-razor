@@ -18,6 +18,9 @@ pub enum PaneEvent {
 pub struct SettingsPane {
     inputs: [(Field, Entity<InputState>); 4],
     notifications: bool,
+    check_updates: bool,
+    /// Only an AppImage can update itself, so only an AppImage shows the control.
+    can_update: bool,
     errors: Vec<FieldError>,
     save_error: Option<String>,
     file_problem: Option<String>,
@@ -30,12 +33,14 @@ impl EventEmitter<PaneEvent> for SettingsPane {}
 
 const PROXY_RULE: &str = "The proxy applies to the Registration Check only. The Web Check ignores it on purpose: it must show what the site does from this machine, not what a proxy relays. Empty means use HTTP_PROXY and HTTPS_PROXY from the environment.";
 const RESOLVER_RULE: &str = "Added to the ten public resolvers (Google, Cloudflare, Quad9, OpenDNS, Level3, DNS.SB, AdGuard, Yandex, 114DNS, CleanBrowsing) in the DNS propagation Check. The queries hold the target's name and nothing else. Separate with commas or spaces; a port is optional (192.0.2.53:5353).";
+const UPDATE_RULE: &str = "Asks GitHub once a day whether a newer version exists. Nothing about you or your lookups is sent. A newer version is downloaded only after you click Update, and its signature is checked first.";
 const APPLY_RULE: &str =
     "Changes apply to the next run of a Check. A Check that is running keeps the settings it started with.";
 
 impl SettingsPane {
     pub fn new(
         current: &Settings,
+        can_update: bool,
         file_problem: Option<String>,
         path: Option<PathBuf>,
         window: &mut Window,
@@ -59,6 +64,8 @@ impl SettingsPane {
         SettingsPane {
             inputs,
             notifications: current.notifications,
+            check_updates: current.check_updates,
+            can_update,
             errors: vec![],
             save_error: None,
             file_problem,
@@ -84,6 +91,7 @@ impl SettingsPane {
             timeout: self.text(Field::Timeout, cx),
             proxy: self.text(Field::Proxy, cx),
             notifications: self.notifications,
+            check_updates: self.check_updates,
         };
         match draft.validate() {
             Ok(settings) => {
@@ -220,6 +228,7 @@ impl Render for SettingsPane {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "No home directory: settings cannot be saved".into());
         let notifications = self.notifications;
+        let check_updates = self.check_updates;
         div()
             .absolute()
             .size_full()
@@ -273,6 +282,19 @@ impl Render for SettingsPane {
                                 cx.notify();
                             })),
                     )
+                    .when(self.can_update, |s| {
+                        s.child(
+                            Checkbox::new("check-updates")
+                                .checked(check_updates)
+                                .label("Check for updates once a day")
+                                .accessibility_label("Check for updates once a day")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.check_updates = *checked;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(div().text_size(px(t::TEXT_CAPTION)).line_height(px(16.)).text_color(color(t::GRAY_900)).child(UPDATE_RULE))
+                    })
                     .child(div().text_size(px(t::TEXT_CAPTION)).line_height(px(16.)).text_color(color(t::GRAY_900)).child(APPLY_RULE))
                     .when_some(self.save_error.clone(), |s, e| s.child(div().id("save-error").text_size(px(t::TEXT_LABEL)).text_color(color(t::CRITICAL)).role(Role::Alert).aria_label(e.clone()).child(e)))
                     .child(

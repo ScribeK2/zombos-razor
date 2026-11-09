@@ -5,10 +5,6 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-[features]
-# CI release job: `cargo test -p zombo-core --features release-key-required` fails while update_key.pub holds the test key.
-release-key-required = []
-
 [dependencies]
 hickory-proto = "0.26.3"
 idna = "1.1.0"
