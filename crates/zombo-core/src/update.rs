@@ -332,6 +332,80 @@ pub fn notes_preview(notes: &str) -> String {
     out.trim().to_string()
 }
 
+/// Release notes for the update card. GitHub's generated notes ("## What's Changed", bullets with
+/// "by @user in <url>", a contributors list and a changelog link) become the list of changes alone,
+/// separated by dots. Hand-written text keeps its words and loses the markup. Bounded work and output.
+pub fn release_notes(body: &str) -> String {
+    const MAX_SOURCE: usize = 16 * 1024;
+    const MAX_ITEMS: usize = 40;
+    fn flush(prose: &mut String, items: &mut Vec<String>) {
+        if !prose.is_empty() {
+            items.push(std::mem::take(prose));
+        }
+    }
+    let source: String = body.chars().take(MAX_SOURCE).collect();
+    let (mut items, mut prose, mut skipping) = (Vec::<String>::new(), String::new(), false);
+    for line in source.lines().map(str::trim) {
+        if line.is_empty() {
+            flush(&mut prose, &mut items);
+        } else if let Some(heading) = line.strip_prefix('#') {
+            flush(&mut prose, &mut items);
+            skipping = heading.trim_start_matches('#').to_ascii_lowercase().contains("new contributors");
+        } else if skipping || line.starts_with("**Full Changelog") {
+            continue;
+        } else {
+            let bullet = line.strip_prefix("* ").or_else(|| line.strip_prefix("- "));
+            let text = tidy_inline(bullet.unwrap_or(line));
+            if text.is_empty() {
+                continue;
+            }
+            if bullet.is_some() {
+                flush(&mut prose, &mut items);
+                items.push(text);
+            } else {
+                if !prose.is_empty() {
+                    prose.push(' ');
+                }
+                prose.push_str(&text);
+            }
+        }
+        if items.len() >= MAX_ITEMS {
+            break;
+        }
+    }
+    flush(&mut prose, &mut items);
+    notes_preview(&items.join(" \u{b7} "))
+}
+
+/// One line of notes without emphasis marks, link targets, bare addresses or the
+/// "by @user in <url>" tail GitHub appends to every generated bullet.
+fn tidy_inline(text: &str) -> String {
+    let text = text.replace("**", "");
+    let (mut out, mut rest) = (String::new(), text.as_str());
+    while let Some((before, after)) = rest.split_once('[') {
+        out.push_str(before);
+        let link = after.split_once("](").and_then(|(label, tail)| tail.split_once(')').map(|(_, t)| (label, t)));
+        match link {
+            Some((label, tail)) => {
+                out.push_str(label);
+                rest = tail;
+            }
+            None => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    if let Some(i) = [" by @", " in https://", " in http://"].iter().filter_map(|m| out.find(m)).min() {
+        out.truncate(i);
+    }
+    out.split_whitespace()
+        .filter(|w| !w.starts_with("https://") && !w.starts_with("http://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn https(url: &str) -> Result<(), UpdateError> {
     match url::Url::parse(url) {
         Ok(u) if u.scheme() == "https" && u.host().is_some() => Ok(()),
@@ -382,7 +456,7 @@ pub fn select(releases: &[u8], current: &Version, ep: &Endpoints) -> Result<Opti
     };
     Ok(Some(Available {
         version,
-        notes: notes_preview(r.body.as_deref().unwrap_or("")),
+        notes: release_notes(r.body.as_deref().unwrap_or("")),
         page_url,
         appimage,
         sums,
@@ -662,6 +736,36 @@ mod tests {
         assert!(p.starts_with("a[31m b"), "{p:?}");
         assert!(p.chars().count() <= NOTES_CHARS + 3 && p.ends_with("..."));
         assert_eq!(notes_preview("short"), "short");
+    }
+
+    const GITHUB_NOTES: &str = "## What's Changed\n* Zombo's Razor: rewrite in Rust and GPUI by @ScribeK2 in https://github.com/ScribeK2/zombos-razor/pull/40\n* test: real minisign signature verifies with the release key by @ScribeK2 in https://github.com/ScribeK2/zombos-razor/pull/41\n* ci: mark release candidates as pre-releases by @ScribeK2 in https://github.com/ScribeK2/zombos-razor/pull/42\n\n## New Contributors\n* @ScribeK2 made their first contribution in https://github.com/ScribeK2/zombos-razor/pull/40\n\n**Full Changelog**: https://github.com/ScribeK2/zombos-razor/compare/v1.0.0...v0.1.0-rc2\n";
+
+    #[test]
+    fn github_generated_notes_read_as_a_list_of_changes() {
+        assert_eq!(
+            release_notes(GITHUB_NOTES),
+            "Zombo's Razor: rewrite in Rust and GPUI · test: real minisign signature verifies with the release key · ci: mark release candidates as pre-releases"
+        );
+    }
+
+    #[test]
+    fn hand_written_notes_keep_their_words_and_lose_the_markup() {
+        assert_eq!(
+            release_notes("Faster lookups.\nFixes the **SPF** finding, see [the issue](https://x.test/1)."),
+            "Faster lookups. Fixes the SPF finding, see the issue."
+        );
+        assert_eq!(release_notes(""), "");
+        assert_eq!(release_notes("## Only a heading\n"), "");
+    }
+
+    #[test]
+    fn release_notes_stay_bounded_and_clean() {
+        let long = format!("* {}\n* b\u{202e}c", "x".repeat(5000));
+        let p = release_notes(&long);
+        assert!(p.chars().count() <= NOTES_CHARS + 3, "{}", p.chars().count());
+        assert!(!p.chars().any(crate::text::is_unsafe_char));
+        let many = (0..20_000).map(|i| format!("* item {i} by @u in https://x.test/{i}\n")).collect::<String>();
+        assert!(release_notes(&many).chars().count() <= NOTES_CHARS + 3);
     }
 
     #[test]
