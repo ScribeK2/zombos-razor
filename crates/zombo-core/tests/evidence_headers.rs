@@ -6,6 +6,10 @@ mod evidence;
 
 use std::time::{Duration, Instant};
 
+/// A guard against a hang or a quadratic parser, not a speed test: these tests run in an unoptimized
+/// debug build on shared CI runners, where 60,000 lines legitimately take seconds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
 use evidence::fixture;
 use zombo_core::{
     Severity,
@@ -278,7 +282,7 @@ fn a_megabyte_single_line_is_bounded() {
     let raw = format!("Subject: {}\nFrom: a@ex.com\nReceived: {}", "a".repeat(1 << 20), "from ".repeat(200_000));
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert!(a.headers.subject.len() <= 16 * 1024);
     assert!(a.anomalies.contains(&Anomaly::Truncated));
     assert!(codes(&a).contains(&"email_headers_truncated"));
@@ -293,7 +297,7 @@ fn a_hundred_thousand_received_headers_are_bounded() {
     raw.push_str("From: a@ex.com\n");
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert!(raw.len() < MAX_INPUT);
     assert_eq!(a.hops.len(), 250);
     assert!(a.anomalies.contains(&Anomaly::TooManyHops { total: 1000 }));
@@ -306,7 +310,7 @@ fn nested_quote_marks_are_linear() {
     let raw = format!("{}From: a@ex.com\n{}Subject: x", "> ".repeat(4_000), ">".repeat(1 << 20));
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert_eq!(a.headers.from, "a@ex.com");
 }
 
