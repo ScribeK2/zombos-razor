@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerates the Finding-code tables in docs/parity.md, then verifies the audit:
 # every cited test exists, the Go reference tables exist in Rust, and the generated block
-# is current. Go is read from git (commit b8fc3d5, the tip of `main`), never the working tree.
+# is current. Go is read from git (commit b8fc3d5, the last Go commit), never the working tree.
 # Usage: scripts/parity.sh [--check]   (--check changes nothing and fails on a stale block)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

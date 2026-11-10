@@ -2,7 +2,7 @@
 
 Question: does the Rust app keep everything the team relied on in the Go app, apart from what was dropped on purpose? Casework (cases, tickets, write-ups) and SecurityTrails were dropped on purpose (plan.md "Goal", DESIGN.md "Not in the app", ADR-0002 "Status").
 
-The Go source is no longer in the working tree. It is at `main` (last Go commit `b8fc3d5`). To read it: `git show b8fc3d5:internal/app/dns.go`, or `git archive b8fc3d5 | tar -x -C <empty dir>`. Every script below reads Go from that commit with `git show`, so they keep working after the Go code is deleted from `rewrite`.
+The Go source is no longer in the working tree. It lives in git history: the last Go commit is `b8fc3d5` (also the tag `v1.0.0` for the release), which stays reachable after the rewrite merged into `main`. To read it: `git show b8fc3d5:internal/app/dns.go`, or `git archive b8fc3d5 | tar -x -C <empty dir>`. Every script below reads Go from that commit with `git show`, so they keep working after the Go code is deleted from `rewrite`.
 
 ## How to check this document
 
