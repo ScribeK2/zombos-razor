@@ -543,6 +543,32 @@ mod tests {
         Endpoints::real(&v("1.0.0"))
     }
 
+    const REAL_SUMS: &[u8] = include_bytes!("../../../testdata/update/real-minisign.SHA256SUMS");
+    const REAL_SIG: &[u8] = include_bytes!("../../../testdata/update/real-minisign.SHA256SUMS.minisig");
+    const REAL_NAME: &str = "Zombos-Razor-0.0.1-x86_64.AppImage";
+
+    /// The only fixture made by the real `minisign` binary, with the real release key
+    /// (key id AFC930F8DF5D3289). Every other signature in the tests comes from a generated key.
+    #[test]
+    fn a_signature_made_by_the_real_minisign_binary_with_the_release_key_verifies() {
+        let hash = signed_hash(PUBLIC_KEY, REAL_SUMS, REAL_SIG, &v("0.0.1"), REAL_NAME).unwrap();
+        assert_eq!(hash, "d617c91de7fafb26cdc4802101822731f5beae27a463c91ad6bfab772272aa70");
+    }
+
+    #[test]
+    fn the_real_signature_is_refused_for_another_version_or_after_the_sums_change() {
+        assert!(matches!(
+            signed_hash(PUBLIC_KEY, REAL_SUMS, REAL_SIG, &v("0.0.2"), REAL_NAME),
+            Err(UpdateError::WrongVersion { .. })
+        ));
+        let mut changed = REAL_SUMS.to_vec();
+        changed.push(b'#');
+        assert!(matches!(
+            signed_hash(PUBLIC_KEY, &changed, REAL_SIG, &v("0.0.1"), REAL_NAME),
+            Err(UpdateError::BadSignature(_))
+        ));
+    }
+
     fn release(tag: &str, draft: bool, pre: bool) -> String {
         let a = |n: &str| format!(r#"{{"name":"{n}","browser_download_url":"https://h/{n}","size":10}}"#);
         format!(
