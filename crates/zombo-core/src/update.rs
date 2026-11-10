@@ -352,14 +352,22 @@ fn asset(release: &ApiRelease, pick: impl Fn(&str) -> bool, what: &str, cap: u64
     Ok(Asset { name: a.name.clone(), url: a.browser_download_url.clone(), size: a.size })
 }
 
+/// Whether a release carries everything an update needs. One that does not (an old release made
+/// before signing existed) is skipped, never an error: it must not hide a valid newer release.
+fn is_signed_release(r: &ApiRelease) -> bool {
+    let has = |pick: &dyn Fn(&str) -> bool| r.assets.iter().any(|a| pick(&a.name));
+    has(&|n| n.ends_with(".AppImage")) && has(&|n| n == "SHA256SUMS") && has(&|n| n == "SHA256SUMS.minisig")
+}
+
 /// The newest release that is newer than `current`. Drafts never count. A pre-release counts only
-/// when the running version is one too.
+/// when the running version is one too. A release without the signed assets is skipped.
 pub fn select(releases: &[u8], current: &Version, ep: &Endpoints) -> Result<Option<Available>, UpdateError> {
     let releases: Vec<ApiRelease> =
         serde_json::from_slice(releases).map_err(|e| UpdateError::BadRelease(e.to_string()))?;
     let best = releases
         .iter()
         .filter(|r| !r.draft && (!r.prerelease || current.is_prerelease()))
+        .filter(|r| is_signed_release(r))
         .filter_map(|r| Version::parse(&r.tag_name).map(|v| (v, r)))
         .filter(|(v, _)| v > current && (!v.is_prerelease() || current.is_prerelease()))
         .max_by(|a, b| a.0.cmp(&b.0));
@@ -623,10 +631,20 @@ mod tests {
     }
 
     #[test]
-    fn a_release_missing_its_signature_is_unusable() {
+    fn a_release_missing_its_signature_is_skipped_and_never_offered() {
         let json = release("v2.0.0", false, false).replace("SHA256SUMS.minisig", "other");
         let r = select(format!("[{json}]").as_bytes(), &v("1.0.0"), &ep());
-        assert!(matches!(r, Err(UpdateError::BadRelease(_))), "{r:?}");
+        assert!(matches!(r, Ok(None)), "{r:?}");
+    }
+
+    /// The Go-era release `v1.0.0` has no signature files and sorts above every 0.x release. It
+    /// must not hide a valid newer release candidate (found live against the real release list).
+    #[test]
+    fn an_unsigned_newer_release_does_not_hide_a_valid_one() {
+        let unsigned = release("v1.0.0", false, false).replace("SHA256SUMS.minisig", "other");
+        let list = format!("[{unsigned},{}]", release("v0.1.0-rc2", false, true));
+        let r = select(list.as_bytes(), &v("0.1.0-rc1"), &ep()).unwrap().unwrap();
+        assert_eq!(r.version, v("0.1.0-rc2"));
     }
 
     #[test]
