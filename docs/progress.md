@@ -236,3 +236,10 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [x] Release version stamp verified in a real build: AppImage and CLI built with `VERSION=0.1.1-test` print `0.1.1-test`
 - [ ] Not seen live from the last UI worker: a differing 'This machine' row (this network's resolver agreed), scroll-into-view for a focused row below the fold, the Markdown copy on the clipboard (unit tests only)
 - [ ] Tidy: mark C23, K07, K10, E04 and N1 to N6, N9 done in `docs/parity.md`
+
+## Update flow against the real GitHub releases (2026-11-09)
+
+- [x] Published `v0.1.0-rc1` and `v0.1.0-rc2` as pre-releases (signed by the release workflow, verified with the real minisign binary)
+- [x] Found live: the running rc1 saw no update. The check picked the newest release above the running version, the Go-era `v1.0.0` (no signature files, and 1.0.0 sorts above every 0.x), failed with `BadRelease`, and the UI hides errors by design. Fixed test first: a release without the signed assets is skipped, never an error, so it cannot hide a valid newer one (`is_signed_release` in `update.rs`). `tests/update_live.rs` (ignored by default) asks the real API
+- [ ] rc1 and rc2 carry the bug and cannot update themselves. The first release with the fix is the next tag
+- [ ] Decision for the owner: the old Go release `v1.0.0` is still the GitHub "Latest" release, so the repository page offers the Go AppImage; and a future Rust `v1.0.0` tag is impossible while the Go tag exists. Recommend: delete the Go release page (the tag and history stay), and start Rust at 0.x

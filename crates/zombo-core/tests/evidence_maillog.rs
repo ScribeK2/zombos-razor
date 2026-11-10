@@ -6,6 +6,10 @@ mod evidence;
 
 use std::time::{Duration, Instant};
 
+/// A guard against a hang or a quadratic parser, not a speed test: these tests run in an unoptimized
+/// debug build on shared CI runners, where 60,000 lines legitimately take seconds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
 use evidence::fixture;
 use zombo_core::{
     Severity,
@@ -376,7 +380,7 @@ fn a_megabyte_single_line_is_bounded() {
     );
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert!(a.truncated);
     assert_eq!(a.unparsed, 0, "the second long line is glued on and cut");
     assert!(maillog_findings(&a).iter().any(|f| f.code == "mail_log_truncated"));
@@ -390,7 +394,7 @@ fn many_lines_for_one_queue_id_are_bounded() {
     }
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert_eq!(a.messages[0].recipients.len(), 1000);
     assert!(a.truncated);
 }
@@ -403,7 +407,7 @@ fn a_hundred_thousand_messages_are_bounded() {
     }
     let start = Instant::now();
     let a = analyse(&raw);
-    assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
     assert_eq!(a.messages.len(), 50_000);
     assert!(maillog_findings(&a).len() < 20);
 }
