@@ -1,0 +1,22 @@
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+SELF="${APPIMAGE:-Zombos-Razor.AppImage}"
+case "${1:-}" in
+-h | --help)
+    cat <<TXT
+Zombo's Razor @VERSION@
+
+Usage: $SELF
+
+Needs a Wayland or X11 session with a Vulkan or OpenGL driver.
+The graphics driver, the Vulkan loader and Mesa come from the system.
+
+If the AppImage does not start and mentions FUSE, install fuse3 or run
+  $SELF --appimage-extract-and-run
+which needs no FUSE.
+TXT
+    exit 0
+    ;;
+esac
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$HERE/usr/bin/zombo-razor" "$@"

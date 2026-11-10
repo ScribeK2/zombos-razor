@@ -1,0 +1,1 @@
+_dmarc.example.com. 300 IN TXT "v=DMARC1; p=none; pct=50; aspf=s"

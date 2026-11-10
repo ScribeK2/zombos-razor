@@ -1,0 +1,5 @@
+; www.example.com is an alias into CloudFront; Team Cymru knows the address.
+www.example.com. 60 IN CNAME d111.cloudfront.net.
+d111.cloudfront.net. 60 IN A 192.0.2.10
+10.2.0.192.origin.asn.cymru.com. 60 IN TXT "16509 | 192.0.2.0/24 | US | arin | 2000-01-01"
+AS16509.asn.cymru.com. 60 IN TXT "16509 | US | arin | 2000-05-04 | AMAZON-02, US"

@@ -1,0 +1,5 @@
+2026-06-12T02:26:20.123Z mail01 postfix/smtpd[2811]: A1B2C3D4: client=mail.client.com[203.0.113.10]
+2026-06-12T02:26:20.200Z mail01 postfix/cleanup[2815]: A1B2C3D4: message-id=<abc123@client.com>
+2026-06-12T02:26:20.250Z mail01 postfix/qmgr[2790]: A1B2C3D4: from=<sender@client.com>, size=4523, nrcpt=1 (queue active)
+2026-06-12T02:26:21.500Z mail01 postfix/smtp[2820]: A1B2C3D4: to=<rcpt@example.net>, relay=mx.example.net[198.51.100.5]:25, delay=1.3, dsn=2.0.0, status=sent (250 2.0.0 OK 1A2B3C)
+2026-06-12T02:26:21.600Z mail01 postfix/qmgr[2790]: A1B2C3D4: removed

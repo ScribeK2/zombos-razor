@@ -1,0 +1,7 @@
+ARG UBUNTU=24.04
+FROM ubuntu:${UBUNTU}
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxkbcommon0 libxkbcommon-x11-0 libxcb1 libwayland-client0 libfontconfig1 libfreetype6 \
+    libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb weston x11-utils imagemagick xauth dbus-x11 \
+ && rm -rf /var/lib/apt/lists/*

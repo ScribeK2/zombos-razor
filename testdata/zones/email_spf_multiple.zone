@@ -1,0 +1,2 @@
+example.com. 300 IN TXT "v=spf1 -all"
+example.com. 300 IN TXT "v=spf1 include:_spf.provider.test ~all"

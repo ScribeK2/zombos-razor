@@ -1,10 +1,5 @@
-/web/node_modules/
-/web/dist/*
-!/web/dist/.gitkeep
-/stackwell
 /.playwright-mcp/
 /build/
-/Stackwell-*.AppImage
-/web/test-results/
-/web/playwright-report/
 /.claude/worktrees/
+/target/
+/target-2404/

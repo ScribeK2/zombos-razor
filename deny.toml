@@ -1,0 +1,45 @@
+# Dependency policy. Run with `cargo deny check`.
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+version = 2
+ignore = [
+    { id = "RUSTSEC-2024-0384", reason = "Unmaintained notice only, no vulnerability: instant, via the GPUI stack. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2024-0436", reason = "Unmaintained notice only, no vulnerability: paste, via the GPUI stack. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2026-0192", reason = "Unmaintained notice only, no vulnerability: ttf-parser, via GPUI text shaping. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2026-0206", reason = "Unmaintained notice only, no vulnerability: rustybuzz, via GPUI text shaping. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2026-0370", reason = "Unmaintained notice only, no vulnerability: zvariant, via GPUI's desktop portal. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2026-0371", reason = "Unmaintained notice only, no vulnerability: zbus_names, via GPUI's desktop portal. Revisit when gpui-kit moves its pin." },
+    { id = "RUSTSEC-2026-0372", reason = "Unmaintained notice only, no vulnerability: zvariant_derive, via GPUI's desktop portal. Revisit when gpui-kit moves its pin." },
+]
+
+[licenses]
+version = 2
+# Licenses we would accept from a future dependency are listed even if unused today.
+unused-allowed-license = "allow"
+allow = [
+    "MIT",
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0", # the Mozilla root certificates bundled by webpki-roots
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

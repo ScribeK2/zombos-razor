@@ -1,0 +1,1 @@
+_spf.provider.test. 300 IN TXT "v=spf1 ~all"

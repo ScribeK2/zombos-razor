@@ -1,0 +1,106 @@
+[package]
+name = "zombo-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tokio = { version = "1.54.1", features = ["rt", "time"] }
+zombo-core = { path = "../crates/zombo-core" }
+zombo-ui = { path = "../crates/zombo-ui" }
+
+[workspace]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "dns_message"
+path = "fuzz_targets/dns_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dnssec_rdata"
+path = "fuzz_targets/dnssec_rdata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "email_records"
+path = "fuzz_targets/email_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "email_headers"
+path = "fuzz_targets/email_headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mail_log"
+path = "fuzz_targets/mail_log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rdap_json"
+path = "fuzz_targets/rdap_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "whois_text"
+path = "fuzz_targets/whois_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smtp_reply"
+path = "fuzz_targets/smtp_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "web_response"
+path = "fuzz_targets/web_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tls_certificate"
+path = "fuzz_targets/tls_certificate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "target"
+path = "fuzz_targets/target.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ui_text"
+path = "fuzz_targets/ui_text.rs"
+test = false
+doc = false
+bench = false

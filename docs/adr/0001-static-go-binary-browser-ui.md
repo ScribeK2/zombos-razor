@@ -11,3 +11,7 @@ Stackwell ships as a single static Go binary (no cgo) inside an AppImage. It ser
 ## Consequences
 
 The app still has to handle port selection, single-instance and opening the browser, but in Go code rather than AppRun shell.
+
+## Status
+
+Superseded by [ADR-0006](0006-rust-gpui-rewrite-gated-on-spike.md).
