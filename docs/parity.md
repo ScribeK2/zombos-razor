@@ -248,11 +248,11 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `spf_permerror` | critical | critical | same | same | same | `zombo-core/tests/email_findings.rs::thirteen_lookups_are_too_many`, `zombo-core/tests/email_findings.rs::syntax_and_include_errors_are_a_permerror` (+2) |
 | `spf_softfail_all` | info | info | same | same | same | `zombo-core/tests/email_findings.rs::syntax_and_include_errors_are_a_permerror`, `zombo-core/tests/email_findings.rs::each_all_qualifier_has_its_finding` |
 | `spf_too_many_lookups` | critical | critical | same | same | same | `zombo-core/tests/email_findings.rs::thirteen_lookups_are_too_many`, `zombo-core/tests/email_findings.rs::ten_lookups_are_still_fine` (+1) |
-| `ssl_inspection_expired` | critical | critical | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/smtp.rs::certificate_problems_use_the_tls_findings` (+2) |
+| `ssl_inspection_expired` | critical | critical | same | same | same | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `ssl_inspection_expiring` | warning | warning | same | same | same | `zombo-core/tests/tls.rs::expiry_warnings_follow_the_go_thresholds`, `zombo-core/tests/tls.rs::the_soonest_expiry_in_the_chain_is_reported_by_name` |
 | `ssl_inspection_expiring_soon` | info | info | same | same | same | `zombo-core/tests/tls.rs::expiry_warnings_follow_the_go_thresholds` |
 | `ssl_inspection_hostname_mismatch` | critical | critical | same | same | same | `zombo-core/tests/smtp.rs::certificate_problems_use_the_tls_findings`, `zombo-core/tests/tls.rs::a_wrong_host_is_critical_and_not_valid` |
-| `ssl_inspection_incomplete_chain` | critical | critical | same | same | same | `zombo-core/tests/tls.rs::a_missing_intermediate_is_an_incomplete_chain` |
+| `ssl_inspection_incomplete_chain` | critical | critical | same | same | same | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls.rs::a_missing_intermediate_is_an_incomplete_chain` |
 | `ssl_inspection_old_protocol` | warning | warning | same | same | same | NONE |
 | `ssl_inspection_self_signed` | critical | critical | same | same | same | `zombo-core/tests/tls.rs::a_self_signed_certificate_is_not_also_untrusted` |
 | `ssl_inspection_untrusted` | critical | critical | same | same | same | `zombo-core/tests/tls.rs::a_complete_chain_under_an_unknown_root_is_untrusted`, `zombo-core/tests/tls.rs::a_chain_that_fails_verification_otherwise_is_invalid` |
@@ -278,13 +278,13 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | Code | Source | Severity | Tests naming the code |
 |---|---|---|---|
 | `caa_forbids_all` | crates/zombo-core/src/tls_extras.rs:213 | warning | `zombo-core/tests/tls_extras.rs::issuewild_is_noted_and_judges_wildcard_certificates`, `zombo-core/tests/tls_extras.rs::records_that_do_not_restrict_issuance_say_so` |
-| `caa_forbids_issuer` | crates/zombo-core/src/tls_extras.rs:225 | critical | `zombo-core/tests/tls_extras.rs::a_ca_the_records_forbid_is_critical`, `zombo-core/tests/tls_extras.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
+| `caa_forbids_issuer` | crates/zombo-core/src/tls_extras.rs:225 | critical | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls_extras.rs::a_ca_the_records_forbid_is_critical` (+1) |
 | `caa_issuer_unknown` | crates/zombo-core/src/tls_extras.rs:235 | info | `zombo-core/tests/tls_extras.rs::an_allowed_or_unmapped_issuer_is_not_critical` |
 | `caa_issuewild` | crates/zombo-core/src/tls_extras.rs:252 | info | `zombo-core/tests/tls_extras.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
-| `caa_lookup_failed` | crates/zombo-core/src/tls_extras.rs:174 | warning | `zombo-ui/src/checks.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_extras.rs::a_failed_question_is_not_read_as_no_caa` |
+| `caa_lookup_failed` | crates/zombo-core/src/tls_extras.rs:174 | warning | `zombo-core/src/tls.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_extras.rs::a_failed_question_is_not_read_as_no_caa` |
 | `caa_no_issue` | crates/zombo-core/src/tls_extras.rs:206 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section` (+1) |
-| `caa_none` | crates/zombo-core/src/tls_extras.rs:183 | info | `zombo-ui/src/checks.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-core/tests/tls_extras.rs::the_nearest_set_wins_and_the_climb_stops_below_the_root` |
-| `caa_ok` | crates/zombo-core/src/tls_extras.rs:241 | ok | `zombo-ui/src/checks.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_extras.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
+| `caa_none` | crates/zombo-core/src/tls_extras.rs:183 | info | `zombo-core/src/tls.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one` (+1) |
+| `caa_ok` | crates/zombo-core/src/tls_extras.rs:241 | ok | `zombo-core/src/tls.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_extras.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
 | `dns_authoritative_behind` | crates/zombo-core/src/propagation.rs:514 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
 | `dns_authoritative_consistent` | crates/zombo-core/src/propagation.rs:695 | ok | `zombo-core/tests/authoritative.rs::everything_matching_the_nameservers_says_so` |
 | `dns_authoritative_mismatch` | crates/zombo-core/src/propagation.rs:532 | critical | `zombo-core/tests/authoritative.rs::resolvers_serving_old_records_are_called_cached_not_broken`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
@@ -301,16 +301,16 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `dns_ns_is_cname` | crates/zombo-core/src/delegation.rs:402 | critical | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/delegation.rs::a_nameserver_that_is_a_cname_is_critical` |
 | `dns_ns_unresolvable` | crates/zombo-core/src/delegation.rs:392 | critical | `zombo-core/tests/delegation.rs::an_unresolvable_nameserver_name_is_critical` |
 | `dns_propagation_stale_cache` | crates/zombo-core/src/propagation.rs:717 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/authoritative.rs::resolvers_serving_old_records_are_called_cached_not_broken` (+1) |
-| `dnssec_algorithm_deprecated` | crates/zombo-core/src/dnssec.rs:661 | warning | `zombo-core/tests/dnssec.rs::a_deprecated_algorithm_is_a_warning_naming_it` |
-| `dnssec_bogus` | crates/zombo-core/src/dnssec.rs:591 | critical | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/dnssec.rs::a_resolver_that_rejects_the_domain_is_named_and_the_domain_is_called_unreachable` (+2) |
-| `dnssec_ds_mismatch` | crates/zombo-core/src/dnssec.rs:623 | critical | `zombo-core/tests/dnssec.rs::a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict`, `zombo-core/tests/dnssec.rs::a_ds_at_the_parent_with_no_dnskey_in_the_zone_is_called_out` |
-| `dnssec_ds_missing` | crates/zombo-core/src/dnssec.rs:691 | info | `zombo-core/tests/dnssec.rs::keys_with_no_ds_are_signed_but_not_linked` |
-| `dnssec_ds_without_dnskey` | crates/zombo-core/src/dnssec.rs:604 | critical | `zombo-core/tests/dnssec.rs::a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict`, `zombo-core/tests/dnssec.rs::a_ds_at_the_parent_with_no_dnskey_in_the_zone_is_called_out` |
-| `dnssec_nameservers_disagree` | crates/zombo-core/src/dnssec.rs:678 | warning | `zombo-core/tests/dnssec.rs::nameservers_serving_different_keys_are_a_warning_listing_each` |
-| `dnssec_not_signed` | crates/zombo-core/src/dnssec.rs:699 | info | `zombo-core/tests/dnssec.rs::no_ds_and_no_dnskey_is_just_unsigned` |
-| `dnssec_secure` | crates/zombo-core/src/dnssec.rs:713 | ok | `zombo-core/tests/dnssec.rs::healthy_dnssec_says_so_and_nothing_else`, `zombo-core/tests/dnssec.rs::a_resolver_that_rejects_the_domain_is_named_and_the_domain_is_called_unreachable` (+5) |
-| `dnssec_signature_expired` | crates/zombo-core/src/dnssec.rs:636 | critical | `zombo-core/tests/dnssec.rs::a_signature_past_its_expiration_is_critical`, `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning` |
-| `dnssec_signature_expiring` | crates/zombo-core/src/dnssec.rs:645 | warning | `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning`, `zombo-core/tests/dnssec.rs::under_three_days_left_on_a_long_signature_is_a_warning` |
+| `dnssec_algorithm_deprecated` | crates/zombo-core/src/dnssec.rs:662 | warning | `zombo-core/tests/dnssec.rs::a_deprecated_algorithm_is_a_warning_naming_it` |
+| `dnssec_bogus` | crates/zombo-core/src/dnssec.rs:592 | critical | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/dnssec.rs::a_resolver_that_rejects_the_domain_is_named_and_the_domain_is_called_unreachable` (+2) |
+| `dnssec_ds_mismatch` | crates/zombo-core/src/dnssec.rs:624 | critical | `zombo-core/tests/check_dnssec.rs::a_ds_that_matches_no_key_is_reported_as_unmatched`, `zombo-core/tests/dnssec.rs::a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict` (+1) |
+| `dnssec_ds_missing` | crates/zombo-core/src/dnssec.rs:692 | info | `zombo-core/tests/dnssec.rs::keys_with_no_ds_are_signed_but_not_linked` |
+| `dnssec_ds_without_dnskey` | crates/zombo-core/src/dnssec.rs:605 | critical | `zombo-core/tests/dnssec.rs::a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict`, `zombo-core/tests/dnssec.rs::a_ds_at_the_parent_with_no_dnskey_in_the_zone_is_called_out` |
+| `dnssec_nameservers_disagree` | crates/zombo-core/src/dnssec.rs:679 | warning | `zombo-core/tests/dnssec.rs::nameservers_serving_different_keys_are_a_warning_listing_each` |
+| `dnssec_not_signed` | crates/zombo-core/src/dnssec.rs:700 | info | `zombo-core/tests/dnssec.rs::no_ds_and_no_dnskey_is_just_unsigned` |
+| `dnssec_secure` | crates/zombo-core/src/dnssec.rs:714 | ok | `zombo-core/tests/check_dnssec.rs::a_healthy_signed_zone_gives_zone_resolver_ds_and_key_rows`, `zombo-core/tests/dnssec.rs::healthy_dnssec_says_so_and_nothing_else` (+6) |
+| `dnssec_signature_expired` | crates/zombo-core/src/dnssec.rs:637 | critical | `zombo-core/tests/dnssec.rs::a_signature_past_its_expiration_is_critical`, `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning` |
+| `dnssec_signature_expiring` | crates/zombo-core/src/dnssec.rs:646 | warning | `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning`, `zombo-core/tests/dnssec.rs::under_three_days_left_on_a_long_signature_is_a_warning` |
 | `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:440 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
 | `email_bimi_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:431 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
 | `email_bimi_missing` | crates/zombo-core/src/email_auth/findings.rs:449 | info | `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem`, `zombo-core/tests/email_records.rs::a_record_with_another_version_or_a_stray_txt_is_not_one_of_them` |
@@ -354,10 +354,10 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:142 | warning | `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code`, `zombo-core/tests/smtp.rs::a_failed_handshake_after_starttls_is_reported` |
 | `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:92 | critical | NONE |
 | `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:177 | ok | `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail`, `zombo-core/tests/smtp.rs::implicit_tls_reads_the_greeting_inside_the_tunnel` |
-| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls.rs:557 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
-| `ssl_inspection_weak_key` | crates/zombo-core/src/tls.rs:628 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls.rs:637 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `tls_no_ocsp_staple` | crates/zombo-core/src/tls_extras.rs:272 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/tls_extras.rs::a_server_that_does_not_staple_gets_an_info_finding` |
+| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls.rs:561 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
+| `ssl_inspection_weak_key` | crates/zombo-core/src/tls.rs:632 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls.rs:641 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `tls_no_ocsp_staple` | crates/zombo-core/src/tls_extras.rs:272 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `tls_ocsp_stapled` | crates/zombo-core/src/tls_extras.rs:262 | ok | `zombo-core/tests/tls_extras.rs::a_server_that_staples_is_detected` |
 | `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:60 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
 | `web_redirect_downgrade` | crates/zombo-core/src/web/findings.rs:34 | warning | `zombo-core/src/web/mod.rs::the_downgrade_finding_names_both_urls`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` |
