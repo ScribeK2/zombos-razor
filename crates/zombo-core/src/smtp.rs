@@ -6,6 +6,7 @@
 //! bounded (see `reply`). The network is injectable through `check_smtp_via`.
 
 mod findings;
+mod plan;
 pub(crate) mod reply;
 
 use std::{io, net::IpAddr, time::Duration};
@@ -19,10 +20,72 @@ use tokio::{
     time::timeout,
 };
 
-use crate::tls::{TlsResult, inspect_stream_keep, public_roots};
+use crate::{
+    check::{Check, OnDemand, Outcome, Request},
+    rdns::{RdnsResult, check_rdns},
+    resolver::Resolver,
+    tls::{TlsResult, inspect_stream_keep, public_roots},
+};
 pub use findings::{smtp_findings, smtp_findings_at};
+pub use plan::PORTS;
 use reply::Conn;
 pub use reply::{Extensions, MAX_LINE, MAX_REPLY_LINES, Reply, ReplyError, banner_host};
+
+/// The SMTP banner row: the greeting, what the server offers, STARTTLS and the certificate, on the
+/// request's `port`. A domain or an email (the request's `kind`) goes to its MX hosts, most
+/// preferred first, and the first of three that answers is reported; a host name or an IP address
+/// is dialled as typed. The MX lookup asks this machine's resolvers (the `bootstrap` ones when it
+/// has none) with a 5 s limit, the reverse lookup of the address reached takes 3 s, and the
+/// request's `query` is not used: each step has its own limit.
+pub static CHECK: Check = Check {
+    label: "SMTP banner",
+    on_demand: Some(OnDemand {
+        run_label: "Run SMTP banner check",
+        what: "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
+        contacts: "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.",
+        note: Some(
+            "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
+        ),
+    }),
+    budget: (Duration::from_secs(40), Duration::from_secs(40)),
+    owns: &["smtp_"],
+    blind_spots: &[
+        "Whether the server accepts mail from you: no mail is sent.",
+        "Recipient-side filtering of mail it does accept.",
+        "MX hosts after the first three tried.",
+        "Whether this network blocks the port, when there is no answer.",
+    ],
+    takes_chosen_port: true,
+    ..Check::base(|request| Box::pin(async move { Ok(run(request).await) }))
+};
+
+async fn run(request: &Request<'_>) -> Outcome {
+    let resolvers = request.machine_or_none();
+    let asked = if resolvers.is_empty() { request.bootstrap } else { &resolvers[..] };
+    let port = request.port;
+    let plan = plan::run(
+        request.name,
+        plan::Request::new(request.kind, port),
+        &Resolver::new(asked, Duration::from_secs(5)),
+        |host| async move { check_smtp(&host, port, &SmtpOptions::for_port(port)).await },
+    )
+    .await;
+    let r = &plan.result;
+    let mut expect = vec![];
+    if plan.host.parse::<IpAddr>().is_err() {
+        expect.push(plan.host.clone());
+    }
+    if let (Some(ip), Reach::Answered, false) = (r.peer, r.reach, resolvers.is_empty())
+        && let RdnsResult::Ip { ptrs, .. } = check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
+    {
+        expect.extend(ptrs.into_iter().map(|p| p.name));
+    }
+    let mut outcome = findings::outcome(r, &expect);
+    let mut facts = plan::facts(&plan);
+    facts.append(&mut outcome.facts);
+    outcome.facts = facts;
+    outcome
+}
 
 /// How the TLS starts: after a STARTTLS command (ports 25 and 587) or at once (port 465).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -9,7 +9,11 @@ use std::{
 };
 
 use crate::{
-    finding::Finding, propagation::Vantage, registration::Endpoints, resolver::system_resolvers, target::Kind,
+    finding::Finding,
+    propagation::Vantage,
+    registration::Endpoints,
+    resolver::system_resolvers,
+    target::{Kind, parse_target},
     text::single_line,
 };
 
@@ -48,18 +52,23 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last nine fields are what a test swaps for a fake, or the rep's settings fill in;
-/// production takes them from [`Request::system`]. Each is read by one Check family: the first three
-/// by DNSSEC (`ns_port` also by Delegation), `port` by the Checks that dial one port (TLS, SMTP, and
-/// the Web Check's HTTPS port when `dial` is set), the fifth by the Checks that ask this machine's
-/// resolvers (the Web Check's hosting questions and SMTP too), `proxy` and `endpoints` by
-/// Registration, `selectors` by Email, `dial` by Web.
+/// zone. The other fields are what a test swaps for a fake, or the rep's settings and the tab fill in;
+/// production takes them from [`Request::system`]. Each is read by one Check family: `ns_port`,
+/// `now` and `validating` by DNSSEC (`ns_port` also by Delegation), `port` by the Checks that dial
+/// one port (TLS, SMTP, and the Web Check's HTTPS port when `dial` is set), `machine_resolvers` by
+/// the Checks that ask this machine's resolvers (the Web Check's hosting questions and SMTP too),
+/// `proxy` and `endpoints` by Registration, `selectors` by Email, `dial` by Web, `kind` by SMTP.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub name: &'a str,
+    /// The kind of target the name came from. It can differ from what parsing `name` gives: the name
+    /// of an email target is its domain part, and `bob@mail.example.com` is an email whose name
+    /// parses as a host name. SMTP reads it: a domain or an email goes to its MX hosts, the rest is
+    /// dialled as typed.
+    pub kind: Kind,
     pub query: Duration,
     pub bootstrap: &'a [SocketAddr],
     /// The port the zone's own nameservers, and its parent zone's, are asked on.
@@ -71,7 +80,9 @@ pub struct Request<'a> {
     /// The port the Check dials. A Check whose descriptor has `takes_chosen_port` gets the rep's pick.
     /// The Web Check reads it as its HTTPS port only when `dial` is set; otherwise it uses 443.
     pub port: u16,
-    /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine has none.
+    /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine
+    /// has none. The Checks that need them fail without one (SMTP instead asks `bootstrap` for the MX
+    /// hosts and skips the reverse lookup of the host it reached).
     pub machine_resolvers: Option<&'a [SocketAddr]>,
     /// The `http://` or `https://` proxy the Checks that honour one go through. `None` leaves each
     /// Check its own default.
@@ -87,10 +98,12 @@ pub struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
-    /// The real network: port 53, the clock now, the Check's own resolvers.
+    /// The real network: port 53, the clock now, the Check's own resolvers, port 443, and the kind
+    /// parsing `name` gives (a host name when it does not parse).
     pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
         Request {
             name,
+            kind: parse_target(name).map_or(Kind::Hostname, |t| t.kind),
             query,
             bootstrap,
             ns_port: 53,
@@ -107,12 +120,17 @@ impl<'a> Request<'a> {
 }
 
 impl Request<'_> {
-    /// The resolvers of this machine, or the error every Check that needs them gives when it has none.
-    pub(crate) fn machine(&self) -> Result<Cow<'_, [SocketAddr]>, String> {
-        let resolvers = match self.machine_resolvers {
+    /// The resolvers of this machine, possibly none.
+    pub(crate) fn machine_or_none(&self) -> Cow<'_, [SocketAddr]> {
+        match self.machine_resolvers {
             Some(r) => Cow::Borrowed(r),
             None => Cow::Owned(system_resolvers()),
-        };
+        }
+    }
+
+    /// The resolvers of this machine, or the error every Check that needs them gives when it has none.
+    pub(crate) fn machine(&self) -> Result<Cow<'_, [SocketAddr]>, String> {
+        let resolvers = self.machine_or_none();
         if resolvers.is_empty() { Err("this machine has no DNS resolver configured".into()) } else { Ok(resolvers) }
     }
 }
@@ -147,7 +165,7 @@ pub struct Check {
     pub owns: &'static [&'static str],
     pub blind_spots: &'static [&'static str],
     /// True when this Check dials the port the rep picked, not the default. The caller then copies
-    /// that port into [`Request::port`].
+    /// that port into [`Request::port`]. A Check that leaves it false is handed the default.
     pub takes_chosen_port: bool,
     pub(crate) run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
