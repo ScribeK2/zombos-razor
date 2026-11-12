@@ -277,14 +277,14 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 
 | Code | Source | Severity | Tests naming the code |
 |---|---|---|---|
-| `caa_forbids_all` | crates/zombo-core/src/tls/caa.rs:211 | warning | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates`, `zombo-core/tests/tls_caa_ocsp.rs::records_that_do_not_restrict_issuance_say_so` |
-| `caa_forbids_issuer` | crates/zombo-core/src/tls/caa.rs:223 | critical | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls_caa_ocsp.rs::a_ca_the_records_forbid_is_critical` (+1) |
-| `caa_issuer_unknown` | crates/zombo-core/src/tls/caa.rs:233 | info | `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` |
-| `caa_issuewild` | crates/zombo-core/src/tls/caa.rs:250 | info | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
-| `caa_lookup_failed` | crates/zombo-core/src/tls/caa.rs:172 | warning | `zombo-core/src/tls/mod.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_caa_ocsp.rs::a_failed_question_is_not_read_as_no_caa` |
-| `caa_no_issue` | crates/zombo-core/src/tls/caa.rs:204 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section` (+1) |
-| `caa_none` | crates/zombo-core/src/tls/caa.rs:181 | info | `zombo-core/src/tls/mod.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one` (+1) |
-| `caa_ok` | crates/zombo-core/src/tls/caa.rs:239 | ok | `zombo-core/src/tls/mod.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
+| `caa_forbids_all` | crates/zombo-core/src/tls/caa.rs:201 | warning | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates`, `zombo-core/tests/tls_caa_ocsp.rs::records_that_do_not_restrict_issuance_say_so` |
+| `caa_forbids_issuer` | crates/zombo-core/src/tls/caa.rs:213 | critical | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls_caa_ocsp.rs::a_ca_the_records_forbid_is_critical` (+1) |
+| `caa_issuer_unknown` | crates/zombo-core/src/tls/caa.rs:223 | info | `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` |
+| `caa_issuewild` | crates/zombo-core/src/tls/caa.rs:240 | info | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
+| `caa_lookup_failed` | crates/zombo-core/src/tls/caa.rs:162 | warning | `zombo-core/src/tls/mod.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_caa_ocsp.rs::a_failed_question_is_not_read_as_no_caa` |
+| `caa_no_issue` | crates/zombo-core/src/tls/caa.rs:194 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section` (+1) |
+| `caa_none` | crates/zombo-core/src/tls/caa.rs:171 | info | `zombo-core/src/tls/mod.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one` (+1) |
+| `caa_ok` | crates/zombo-core/src/tls/caa.rs:229 | ok | `zombo-core/src/tls/mod.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
 | `dns_authoritative_behind` | crates/zombo-core/src/propagation.rs:514 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
 | `dns_authoritative_consistent` | crates/zombo-core/src/propagation.rs:695 | ok | `zombo-core/tests/authoritative.rs::everything_matching_the_nameservers_says_so` |
 | `dns_authoritative_mismatch` | crates/zombo-core/src/propagation.rs:532 | critical | `zombo-core/tests/authoritative.rs::resolvers_serving_old_records_are_called_cached_not_broken`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
@@ -354,9 +354,9 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:143 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code` (+1) |
 | `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:93 | critical | NONE |
 | `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:178 | ok | `zombo-core/tests/check_smtp.rs::a_server_that_upgrades_gives_the_tls_rows_and_the_after_starttls_details`, `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail` (+1) |
-| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/handshake.rs:556 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
-| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/handshake.rs:627 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/handshake.rs:636 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/handshake.rs:547 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
+| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/handshake.rs:618 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/handshake.rs:627 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
 | `tls_no_ocsp_staple` | crates/zombo-core/src/tls/ocsp.rs:22 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `tls_ocsp_stapled` | crates/zombo-core/src/tls/ocsp.rs:12 | ok | `zombo-core/tests/tls_caa_ocsp.rs::a_server_that_staples_is_detected` |
 | `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:97 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |

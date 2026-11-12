@@ -1,12 +1,12 @@
 //! The CAA half of the TLS Check: which CAs the domain's CAA records allow to
 //! issue (RFC 8659). The lookup climbs the name tree.
 
-use std::{borrow::Cow, net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 
-use super::TlsResult;
+use super::{TlsResult, finding};
 use crate::{
     email_auth::clip,
     finding::{Finding, Severity},
@@ -154,16 +154,6 @@ pub fn ca_identifiers(issuer: &str) -> Option<&'static [&'static str]> {
         .map(|c| c.domains)
 }
 
-pub(super) fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: impl Into<Cow<'static, str>>,
-    message: String,
-    recommendation: Option<&'static str>,
-) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Cow::Borrowed) }
-}
-
 /// CAA findings, with the served certificate's issuer compared when `tls` is given.
 pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
     let name = &r.name;
@@ -173,7 +163,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             Severity::Warning,
             "CAA lookup failed",
             format!("The CAA records for {name} could not be read: {e}. A CA that cannot read them must not issue."),
-            Some("Check that the domain's nameservers answer CAA questions."),
+            Some("Check that the domain's nameservers answer CAA questions.".into()),
         )];
     }
     let Some(at) = &r.found_at else {
@@ -184,7 +174,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             format!(
                 "{name} and its parent names have no CAA record, so any certificate authority may issue certificates for it."
             ),
-            Some("Add a CAA record naming the CA you use, for example: 0 issue \"letsencrypt.org\"."),
+            Some("Add a CAA record naming the CA you use, for example: 0 issue \"letsencrypt.org\".".into()),
         )];
     };
     let place = if at == name { name.clone() } else { format!("{name} (the records are on {at})") };
@@ -205,7 +195,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             Severity::Info,
             "CAA does not restrict issuance",
             format!("{place} has CAA records, but none with the {tag} tag, so every CA may issue."),
-            Some("Add a CAA issue record naming the CA you use."),
+            Some("Add a CAA issue record naming the CA you use.".into()),
         )),
         Some(list) if list.is_empty() => out.push(finding(
             "caa_forbids_all",
@@ -214,7 +204,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
             format!(
                 "{place} has a CAA {tag} record with no CA in it, so no CA may issue or renew certificates for it."
             ),
-            Some("Name the CA you use in the CAA record before the certificate has to be renewed."),
+            Some("Name the CA you use in the CAA record before the certificate has to be renewed.".into()),
         )),
         Some(list) => {
             let names = list.join(", ");
@@ -227,7 +217,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
                         "The certificate served for {name} was issued by {}, but the CAA {tag} records on {at} allow only {names}. A CA checks CAA when it issues, so renewal from this CA will be refused.",
                         clip(&l.issuer)
                     ),
-                    Some("Add the issuing CA to the CAA record, or move to a CA the record allows."),
+                    Some("Add the issuing CA to the CAA record, or move to a CA the record allows.".into()),
                 )),
                 Some((l, None)) => out.push(finding(
                     "caa_issuer_unknown",

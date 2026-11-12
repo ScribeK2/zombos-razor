@@ -37,6 +37,7 @@ use x509_parser::{
     x509::AlgorithmIdentifier,
 };
 
+use super::finding;
 use crate::finding::{Finding, Severity};
 
 /// A server that sends more certificates than this is not building a chain.
@@ -488,16 +489,6 @@ fn plural(n: i64, one: &str, many: &str) -> String {
 fn date(t: OffsetDateTime) -> String {
     use time::macros::format_description;
     t.format(format_description!("[day padding:none] [month repr:short] [year]")).unwrap_or_default()
-}
-
-fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: impl Into<Cow<'static, str>>,
-    message: String,
-    recommendation: Option<Cow<'static, str>>,
-) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation }
 }
 
 /// The Go `ssl_inspection` findings, plus three the Go code lacks:

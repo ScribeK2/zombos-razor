@@ -6,10 +6,11 @@
 //! full. Trust is then judged here, with an injected clock, so every failure
 //! is its own finding.
 
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use crate::{
     check::{Check, Fact, OnDemand, Outcome, Request, RunFlag},
+    finding::{Finding, Severity},
     target::Kind,
 };
 
@@ -23,6 +24,17 @@ pub use handshake::{
     check_tls_via, inspect_stream, inspect_stream_keep, public_roots, tls_findings, tls_findings_at,
 };
 pub use ocsp::ocsp_findings;
+
+/// Builds a [`Finding`]; the one helper for the handshake, CAA and OCSP findings.
+fn finding(
+    code: &'static str,
+    severity: Severity,
+    title: impl Into<Cow<'static, str>>,
+    message: String,
+    recommendation: Option<Cow<'static, str>>,
+) -> Finding {
+    Finding { code, severity, title: title.into(), message, recommendation }
+}
 
 /// Everything one TLS run saw: the handshake, and the CAA records when the run asked for them.
 struct Observed {
