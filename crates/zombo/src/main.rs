@@ -1220,8 +1220,10 @@ async fn run_check(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let report = zombo_core::check::run_by_id(id, &args).await.map_err(|e| e.to_string())?;
     if json {
         let mut v = serde_json::to_value(&report.outcome).map_err(|e| e.to_string())?;
-        v["check"] = report.id.into();
-        v["target"] = report.subject.clone().into();
+        if let Some(o) = v.as_object_mut() {
+            o.insert("check".into(), report.id.into());
+            o.insert("target".into(), report.subject.clone().into());
+        }
         return print_json(&v);
     }
     println!("{}", report.to_text());

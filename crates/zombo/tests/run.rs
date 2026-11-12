@@ -207,7 +207,11 @@ fn selectors_and_resolvers_reach_the_check() {
         "300",
     ]);
     drop(o);
-    let sent: Vec<_> = rx_a.try_iter().chain(rx_b.try_iter()).collect();
+    // The recorder threads may lag the exited process by a moment.
+    let drain = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        std::iter::from_fn(move || rx.recv_timeout(std::time::Duration::from_millis(300)).ok()).collect::<Vec<_>>()
+    };
+    let sent: Vec<_> = drain(rx_a).into_iter().chain(drain(rx_b)).collect();
     assert!(sent.iter().any(|p| has(p, "zzfirst")), "no query for the first selector");
     assert!(sent.iter().any(|p| has(p, "zzsecond")), "no query for the second selector");
     assert!(sent.iter().all(|p| has(p, "example")), "a query for another name");

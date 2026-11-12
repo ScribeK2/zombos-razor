@@ -273,3 +273,10 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 - [x] (fixed in PR #45) The release notes in the card showed GitHub's generated markdown flattened onto one line (`## What's Changed * ... in https://...`). Strip headings, bullets and links, or show the first lines only
 - [ ] Not tried live: Later, Skip this version, an unwritable AppImage directory, a failed download, and the card refusing in a release binary
 - [ ] CI timing tests (`evidence_maillog`, `evidence_headers`) were speed tests on a shared runner and failed once at 5.13 s; their limits are now 30 s hang guards
+
+## Generic CLI: `zombo run` (branch `feat/cli-run`, not merged)
+
+- [x] `zombo_core::check`: every Check has an id, the kinds it accepts and a default port, listed in `check::ALL`; `check::find` and `check::run_by_id` run one as the UI does, with a production `resolvers` input and a serialisable `Outcome`
+- [x] `zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]` and `zombo checks [--json]` in `crates/zombo/src/main.rs`, tested through the real binary in `crates/zombo/tests/run.rs` with fakes on loopback only
+- [x] Not done on purpose: the 13 old subcommands are untouched (their text and `--json` stay as shipped); the SSH remote Vantage is not built; `Finding` has no wire type of its own, so `--json` carries the Outcome's serde shape
+- [ ] Not seen live: `zombo run` against the real network (this network intercepts DNS on port 53)
