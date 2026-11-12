@@ -59,6 +59,7 @@ pub static CHECK: Check = Check {
         "Whether this network blocks the port, when there is no answer.",
     ],
     takes_chosen_port: true,
+    default_port: 25,
     ..Check::base(|request| Box::pin(async move { Ok(run(request).await) }))
 };
 

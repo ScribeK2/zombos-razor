@@ -239,6 +239,8 @@ pub struct Check {
     /// True when this Check dials the port the rep picked, not the default. The caller then copies
     /// that port into [`Request::port`]. A Check that leaves it false is handed the default.
     pub takes_chosen_port: bool,
+    /// The port this Check dials when the caller picks none.
+    pub default_port: u16,
     pub(crate) run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
 
@@ -255,6 +257,7 @@ impl Check {
             owns: &[],
             blind_spots: &[],
             takes_chosen_port: false,
+            default_port: 443,
             run,
         }
     }
@@ -403,7 +406,7 @@ pub async fn run_by_id(id: &str, args: &RunArgs<'_>) -> Result<Report, RunError>
         kind: target.kind,
         selectors: args.selectors,
         resolvers: args.resolvers,
-        port: args.port.unwrap_or(443),
+        port: args.port.unwrap_or(check.default_port),
         seams: args.seams,
         ..Request::system(&subject, query, bootstrap)
     };

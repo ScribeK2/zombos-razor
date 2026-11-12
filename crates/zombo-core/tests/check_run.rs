@@ -254,3 +254,31 @@ Keys
     let bare = Outcome { findings: vec![finding(Severity::Ok, "Fine", None)], ..Outcome::default() };
     assert_eq!(bare.to_text(), "[ok] Fine: A message.");
 }
+
+#[test]
+fn every_check_has_its_default_port_pinned() {
+    let ports: Vec<_> = ALL.iter().map(|c| (c.id, c.default_port)).collect();
+    assert_eq!(
+        ports,
+        [
+            ("delegation", 443),
+            ("dnssec", 443),
+            ("email", 443),
+            ("web", 443),
+            ("tls", 443),
+            ("registration", 443),
+            ("rdns", 443),
+            ("ports", 443),
+            ("smtp", 25),
+            ("tls-port", 443),
+            ("blacklist", 443),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn smtp_without_a_port_dials_25_not_443() {
+    let args = RunArgs { timeout: Some(T), ..RunArgs::new("127.0.0.1") };
+    let report = run_by_id("smtp", &args).await.unwrap();
+    assert_eq!(rows(&report.outcome)[0], "Server: 127.0.0.1:25");
+}
