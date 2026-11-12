@@ -8,7 +8,6 @@ use zombo_core::{
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
-    web::{WebOptions, WebResult, check_web, parse_web_target, web_findings},
 };
 
 use crate::{
@@ -23,8 +22,7 @@ use crate::{
 pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
     let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email => &[Dns, Web],
-        Kind::Hostname => &[Dns, Web],
+        Kind::Domain | Kind::Email | Kind::Hostname => &[Dns],
         Kind::Ip => &[],
     };
     Section::ALL
@@ -166,11 +164,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         return check.run(&request_for(check, name, query, &bootstrap, options, settings)).await;
     }
     match section {
-        Section::Web => {
-            let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
-            let opts = WebOptions { timeout: query, ..WebOptions::default() };
-            Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
-        }
         Section::Smtp => {
             let resolvers = system_resolvers();
             let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
@@ -198,39 +191,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
-}
-
-pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
-    let mut facts = vec![Fact::new("URL", &r.url)];
-    if let Some(u) = &r.final_url {
-        facts.push(Fact::new("Final URL", u));
-    }
-    if let Some(s) = r.status {
-        facts.push(Fact::new("Status", s.to_string()));
-    }
-    if let Some(s) = &r.server {
-        facts.push(Fact::new("Server", s));
-    }
-    if let Some(e) = &r.https_error {
-        facts.push(Fact::new("HTTPS error", e));
-    }
-    let details = r
-        .chain
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            Fact::new(
-                format!("Hop {}", i + 1),
-                format!(
-                    "{} {}{}",
-                    h.status,
-                    h.url,
-                    h.location.as_ref().map(|l| format!(" to {l}")).unwrap_or_default()
-                ),
-            )
-        })
-        .collect();
-    Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
 }
 
 fn extensions_text(e: &Extensions) -> String {

@@ -6,14 +6,8 @@ use crate::section::Section;
 /// wins, so row order does not matter. A migrated Check lists its own prefixes in its descriptor
 /// and is not repeated here. `None` is a deliberate "no section owns this":
 /// Evidence findings live in their own tab.
-const OWNERS: &[(&str, Option<Section>)] = &[
-    ("email_headers_", None),
-    ("mail_log_", None),
-    ("dns_", Some(Section::Dns)),
-    ("website_", Some(Section::Web)),
-    ("web_", Some(Section::Web)),
-    ("smtp_", Some(Section::Smtp)),
-];
+const OWNERS: &[(&str, Option<Section>)] =
+    &[("email_headers_", None), ("mail_log_", None), ("dns_", Some(Section::Dns)), ("smtp_", Some(Section::Smtp))];
 
 type Row = (&'static str, Option<Section>);
 

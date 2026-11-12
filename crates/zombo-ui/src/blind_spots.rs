@@ -17,12 +17,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
         Section::Delegation => zombo_core::delegation::CHECK.blind_spots,
         Section::Dnssec => zombo_core::dnssec::CHECK.blind_spots,
         Section::Email => zombo_core::email_auth::CHECK.blind_spots,
-        Section::Web => &[
-            "Application logs and errors behind the page.",
-            "The CDN's origin server: the Check sees what the CDN returns, not what is behind it.",
-            "Pages behind a login, and content that JavaScript builds.",
-            "How the site answers other regions or networks than this one.",
-        ],
+        Section::Web => zombo_core::web::CHECK.blind_spots,
         Section::Tls => zombo_core::tls::CHECK.blind_spots,
         Section::Registration => zombo_core::registration::CHECK.blind_spots,
         Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
