@@ -38,11 +38,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Contact details hidden by a privacy service.",
             "Changes the registry has not yet published to RDAP or WHOIS.",
         ],
-        Section::Rdns => &[
-            "The hosting provider's panel, where the PTR record is set.",
-            "Reverse names published only to some networks.",
-            "Whether a mail server's greeting name matches its PTR: only the DNS side is read.",
-        ],
+        Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
         Section::Ports => &[
             "UDP services: only TCP ports are tried.",
             "Ports outside the quick list.",
