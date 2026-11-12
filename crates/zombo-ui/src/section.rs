@@ -38,20 +38,21 @@ impl Section {
     pub const FIRST_ON_DEMAND: usize = 9;
 
     pub fn label(self) -> &'static str {
+        if let Some(check) = self.check() {
+            return check.label;
+        }
         match self {
             Section::Summary => "Summary",
             Section::Dns => "DNS",
             Section::Delegation => "Delegation",
-            Section::Dnssec => "DNSSEC",
             Section::Email => "Email",
             Section::Web => "Web",
-            Section::Tls => "TLS",
             Section::Registration => "Registration",
             Section::Rdns => "Reverse DNS",
             Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
-            Section::TlsPort => "TLS on a port",
             Section::Blacklist => "Blacklist",
+            Section::Dnssec | Section::Tls | Section::TlsPort => unreachable!("{self:?} reads its descriptor"),
         }
     }
 
@@ -67,7 +68,10 @@ impl Section {
     }
 
     pub fn is_on_demand(self) -> bool {
-        matches!(self, Section::Ports | Section::Smtp | Section::TlsPort | Section::Blacklist)
+        match self.check() {
+            Some(check) => check.is_on_demand(),
+            None => matches!(self, Section::Ports | Section::Smtp | Section::Blacklist),
+        }
     }
 
     pub fn index(self) -> usize {
