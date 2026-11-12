@@ -9,7 +9,8 @@
 
 Go is read from git (GO_COMMIT), not the working tree: the Go code is deleted from `rewrite`.
 Rust Findings are found by `code: "x"` literals and by calls such as `finding("x", Severity, ..)`
-whose argument list has a snake_case literal followed by a severity. The same literal is also
+whose argument list has a snake_case literal followed by a severity. A `.recommend(text)` right after
+the call's closing parenthesis supplies the recommendation. The same literal is also
 looked up in every test body, so a code with no test naming it is visible.
 """
 import contextlib
@@ -154,6 +155,7 @@ def go_findings():
 
 
 SEV = re.compile(r"^(Severity::\w+|Ok|Info|Warning|Critical|sev\w*|severity|s|if .*\b(Ok|Info|Warning|Critical)\b.*)$")
+RECOMMEND = re.compile(r"\s*\.recommend\(")  # `Finding::new(..).recommend(text)`: the fifth argument
 LITERAL = re.compile(r'"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"')
 WEB_TUPLE = (("website_cdn_detected", 'format!("Served through {}", d.provider)'),
              ("website_host_detected", 'format!("Hosted on {}", d.provider)'))
@@ -188,13 +190,17 @@ def rust_findings():
             if o < 0 or s[o] != "(":
                 continue
             args = [clean(a) for a in split_top(s, o)]
+            if args[-1] == "":  # trailing comma
+                args.pop()
             lit = f'"{m.group(1)}"'
             if lit not in args:
                 continue
             i = args.index(lit)
             if len(args) >= i + 3 and SEV.match(args[i + 1]):
-                add(m.group(1), m.start(), args[i + 1], args[i + 2], args[i + 3] if len(args) > i + 3 else "",
-                    args[i + 4] if len(args) > i + 4 else "None")
+                rec = args[i + 4] if len(args) > i + 4 else "None"
+                if len(args) <= i + 4 and (t := RECOMMEND.match(s, group_end(s, o) + 1)):
+                    rec = clean(split_top(s, t.end() - 1)[0])
+                add(m.group(1), m.start(), args[i + 1], args[i + 2], args[i + 3] if len(args) > i + 3 else "", rec)
         if str(rel) == "crates/zombo-core/src/web/findings.rs":
             for code, title in WEB_TUPLE:
                 add(code, prod.index(code), "Severity::Info", title,
