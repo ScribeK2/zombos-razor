@@ -29,7 +29,8 @@ fn found(o: &Outcome) -> Vec<(&'static str, Severity)> {
 }
 
 async fn serve(ca: &Ca) -> u16 {
-    let leaf = ca.valid_leaf(&["localhost"]);
+    let now = time::OffsetDateTime::now_utc();
+    let leaf = ca.leaf(&["localhost"], now - time::Duration::days(365), now + time::Duration::days(365));
     pki::serve(vec![leaf.der], leaf.key).await.port()
 }
 
@@ -69,12 +70,7 @@ async fn the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_wor
     let f = found(&o);
     assert_eq!(
         f,
-        [
-            ("ssl_inspection_not_yet_valid", Critical),
-            ("ssl_inspection_incomplete_chain", Critical),
-            ("caa_forbids_issuer", Critical),
-            ("tls_no_ocsp_staple", Info)
-        ]
+        [("ssl_inspection_incomplete_chain", Critical), ("caa_forbids_issuer", Critical), ("tls_no_ocsp_staple", Info)]
     );
 }
 

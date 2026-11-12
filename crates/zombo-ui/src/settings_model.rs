@@ -282,7 +282,6 @@ fn default_budget(section: Section) -> Budget {
         Section::Registration => (15, 12),
         Section::Email => (25, 4),
         Section::Web => (12, 10),
-        Section::Tls | Section::TlsPort => (10, 8),
         Section::Smtp => (40, 40),
         Section::Blacklist => (25, 25),
         _ => (20, 4),
