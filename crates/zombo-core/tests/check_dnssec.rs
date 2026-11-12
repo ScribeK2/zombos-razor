@@ -35,6 +35,7 @@ async fn run(parent: &str, zone: &str, at: u64) -> Result<Outcome, String> {
             ns_port: ns.addr.port(),
             now: UNIX_EPOCH + Duration::from_secs(at),
             validating: Some(&validating),
+            tls_port: 443,
         })
         .await
 }

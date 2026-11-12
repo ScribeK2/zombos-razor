@@ -44,8 +44,8 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last three fields are what a test swaps for a fake; production takes them from
-/// [`Request::system`]. Only the DNSSEC Check reads them so far.
+/// zone. The last four fields are what a test swaps for a fake; production takes them from
+/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the last by TLS.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub name: &'a str,
@@ -57,12 +57,14 @@ pub struct Request<'a> {
     pub now: SystemTime,
     /// The validating resolvers to ask. `None` means the Check's own list; `Some(&[])` means ask none.
     pub validating: Option<&'a [Vantage]>,
+    /// The port the TLS Checks connect to.
+    pub tls_port: u16,
 }
 
 impl<'a> Request<'a> {
     /// The real network: port 53, the clock now, the Check's own resolvers.
     pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
-        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None }
+        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None, tls_port: 443 }
     }
 }
 
