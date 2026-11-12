@@ -22,12 +22,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
         Section::Registration => zombo_core::registration::CHECK.blind_spots,
         Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
         Section::Ports => zombo_core::ports::CHECK.blind_spots,
-        Section::Smtp => &[
-            "Whether the server accepts mail from you: no mail is sent.",
-            "Recipient-side filtering of mail it does accept.",
-            "MX hosts after the first three tried.",
-            "Whether this network blocks the port, when there is no answer.",
-        ],
+        Section::Smtp => zombo_core::smtp::CHECK.blind_spots,
         Section::TlsPort => zombo_core::tls::ON_PORT.blind_spots,
         Section::Blacklist => zombo_core::blacklist::CHECK.blind_spots,
     }

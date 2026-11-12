@@ -10,7 +10,6 @@ use crate::{
     outcome::{History, Run},
     record::RecordKind,
     section::Section,
-    smtp_plan,
     status::{CheckState, Glyph},
 };
 
@@ -323,13 +322,13 @@ impl Tab {
             propagation: Propagation::new(),
             record: RecordKind::default(),
             runs: HashMap::new(),
-            smtp_port: smtp_plan::PORTS[0],
+            smtp_port: zombo_core::smtp::PORTS[0],
             tls_port: Default::default(),
         }
     }
 
     pub fn step_port(&mut self, delta: isize) {
-        self.smtp_port = crate::cycle::step(&smtp_plan::PORTS, self.smtp_port, delta);
+        self.smtp_port = crate::cycle::step(&zombo_core::smtp::PORTS, self.smtp_port, delta);
     }
 
     /// `[` and `]` step through the five chips. A typed port that is not a chip starts at the first.
@@ -338,14 +337,15 @@ impl Tab {
         self.tls_port.choose(next);
     }
 
-    pub fn smtp_request(&self) -> smtp_plan::Request {
-        smtp_plan::Request::new(self.target.kind, self.smtp_port)
-    }
-
-    /// The choices the on-demand Checks run with. A typed TLS port that is not a port is an
-    /// error here, so the Check never runs on a port the rep did not ask for.
-    pub fn options(&self) -> Result<crate::checks::Options, &'static str> {
-        Ok(crate::checks::Options { smtp: self.smtp_request(), tls_port: self.tls_port.to_run()? })
+    /// The port this section's own picker holds. A typed TLS port that is not a port is an error
+    /// for the TLS on a port section only, so that Check never runs on a port the rep did not ask
+    /// for. A section with no picker gets the first TLS chip, which no Check reads.
+    pub fn chosen_port(&self, section: Section) -> Result<u16, &'static str> {
+        match section {
+            Section::Smtp => Ok(self.smtp_port),
+            Section::TlsPort => self.tls_port.to_run(),
+            _ => Ok(crate::tls_port::PRESETS[0]),
+        }
     }
 
     pub fn cancelled(&self, section: Section) -> bool {
@@ -799,16 +799,29 @@ mod tests {
     #[test]
     fn the_tls_port_runs_what_was_chosen_and_never_a_bad_typed_port() {
         let mut t = tab();
-        assert_eq!(t.options().map(|o| o.tls_port), Ok(443));
+        let port = |t: &Tab| t.chosen_port(Section::TlsPort);
+        assert_eq!(port(&t), Ok(443));
         t.step_tls_port(1);
-        assert_eq!(t.options().map(|o| o.tls_port), Ok(465));
+        assert_eq!(port(&t), Ok(465));
         t.step_tls_port(-1);
         t.step_tls_port(-1);
-        assert_eq!(t.options().map(|o| o.tls_port), Ok(8443));
+        assert_eq!(port(&t), Ok(8443));
         t.tls_port.typed("0");
-        assert_eq!(t.options().map(|o| o.tls_port), Err(crate::tls_port::INVALID));
+        assert_eq!(port(&t), Err(crate::tls_port::INVALID));
         t.tls_port.typed("2525");
-        assert_eq!(t.options().map(|o| o.tls_port), Ok(2525));
+        assert_eq!(port(&t), Ok(2525));
+    }
+
+    #[test]
+    fn a_bad_typed_tls_port_stops_only_the_tls_on_a_port_section() {
+        let mut t = tab();
+        t.tls_port.typed("0");
+        assert_eq!(t.chosen_port(Section::TlsPort), Err(crate::tls_port::INVALID));
+        t.step_port(1);
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(587));
+        for s in [Section::Tls, Section::Web, Section::Ports, Section::Blacklist] {
+            assert_eq!(t.chosen_port(s), Ok(443), "{s:?}");
+        }
     }
 
     #[test]
@@ -922,18 +935,16 @@ mod tests {
     }
 
     #[test]
-    fn the_smtp_port_steps_through_the_three_ports_and_a_domain_asks_for_mx() {
+    fn the_smtp_port_steps_through_the_three_ports() {
         let mut t = tab();
-        assert_eq!(t.smtp_request(), smtp_plan::Request { port: 25, via_mx: true });
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(25));
         t.step_port(1);
         t.step_port(1);
         assert_eq!(t.smtp_port, 465);
         t.step_port(1);
         assert_eq!(t.smtp_port, 25);
         t.step_port(-1);
-        assert_eq!(t.smtp_port, 465);
-        let host = Tab::new(Target { value: "mail.example.com".into(), kind: Kind::Hostname });
-        assert!(!host.smtp_request().via_mx);
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(465));
     }
 
     #[test]

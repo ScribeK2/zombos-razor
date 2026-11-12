@@ -1,7 +1,8 @@
 //! Pieces of the on-demand panes that only the shell draws.
 
 use super::*;
-use zombo_ui::{smtp_plan::PORTS, tls_port};
+use zombo_core::smtp::PORTS;
+use zombo_ui::tls_port;
 
 impl Shell {
     /// The port the SMTP Check dials: 25, 587 or 465. `[` and `]` step through them.

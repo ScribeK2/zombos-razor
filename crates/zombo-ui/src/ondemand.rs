@@ -29,32 +29,11 @@ pub fn collapsed(state: &CheckState, open: bool) -> bool {
 }
 
 pub fn run_label(section: Section) -> Option<&'static str> {
-    if let Some(check) = section.check() {
-        return check.on_demand.map(|d| d.run_label);
-    }
-    match section {
-        Section::Smtp => Some("Run SMTP banner check"),
-        _ => None,
-    }
+    section.check()?.on_demand.map(|d| d.run_label)
 }
 
 pub fn brief(section: Section) -> Option<Brief> {
-    if let Some(check) = section.check() {
-        return check.on_demand.map(|d| Brief { what: d.what.into(), contacts: d.contacts.into(), note: d.note });
-    }
-    let brief = |what: &str, contacts: String, note: &'static str| Brief {
-        what: what.into(),
-        contacts,
-        note: Some(note).filter(|n| !n.is_empty()),
-    };
-    match section {
-        Section::Smtp => Some(brief(
-            "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
-            "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
-            "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
-        )),
-        _ => None,
-    }
+    section.check()?.on_demand.map(|d| Brief { what: d.what.into(), contacts: d.contacts.into(), note: d.note })
 }
 
 #[cfg(test)]

@@ -4,18 +4,15 @@ use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
-    rdns::{RdnsResult, check_rdns},
-    resolver::{Resolver, system_resolvers},
-    smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
+    resolver::system_resolvers,
     target::{Kind, Target},
 };
 
 use crate::{
     diagnosis::PropEvent,
-    outcome::{CheckEvent, Fact, Outcome},
+    outcome::{CheckEvent, Outcome},
     section::Section,
     settings_model::{Settings, budget},
-    smtp_plan,
 };
 
 /// The Checks that run on their own when a target is submitted (DESIGN.md, "Checks per target kind").
@@ -104,30 +101,18 @@ pub async fn run_propagation(target: String, settings: Settings, tx: UnboundedSe
     let _ = tx.send(event);
 }
 
-/// What the tab asks of the Checks that take a choice: the SMTP port and host, the TLS port.
-#[derive(Debug, Clone, Copy)]
-pub struct Options {
-    pub smtp: smtp_plan::Request,
-    pub tls_port: u16,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Options { smtp: smtp_plan::Request::default(), tls_port: crate::tls_port::PRESETS[0] }
-    }
-}
-
 pub async fn run_section(
     section: Section,
     name: String,
+    kind: Kind,
     settings: Settings,
-    options: Options,
+    port: u16,
     tx: UnboundedSender<CheckEvent>,
 ) {
     let _ = tx.send(CheckEvent::Started);
     let event = match tokio::time::timeout(
         budget(section, settings.timeout).whole,
-        produce(section, &name, &settings, options),
+        produce(section, &name, kind, &settings, port),
     )
     .await
     {
@@ -137,133 +122,40 @@ pub async fn run_section(
     let _ = tx.send(event);
 }
 
-/// A Check that does not take the chosen port keeps the system port, so the automatic TLS row is
-/// the service on 443 whatever port the picker holds. The rep's proxy and DKIM selectors go to every
-/// Check; each takes them or ignores them.
+/// `port` is what the tab holds for this section's own picker. A Check that does not take the
+/// chosen port keeps the system port, so the automatic TLS row is the service on 443 whatever
+/// port the picker holds. The target kind, the rep's proxy and DKIM selectors go to every Check;
+/// each takes them or ignores them.
 fn request_for<'a>(
     check: &Check,
     name: &'a str,
+    kind: Kind,
     query: Duration,
     bootstrap: &'a [SocketAddr],
-    options: Options,
+    port: u16,
     settings: &'a Settings,
 ) -> Request<'a> {
     let request = Request {
+        kind,
         proxy: settings.proxy.as_deref(),
         selectors: &settings.selectors,
         ..Request::system(name, query, bootstrap)
     };
-    if check.takes_chosen_port { Request { port: options.tls_port, ..request } } else { request }
+    if check.takes_chosen_port { Request { port, ..request } } else { request }
 }
 
-async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
-    let smtp = options.smtp;
+async fn produce(section: Section, name: &str, kind: Kind, settings: &Settings, port: u16) -> Result<Outcome, String> {
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
-    if let Some(check) = section.check() {
-        return check.run(&request_for(check, name, query, &bootstrap, options, settings)).await;
+    match section.check() {
+        Some(check) => check.run(&request_for(check, name, kind, query, &bootstrap, port, settings)).await,
+        None => Err(format!("{} has no Check behind it", section.label())),
     }
-    match section {
-        Section::Smtp => {
-            let resolvers = system_resolvers();
-            let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
-            let port = smtp.port;
-            let plan = smtp_plan::run(name, smtp, &Resolver::new(asked, Duration::from_secs(5)), |host| async move {
-                check_smtp(&host, port, &SmtpOptions::for_port(port)).await
-            })
-            .await;
-            let r = &plan.result;
-            let mut expect = vec![];
-            if plan.host.parse::<std::net::IpAddr>().is_err() {
-                expect.push(plan.host.clone());
-            }
-            if let (Some(ip), Reach::Answered, false) = (r.peer, r.reach, resolvers.is_empty())
-                && let RdnsResult::Ip { ptrs, .. } =
-                    check_rdns(&resolvers, &ip.to_string(), Duration::from_secs(3)).await
-            {
-                expect.extend(ptrs.into_iter().map(|p| p.name));
-            }
-            let mut outcome = smtp_outcome(r, &expect);
-            let mut facts = smtp_plan::facts(&plan);
-            facts.append(&mut outcome.facts);
-            outcome.facts = facts;
-            Ok(outcome)
-        }
-        other => Err(format!("{} has no Check behind it", other.label())),
-    }
-}
-
-fn extensions_text(e: &Extensions) -> String {
-    let mut parts = vec![];
-    for (on, name) in [(e.starttls, "STARTTLS"), (e.pipelining, "PIPELINING"), (e.eight_bit_mime, "8BITMIME")] {
-        if on {
-            parts.push(name.to_string());
-        }
-    }
-    if let Some(n) = e.size {
-        parts.push(format!("SIZE {n}"));
-    }
-    if !e.auth.is_empty() {
-        parts.push(format!("AUTH {}", e.auth.join(" ")));
-    }
-    parts.extend(e.other.iter().cloned());
-    if parts.is_empty() { "nothing".into() } else { parts.join(", ") }
-}
-
-pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
-    let peer = r.peer.map(|p| format!(" ({p})")).unwrap_or_default();
-    let mut facts = vec![
-        Fact::new("Server", format!("{}:{}{peer}", r.host, r.port)),
-        Fact::new(
-            "Reached",
-            match r.reach {
-                Reach::Answered => "answered",
-                Reach::NoAnswer => "no answer",
-                Reach::Refused => "refused",
-                Reach::NoRoute => "no route from this network",
-                Reach::Failed => "failed",
-            },
-        ),
-    ];
-    if let Some(b) = &r.banner {
-        facts.push(Fact::new("Banner", format!("{} {}", b.code, b.text)));
-    }
-    if let Some(e) = &r.extensions {
-        facts.push(Fact::new("Offers", extensions_text(e)));
-    }
-    facts.push(Fact::new(
-        "STARTTLS",
-        match &r.starttls {
-            Starttls::NotApplicable => "not used, the port starts TLS at once".to_string(),
-            Starttls::NotAttempted => "not tried".to_string(),
-            Starttls::NotOffered => "not offered".to_string(),
-            Starttls::Refused { code, text } => format!("refused: {code} {text}"),
-            Starttls::HandshakeFailed(why) => format!("handshake failed: {why}"),
-            Starttls::Upgraded => "upgraded to TLS".to_string(),
-        },
-    ));
-    if let Some(t) = &r.tls {
-        facts.push(Fact::new("Protocol", &t.version));
-        facts.push(Fact::new("Cipher", &t.cipher));
-        facts.push(Fact::new("Trust", format!("{:?}", t.trust)));
-        if let Some(leaf) = t.chain.first() {
-            facts.push(Fact::new("Certificate", format!("{}, expires {}", leaf.subject, leaf.not_after)));
-        }
-    }
-    if let Some(f) = &r.failure {
-        facts.push(Fact::new("Stopped", format!("{:?}: {}", f.stage, f.message)));
-    }
-    let details = r
-        .extensions_after_tls
-        .as_ref()
-        .map(|e| vec![Fact::new("Offers after STARTTLS", extensions_text(e))])
-        .unwrap_or_default();
-    Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
 }
 
 #[cfg(test)]
 mod tests {
-    use zombo_core::{dnssec, tls};
+    use zombo_core::{dnssec, smtp, tls};
 
     use super::*;
 
@@ -292,47 +184,67 @@ mod tests {
     #[tokio::test]
     async fn a_section_with_a_descriptor_runs_the_descriptor() {
         let name = format!("{}.example.com", "a".repeat(64));
-        let err = produce(Section::Dnssec, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        let err = produce(Section::Dnssec, &name, Kind::Hostname, &Settings::default(), 443).await.unwrap_err();
         assert_eq!(err, format!("no nameservers found for {name}"));
-        let err = produce(Section::Summary, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        let err = produce(Section::Summary, &name, Kind::Hostname, &Settings::default(), 443).await.unwrap_err();
         assert_eq!(err, "Summary has no Check behind it");
     }
 
+    fn request_with<'a>(check: &Check, port: u16, settings: &'a Settings) -> Request<'a> {
+        request_for(check, "example.com", Kind::Domain, Duration::from_secs(1), &[], port, settings)
+    }
+
     #[test]
-    fn only_the_on_demand_tls_row_takes_the_picked_port() {
-        let options = Options { tls_port: 993, ..Options::default() };
+    fn only_the_checks_that_take_the_picked_port_get_it() {
         let settings = Settings::default();
-        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options, &settings).port;
-        assert_eq!((port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK)), (443, 993, 443));
+        let port = |c| request_with(c, 993, &settings).port;
+        let (tls, on_port, dnssec, smtp) =
+            (port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK), port(&smtp::CHECK));
+        assert_eq!((tls, on_port, dnssec, smtp), (443, 993, 443, 993));
+        for section in Section::ALL {
+            if let Some(check) = section.check() {
+                assert_eq!(port(check) == 993, check.takes_chosen_port, "{section:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_check_is_handed_the_kind_of_the_target() {
+        let settings = Settings::default();
+        for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
+            for section in Section::ALL {
+                if let Some(check) = section.check() {
+                    let request = request_for(check, "example.com", kind, Duration::from_secs(1), &[], 25, &settings);
+                    assert_eq!(request.kind, kind, "{section:?}");
+                }
+            }
+        }
     }
 
     #[test]
     fn every_check_is_handed_the_rep_proxy() {
         let settings = Settings { proxy: Some("http://proxy.example:3128".into()), ..Settings::default() };
-        let proxy = |c| request_for(c, "example.com", Duration::from_secs(1), &[], Options::default(), &settings).proxy;
+        let proxy = |c| request_with(c, 443, &settings).proxy;
         for section in Section::ALL {
             if let Some(check) = section.check() {
                 assert_eq!(proxy(check), Some("http://proxy.example:3128"), "{section:?}");
             }
         }
         let none = Settings::default();
-        let request =
-            request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
-        assert_eq!(request.proxy, None);
+        assert_eq!(request_with(&dnssec::CHECK, 443, &none).proxy, None);
     }
 
     #[test]
     fn every_check_is_handed_the_rep_dkim_selectors() {
         let settings = Settings { selectors: vec!["acme2024".into(), "mail.k1".into()], ..Settings::default() };
-        let request = |c| request_for(c, "example.com", Duration::from_secs(1), &[], Options::default(), &settings);
+        let request = |c| request_with(c, 443, &settings);
         for section in Section::ALL {
             if let Some(check) = section.check() {
                 assert_eq!(request(check).selectors, ["acme2024", "mail.k1"], "{section:?}");
             }
         }
         let none = Settings::default();
-        let bare = request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
-        assert!(bare.selectors.is_empty());
+        assert!(request_with(&dnssec::CHECK, 443, &none).selectors.is_empty());
     }
 
     #[test]
@@ -377,28 +289,6 @@ mod tests {
                 assert!(!automatic(kind).contains(s), "{s:?} would start by itself for {kind:?}");
             }
         }
-    }
-
-    #[test]
-    fn an_smtp_server_that_never_answered_is_reported_as_no_answer_with_the_cores_finding() {
-        let r = SmtpResult {
-            host: "mail.example.com".into(),
-            port: 25,
-            mode: zombo_core::smtp::Mode::Starttls,
-            reach: Reach::NoAnswer,
-            peer: None,
-            banner: None,
-            extensions: None,
-            starttls: Starttls::NotAttempted,
-            tls: None,
-            extensions_after_tls: None,
-            failure: None,
-        };
-        let o = smtp_outcome(&r, &[]);
-        let lines = o.records();
-        assert!(lines.contains(&"Reached: no answer".to_string()));
-        assert!(lines.contains(&"STARTTLS: not tried".to_string()));
-        assert!(!o.findings.is_empty());
     }
 
     #[test]

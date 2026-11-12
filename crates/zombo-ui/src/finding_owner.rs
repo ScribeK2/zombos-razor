@@ -7,7 +7,7 @@ use crate::section::Section;
 /// and is not repeated here. `None` is a deliberate "no section owns this":
 /// Evidence findings live in their own tab.
 const OWNERS: &[(&str, Option<Section>)] =
-    &[("email_headers_", None), ("mail_log_", None), ("dns_", Some(Section::Dns)), ("smtp_", Some(Section::Smtp))];
+    &[("email_headers_", None), ("mail_log_", None), ("dns_", Some(Section::Dns))];
 
 type Row = (&'static str, Option<Section>);
 

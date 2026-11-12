@@ -1,4 +1,4 @@
-use zombo_core::{blacklist, check::Check, delegation, dnssec, email_auth, ports, rdns, registration, tls, web};
+use zombo_core::{blacklist, check::Check, delegation, dnssec, email_auth, ports, rdns, registration, smtp, tls, web};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -44,7 +44,6 @@ impl Section {
         match self {
             Section::Summary => "Summary",
             Section::Dns => "DNS",
-            Section::Smtp => "SMTP banner",
             Section::Delegation
             | Section::Dnssec
             | Section::Email
@@ -54,6 +53,7 @@ impl Section {
             | Section::TlsPort
             | Section::Rdns
             | Section::Ports
+            | Section::Smtp
             | Section::Blacklist => {
                 unreachable!("{self:?} reads its descriptor")
             }
@@ -73,16 +73,14 @@ impl Section {
             Section::TlsPort => Some(&tls::ON_PORT),
             Section::Rdns => Some(&rdns::CHECK),
             Section::Ports => Some(&ports::CHECK),
+            Section::Smtp => Some(&smtp::CHECK),
             Section::Blacklist => Some(&blacklist::CHECK),
             _ => None,
         }
     }
 
     pub fn is_on_demand(self) -> bool {
-        match self.check() {
-            Some(check) => check.is_on_demand(),
-            None => matches!(self, Section::Smtp),
-        }
+        self.check().is_some_and(Check::is_on_demand)
     }
 
     pub fn index(self) -> usize {
@@ -154,6 +152,7 @@ mod tests {
                 &Section::Registration,
                 &Section::Rdns,
                 &Section::Ports,
+                &Section::Smtp,
                 &Section::TlsPort,
                 &Section::Blacklist
             ]
