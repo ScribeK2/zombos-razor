@@ -3,7 +3,10 @@
 //! `website_asn` and `website_origin_*` ones are new.
 
 use super::{Answer, MAX_REDIRECTS, OriginAnswer, ProviderKind, SECURITY_HEADERS, WebResult, origin::origin_findings};
-use crate::finding::{Finding, Severity};
+use crate::{
+    check::{Fact, Outcome},
+    finding::{Finding, Severity},
+};
 
 const SLOW_MS: u64 = 3000;
 
@@ -26,6 +29,40 @@ pub fn web_findings(target: &str, r: &WebResult) -> Vec<Finding> {
         out.extend(unverified_origin_finding(o));
     }
     out
+}
+
+/// What the Web row shows: the URL, where it ended, the status, the server and the redirect chain, with the Findings.
+pub(super) fn outcome(host: &str, r: &WebResult) -> Outcome {
+    let mut facts = vec![Fact::new("URL", &r.url)];
+    if let Some(u) = &r.final_url {
+        facts.push(Fact::new("Final URL", u));
+    }
+    if let Some(s) = r.status {
+        facts.push(Fact::new("Status", s.to_string()));
+    }
+    if let Some(s) = &r.server {
+        facts.push(Fact::new("Server", s));
+    }
+    if let Some(e) = &r.https_error {
+        facts.push(Fact::new("HTTPS error", e));
+    }
+    let details = r
+        .chain
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            Fact::new(
+                format!("Hop {}", i + 1),
+                format!(
+                    "{} {}{}",
+                    h.status,
+                    h.url,
+                    h.location.as_ref().map(|l| format!(" to {l}")).unwrap_or_default()
+                ),
+            )
+        })
+        .collect();
+    Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
 }
 
 fn downgrade_finding(r: &WebResult) -> Option<Finding> {

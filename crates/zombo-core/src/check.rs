@@ -48,10 +48,11 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last eight fields are what a test swaps for a fake, or the rep's settings fill in;
+/// zone. The last nine fields are what a test swaps for a fake, or the rep's settings fill in;
 /// production takes them from [`Request::system`]. Each is read by one Check family: the first three
-/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS, the fifth by the Checks that ask this
-/// machine's resolvers, `proxy` and `endpoints` by Registration, `selectors` by Email.
+/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS (and the Web Check's HTTPS port), the
+/// fifth by the Checks that ask this machine's resolvers (the Web Check's hosting questions too),
+/// `proxy` and `endpoints` by Registration, `selectors` by Email, `dial` by Web.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -77,6 +78,10 @@ pub struct Request<'a> {
     pub endpoints: Option<&'a Endpoints>,
     /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
     pub selectors: &'a [String],
+    /// Where the Web Check connects instead of resolving its name: the address the name is pinned
+    /// to, and the port of plain HTTP (the HTTPS port is `tls_port`). `None` means the name's own
+    /// addresses and port 80.
+    pub dial: Option<SocketAddr>,
 }
 
 impl<'a> Request<'a> {
@@ -94,6 +99,7 @@ impl<'a> Request<'a> {
             proxy: None,
             endpoints: None,
             selectors: &[],
+            dial: None,
         }
     }
 }

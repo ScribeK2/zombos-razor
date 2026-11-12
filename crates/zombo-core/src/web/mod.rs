@@ -17,7 +17,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::text::printable;
+use crate::{check::Check, target::Kind, text::printable};
 use fetch::{Fetch, TlsMode, fetch_chain};
 
 pub use fetch::{CertCheck, Hop, MAX_REDIRECTS, Pin};
@@ -26,6 +26,41 @@ pub use origin::Answer;
 pub use providers::{
     AsnInfo, Detection, Hosting, ProviderKind, cymru_origin_name, detect_hosting, parse_cymru_name, parse_cymru_origin,
     system_resolver,
+};
+
+/// The Web row: HTTPS then HTTP, the redirect chain, the security headers and who serves the site.
+/// It dials the site from this machine and ignores `HTTP_PROXY`, `HTTPS_PROXY` and the request's
+/// proxy on purpose: it must show what the site does from here, not what a proxy relays. The
+/// request's `query` bounds the whole Check. The hosting questions go to the first of the request's
+/// `machine_resolvers`, or to this machine's resolver when it has none.
+pub static CHECK: Check = Check {
+    label: "Web",
+    automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
+    budget: (Duration::from_secs(12), Duration::from_secs(10)),
+    owns: &["website_", "web_"],
+    blind_spots: &[
+        "Application logs and errors behind the page.",
+        "The CDN's origin server: the Check sees what the CDN returns, not what is behind it.",
+        "Pages behind a login, and content that JavaScript builds.",
+        "How the site answers other regions or networks than this one.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let (host, path) = parse_web_target(request.name).map_err(|e| e.to_string())?;
+            let ports = match request.dial {
+                Some(a) => Ports { http: a.port(), https: request.tls_port },
+                None => Ports::default(),
+            };
+            let opts = WebOptions {
+                timeout: request.query,
+                resolver: request.machine_resolvers.and_then(|r| r.first().copied()),
+                ports,
+                pin: request.dial.map(|a| a.ip()),
+                ..WebOptions::default()
+            };
+            Ok(findings::outcome(&host, &check_web(&host, &path, &opts).await))
+        })
+    })
 };
 
 /// Evaluated on the final response, in display order.
