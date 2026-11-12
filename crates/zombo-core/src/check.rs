@@ -48,10 +48,10 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last seven fields are what a test swaps for a fake, or the rep's settings fill in;
+/// zone. The last eight fields are what a test swaps for a fake, or the rep's settings fill in;
 /// production takes them from [`Request::system`]. Each is read by one Check family: the first three
 /// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS, the fifth by the Checks that ask this
-/// machine's resolvers, the last two by Registration.
+/// machine's resolvers, `proxy` and `endpoints` by Registration, `selectors` by Email.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -75,6 +75,8 @@ pub struct Request<'a> {
     pub proxy: Option<&'a str>,
     /// Where Registration asks. `None` means the real registries; a test points it at fakes.
     pub endpoints: Option<&'a Endpoints>,
+    /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
+    pub selectors: &'a [String],
 }
 
 impl<'a> Request<'a> {
@@ -91,6 +93,7 @@ impl<'a> Request<'a> {
             machine_resolvers: None,
             proxy: None,
             endpoints: None,
+            selectors: &[],
         }
     }
 }
