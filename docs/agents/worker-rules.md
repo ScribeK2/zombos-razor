@@ -32,7 +32,7 @@ You are one of several workers building independent slices in parallel, each in 
 - Comments only for a non-obvious why. No long-dash punctuation (em or en dash) in code, comments or prose.
 
 ## Quality gate (all must be clean before you report)
-`cargo test --workspace`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo deny check`, `cargo audit`.
+`cargo test --workspace`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo deny check`, `cargo audit`, and `bash scripts/parity.sh` followed by `bash scripts/parity.sh --check`. CI runs the last one. Rerun `bash scripts/parity.sh` after your last change to a test or to a finding: a new test that mentions a finding code can change a row of `docs/parity.md`.
 
 ## Live check
 This machine's network intercepts DNS on port 53 (a home router), so DNS-based live results may not be real. HTTPS and plain TCP are real. Run your CLI subcommand against a few real targets and paste the output; say honestly which parts looked meaningful. The lead reruns it from a clean network.
