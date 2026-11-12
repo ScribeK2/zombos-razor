@@ -67,7 +67,8 @@ async fn a_machine_with_no_resolver_gets_the_error_text() {
 }
 
 #[tokio::test]
-async fn a_resolver_that_never_answers_is_a_finding_not_an_error() {
+async fn a_resolver_that_never_answers_is_a_finding_not_an_error_after_one_query_timeout() {
+    let started = std::time::Instant::now();
     let dns = FakeDns::silent().await;
     let machine = [dns.addr];
     let o = CHECK
@@ -78,6 +79,7 @@ async fn a_resolver_that_never_answers_is_a_finding_not_an_error() {
         .await
         .unwrap();
     assert_eq!(found(&o), [("rdns_lookup_failed", Severity::Warning)]);
+    assert!(started.elapsed() < Duration::from_secs(2), "the request's query timeout was not used");
 }
 
 #[test]
