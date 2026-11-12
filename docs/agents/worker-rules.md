@@ -5,6 +5,7 @@ You are one of several workers building independent slices in parallel, each in 
 ## First, in your worktree
 1. Run `git reset --hard rewrite` on your own branch. Your worktree starts on a Go-era commit with no Cargo workspace, and every earlier worker had to do this. `rewrite` is the Rust line of work.
 2. Read `docs/progress.md` (state), `docs/plan.md` (why), and `CONTEXT.md` (vocabulary: Check, Lookup, Vantage, Finding, Target, Evidence).
+   Also read `docs/agents/module-design.md`. Put a feature inside the module whose question it answers. Do not add a sibling module next to it. Add a "Module" line to your report.
 3. Read the Go oracle files named in your task in full (the Go code was deleted from `rewrite` on 2026-11-09; read it with `git show b8fc3d5:<path>`; that commit stays reachable after the rewrite merges into `main`). The Go code is the behaviour spec: keep finding codes, severities, titles and message wording verbatim where one exists. Do not edit Go code.
 
 ## The Rust you build on (already merged, read the ones you need)
