@@ -15,7 +15,7 @@ use crate::{
     Finding, Severity,
     check::{Check, Fact, Outcome},
     email_auth::clip,
-    resolver::{Resolver, system_resolvers},
+    resolver::Resolver,
     target::Kind,
     text::printable,
 };
@@ -324,18 +324,8 @@ pub static CHECK: Check = Check {
     ],
     ..Check::base(|request| {
         Box::pin(async move {
-            let own;
-            let resolvers = match request.machine_resolvers {
-                Some(r) => r,
-                None => {
-                    own = system_resolvers();
-                    &own
-                }
-            };
-            if resolvers.is_empty() {
-                return Err("this machine has no DNS resolver configured".into());
-            }
-            Ok(outcome(&check_rdns(resolvers, request.name, request.query).await))
+            let resolvers = request.machine()?;
+            Ok(outcome(&check_rdns(&resolvers, request.name, request.query).await))
         })
     })
 };

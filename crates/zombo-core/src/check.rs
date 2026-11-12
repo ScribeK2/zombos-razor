@@ -1,13 +1,14 @@
 //! What every Check hands back, in one shape. The UI shows an `Outcome` without knowing which Check made it.
 
 use std::{
+    borrow::Cow,
     future::Future,
     net::SocketAddr,
     pin::Pin,
     time::{Duration, SystemTime},
 };
 
-use crate::{finding::Finding, propagation::Vantage, target::Kind, text::single_line};
+use crate::{finding::Finding, propagation::Vantage, resolver::system_resolvers, target::Kind, text::single_line};
 
 /// One line of a Check's data: a label and a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +81,17 @@ impl<'a> Request<'a> {
             tls_port: 443,
             machine_resolvers: None,
         }
+    }
+}
+
+impl Request<'_> {
+    /// The resolvers of this machine, or the error every Check that needs them gives when it has none.
+    pub(crate) fn machine(&self) -> Result<Cow<'_, [SocketAddr]>, String> {
+        let resolvers = match self.machine_resolvers {
+            Some(r) => Cow::Borrowed(r),
+            None => Cow::Owned(system_resolvers()),
+        };
+        if resolvers.is_empty() { Err("this machine has no DNS resolver configured".into()) } else { Ok(resolvers) }
     }
 }
 
