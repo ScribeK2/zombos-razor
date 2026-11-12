@@ -248,7 +248,11 @@ fn add(
     message: String,
     recommendation: Option<&'static str>,
 ) {
-    out.push(Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) });
+    let f = Finding::new(code, severity, title, message);
+    out.push(match recommendation {
+        Some(r) => f.recommend(r),
+        None => f,
+    });
 }
 
 pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
@@ -409,18 +413,17 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         );
     }
     if out.is_empty() {
-        out.push(Finding {
-            code: "dns_delegation_ok",
-            severity: Severity::Ok,
-            title: "Delegation is consistent".into(),
-            message: format!(
+        out.push(Finding::new(
+            "dns_delegation_ok",
+            Severity::Ok,
+            "Delegation is consistent",
+            format!(
                 "{} delegates {} to {} nameservers; the zone lists the same ones, each answers authoritatively, and the glue matches.",
                 r.parent,
                 r.apex,
                 r.parent_ns.len()
             ),
-            recommendation: None,
-        });
+        ));
     }
     out
 }

@@ -57,11 +57,12 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
     let findings: Vec<_> = d
         .findings
         .iter()
-        .map(|f| zombo_core::Finding {
-            title: single_line(&f.title).into(),
-            message: single_line(&f.message),
-            recommendation: f.recommendation.as_deref().map(|r| single_line(r).into()),
-            ..f.clone()
+        .map(|f| {
+            let clean = zombo_core::Finding::new(f.code, f.severity, single_line(&f.title), single_line(&f.message));
+            match f.recommendation.as_deref() {
+                Some(r) => clean.recommend(single_line(r)),
+                None => clean,
+            }
         })
         .collect();
     finding_lines(&mut out, &findings);
@@ -189,13 +190,8 @@ mod tests {
 
     fn tab_with_web() -> Tab {
         let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
-        let f = Finding {
-            code: "web_x",
-            severity: Severity::Warning,
-            title: "No HSTS".into(),
-            message: "Add the header.\u{1b}[31m".into(),
-            recommendation: Some("Set it.".into()),
-        };
+        let f = Finding::new("web_x", Severity::Warning, "No HSTS", "Add the header.\u{1b}[31m".into())
+            .recommend("Set it.");
         let o = Outcome {
             findings: vec![f],
             facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`\u{202e}\u{200b}b")],
@@ -215,6 +211,17 @@ mod tests {
         assert!(md.contains("- Status: `200`\n"), "{md}");
         assert!(md.contains("- Server: `a' b`\n"), "{md}");
         assert!(md.contains("\n### Redirect chain\n\n- Hop 1: `301 http://example.com`\n"), "{md}");
+    }
+
+    #[test]
+    fn a_copied_finding_has_its_title_and_recommendation_cleaned_like_its_message() {
+        let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
+        let f = Finding::new("web_y", Severity::Info, "Ti\ntle", "msg".into()).recommend("Re\u{202e}com\nmend");
+        let o = Outcome { findings: vec![f], ..Outcome::default() };
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
+        let md = section_markdown(&t, Section::Web);
+        assert!(md.contains("- **Info** Ti tle: msg Re com mend\n"), "{md}");
     }
 
     #[test]

@@ -74,17 +74,17 @@ pub fn finding(differing: &[String]) -> Option<Finding> {
     let only_addresses = differing.iter().all(|t| t == "A" || t == "AAAA");
     let what: Vec<&str> =
         differing.iter().map(|t| if t == "existence" { "whether the name exists" } else { t.as_str() }).collect();
-    Some(Finding {
-        code: CODE,
-        severity: if only_addresses { Severity::Info } else { Severity::Warning },
-        title: "This machine's resolver answers differently".into(),
-        message: format!(
+    Some(Finding::new(
+        CODE,
+        if only_addresses { Severity::Info } else { Severity::Warning },
+        "This machine's resolver answers differently",
+        format!(
             "The resolver this machine uses gives other answers than the authoritative nameservers or the public resolvers for {}. A router or network that rewrites DNS answers, split-horizon DNS, or a cache on this network that has not refreshed would do this.{}",
             what.join(", "),
             if only_addresses { " Differing addresses are also normal for a CDN." } else { "" }
         ),
-        recommendation: Some("Compare with the public resolver rows. Visitors outside this network see those, not this machine's answer.".into()),
-    })
+    )
+        .recommend("Compare with the public resolver rows. Visitors outside this network see those, not this machine's answer."))
 }
 
 #[cfg(test)]
