@@ -91,6 +91,20 @@ async fn a_zone_whose_parent_gives_no_referral_gives_the_no_referral_text() {
 }
 
 #[tokio::test]
+async fn the_request_s_query_timeout_limits_each_question() {
+    let started = std::time::Instant::now();
+    let silent = FakeDns::silent().await;
+    let rec = FakeDns::start(BOOTSTRAP).await;
+    let bootstrap = [rec.addr];
+    let request = Request {
+        ns_port: silent.addr.port(),
+        ..Request::system("example.com", Duration::from_millis(100), &bootstrap)
+    };
+    assert!(CHECK.run(&request).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(2), "the request's query timeout was not used");
+}
+
+#[tokio::test]
 async fn a_top_level_name_gives_the_no_parent_text() {
     let server = FakeDns::start(ZONE).await.referral().authoritative();
     let err = run_on(server.addr.port(), "com").await;
