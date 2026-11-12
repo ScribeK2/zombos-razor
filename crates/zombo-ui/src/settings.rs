@@ -32,7 +32,7 @@ pub struct SettingsPane {
 
 impl EventEmitter<PaneEvent> for SettingsPane {}
 
-const PROXY_RULE: &str = "The proxy applies to the Registration Check only. The Web Check ignores it on purpose: it must show what the site does from this machine, not what a proxy relays. Empty means use HTTP_PROXY and HTTPS_PROXY from the environment.";
+const PROXY_RULE: &str = "Used for the registration lookup over RDAP (HTTPS) only. The WHOIS fallback connects directly on port 43, and the Web Check ignores every proxy on purpose: it must show what the site does from this machine, not what a proxy relays. Empty means use HTTP_PROXY and HTTPS_PROXY from the environment. The daily update check always uses those environment variables.";
 const RESOLVER_RULE: &str = "Added to the ten public resolvers (Google, Cloudflare, Quad9, OpenDNS, Level3, DNS.SB, AdGuard, Yandex, 114DNS, CleanBrowsing) in the DNS propagation Check. The queries hold the target's name and nothing else. Separate with commas or spaces; a port is optional (192.0.2.53:5353).";
 const UPDATE_RULE: &str = "Asks GitHub once a day whether a newer version exists. Nothing about you or your lookups is sent. A newer version is downloaded only after you click Update, and its signature is checked first.";
 const APPLY_RULE: &str =
