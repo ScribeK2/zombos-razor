@@ -32,3 +32,12 @@ jobs:
       - run: cargo install --locked cargo-deny cargo-audit
       - run: cargo deny check
       - run: cargo audit
+
+  parity:
+    runs-on: ubuntu-24.04
+    steps:
+      # The audit reads the Go reference code from git history (commit b8fc3d5), so it needs every commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: bash scripts/parity.sh --check
