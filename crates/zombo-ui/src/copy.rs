@@ -214,6 +214,17 @@ mod tests {
     }
 
     #[test]
+    fn a_copied_finding_has_its_title_and_recommendation_cleaned_like_its_message() {
+        let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
+        let f = Finding::new("web_y", Severity::Info, "Ti\ntle", "msg".into()).recommend("Re\u{202e}com\nmend");
+        let o = Outcome { findings: vec![f], ..Outcome::default() };
+        t.run_mut(Section::Web).apply(CheckEvent::Started);
+        t.run_mut(Section::Web).apply(CheckEvent::Finished(Box::new(Ok(o))));
+        let md = section_markdown(&t, Section::Web);
+        assert!(md.contains("- **Info** Ti tle: msg Re com mend\n"), "{md}");
+    }
+
+    #[test]
     fn a_copied_section_ends_with_what_it_cannot_see_and_the_summary_does_not() {
         let t = tab_with_web();
         let md = section_markdown(&t, Section::Web);
