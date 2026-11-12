@@ -331,6 +331,25 @@ async fn the_ptr_question_has_three_seconds_and_the_request_query_is_not_used() 
     assert!(took < Duration::from_secs(5), "{took:?}");
 }
 
+/// Nobody sets the kind in a plain `Request::system`, so an address must not go through MX.
+#[tokio::test]
+async fn a_system_request_takes_its_kind_from_its_name() {
+    for (name, kind) in [
+        ("127.0.0.1", Kind::Ip),
+        ("example.com", Kind::Domain),
+        ("www.example.com", Kind::Hostname),
+        ("bob@example.com", Kind::Email),
+        ("not a name", Kind::Hostname),
+    ] {
+        assert_eq!(Request::system(name, T, &[]).kind, kind, "{name}");
+    }
+    let srv = mail().await;
+    let r =
+        Request { port: srv.addr.port(), machine_resolvers: Some(NO_RESOLVER), ..Request::system("127.0.0.1", T, &[]) };
+    let o = CHECK.run(&r).await.unwrap();
+    assert_eq!(rows(&o.facts)[0], format!("Server: 127.0.0.1:{} (127.0.0.1)", srv.addr.port()));
+}
+
 #[test]
 fn the_descriptor_names_the_row_its_brief_its_limits_and_what_it_owns() {
     assert_eq!(CHECK.label, "SMTP banner");
