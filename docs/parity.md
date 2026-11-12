@@ -308,7 +308,7 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `dnssec_ds_without_dnskey` | crates/zombo-core/src/dnssec.rs:606 | critical | `zombo-core/tests/dnssec.rs::a_ds_that_matches_no_key_is_a_mismatch_and_the_likely_cause_of_the_bogus_verdict`, `zombo-core/tests/dnssec.rs::a_ds_at_the_parent_with_no_dnskey_in_the_zone_is_called_out` |
 | `dnssec_nameservers_disagree` | crates/zombo-core/src/dnssec.rs:680 | warning | `zombo-core/tests/dnssec.rs::nameservers_serving_different_keys_are_a_warning_listing_each` |
 | `dnssec_not_signed` | crates/zombo-core/src/dnssec.rs:701 | info | `zombo-core/tests/dnssec.rs::no_ds_and_no_dnskey_is_just_unsigned` |
-| `dnssec_secure` | crates/zombo-core/src/dnssec.rs:715 | ok | `zombo-core/tests/check_dnssec.rs::a_healthy_signed_zone_gives_zone_resolver_ds_and_key_rows`, `zombo-core/tests/dnssec.rs::healthy_dnssec_says_so_and_nothing_else` (+6) |
+| `dnssec_secure` | crates/zombo-core/src/dnssec.rs:715 | ok | `zombo-core/tests/check_dnssec.rs::a_healthy_signed_zone_gives_zone_resolver_ds_and_key_rows`, `zombo-core/tests/check_live.rs::dnssec_a_signed_zone_is_secure` (+8) |
 | `dnssec_signature_expired` | crates/zombo-core/src/dnssec.rs:638 | critical | `zombo-core/tests/dnssec.rs::a_signature_past_its_expiration_is_critical`, `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning` |
 | `dnssec_signature_expiring` | crates/zombo-core/src/dnssec.rs:647 | warning | `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning`, `zombo-core/tests/dnssec.rs::under_three_days_left_on_a_long_signature_is_a_warning` |
 | `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:443 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
