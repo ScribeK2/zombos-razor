@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     Finding, Severity,
-    check::{Check, Fact, Outcome},
+    check::{Check, Fact, Outcome, RunFlag},
     email_auth::clip,
     resolver::Resolver,
     target::Kind,
@@ -324,6 +324,7 @@ pub static CHECK: Check = Check {
         "Reverse names published only to some networks.",
         "Whether a mail server's greeting name matches its PTR: only the DNS side is read.",
     ],
+    honours: &[RunFlag::Timeout, RunFlag::Resolver],
     ..Check::base(|request| {
         Box::pin(async move {
             let resolvers = request.machine()?;

@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256, Sha384};
 use tokio::task::JoinSet;
 
 use crate::{
-    check::{Check, Fact, Outcome},
+    check::{Check, Fact, Outcome, RunFlag},
     dns::{QueryFlags, exchange_with},
     finding::{Finding, Severity},
     propagation::{DiscoverError, Vantage, ipv6_available},
@@ -903,6 +903,7 @@ pub static CHECK: Check = Check {
         "The DS record upload at the registrar: only what the parent zone serves now is read.",
         "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
     ],
+    honours: &[RunFlag::Timeout, RunFlag::Resolver],
     ..Check::base(|request| {
         Box::pin(async move {
             let own;

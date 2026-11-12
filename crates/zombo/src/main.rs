@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use zombo_core::check::RunFlag;
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 use zombo_core::evidence::{headers, maillog};
 use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
@@ -1147,6 +1148,12 @@ fn kind_name(k: Kind) -> String {
     format!("{k:?}").to_lowercase()
 }
 
+/// The flags `zombo run` takes for this Check, as `zombo checks` names them (no dashes).
+fn flags_of(c: &zombo_core::check::Check) -> Vec<&'static str> {
+    let port = c.takes_chosen_port.then_some("port");
+    c.honours.iter().map(|f| f.name()).chain(port).collect()
+}
+
 fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
     let mut json = false;
     for a in it {
@@ -1165,7 +1172,8 @@ fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
                     "label": c.label,
                     "accepts": kinds(c),
                     "automatic": !c.is_on_demand(),
-                    "query_secs": c.budget.1.as_secs_f64(),
+                    "flags": flags_of(c),
+                    "query_secs": c.honours.contains(&RunFlag::Timeout).then_some(c.budget.1.as_secs_f64()),
                     "whole_secs": c.budget.0.as_secs_f64(),
                 })
             })
@@ -1174,20 +1182,26 @@ fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     for c in zombo_core::check::ALL {
         let when = if c.is_on_demand() { "on demand" } else { "automatic" };
+        let flags: Vec<_> = flags_of(c).iter().map(|f| format!("--{f}")).collect();
+        let query = if c.honours.contains(&RunFlag::Timeout) {
+            format!("{}s per query", c.budget.1.as_secs_f64())
+        } else {
+            "-".into()
+        };
         println!(
-            "{:<13} {:<20} {:<28} {:<10} {}s per query, {}s whole",
+            "{:<13} {:<20} {:<28} {:<10} {:<34} {query}, {}s whole",
             c.id,
             c.label,
             kinds(c).join(","),
             when,
-            c.budget.1.as_secs_f64(),
+            flags.join(" "),
             c.budget.0.as_secs_f64()
         );
     }
     Ok(())
 }
 
-const RUN_USAGE: &str = "usage: zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]";
+const RUN_USAGE: &str = "usage: zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]\nA flag the check does not use is refused; zombo checks shows which each check takes.";
 
 async fn run_check(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     let (mut positional, mut json, mut timeout, mut resolvers, mut port) = (vec![], false, None, vec![], None);

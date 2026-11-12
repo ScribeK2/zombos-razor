@@ -21,7 +21,7 @@ use tokio::{
 };
 
 use crate::{
-    check::{Check, OnDemand, Outcome, Request},
+    check::{Check, OnDemand, Outcome, Request, RunFlag},
     rdns::{RdnsResult, check_rdns},
     resolver::Resolver,
     target::Kind,
@@ -60,6 +60,7 @@ pub static CHECK: Check = Check {
     ],
     takes_chosen_port: true,
     default_port: 25,
+    honours: &[RunFlag::Resolver],
     ..Check::base(|request| Box::pin(async move { Ok(run(request).await) }))
 };
 

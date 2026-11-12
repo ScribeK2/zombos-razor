@@ -39,7 +39,7 @@ use x509_parser::{
 };
 
 use crate::{
-    check::{Check, Fact, OnDemand, Outcome, Request},
+    check::{Check, Fact, OnDemand, Outcome, Request, RunFlag},
     finding::{Finding, Severity},
     target::Kind,
     tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
@@ -699,6 +699,7 @@ pub static CHECK: Check = Check {
         "Cipher suites the server accepts but did not choose.",
         "Revocation at the CA: only an OCSP response stapled by the server is seen.",
     ],
+    honours: &[RunFlag::Timeout, RunFlag::Resolver],
     ..Check::base(|request| Box::pin(observe(request, true)))
 };
 

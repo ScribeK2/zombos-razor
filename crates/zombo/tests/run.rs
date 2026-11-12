@@ -59,7 +59,7 @@ fn checks_json_is_an_array_with_the_registry_ids_and_fields() {
     assert_eq!(smtp["label"], "SMTP banner");
     assert_eq!(smtp["automatic"], false);
     assert_eq!(smtp["accepts"], serde_json::json!(["domain", "hostname", "email", "ip"]));
-    assert_eq!((smtp["query_secs"].as_f64(), smtp["whole_secs"].as_f64()), (Some(40.0), Some(40.0)));
+    assert_eq!((smtp["query_secs"].as_f64(), smtp["whole_secs"].as_f64()), (None, Some(40.0)));
     let dnssec = rows.iter().find(|r| r["id"] == "dnssec").unwrap();
     assert_eq!(dnssec["automatic"], true);
 }
@@ -228,4 +228,51 @@ fn the_port_and_the_timeout_reach_the_check() {
     assert_eq!(err(&o), "zombo: timed out\n");
     listener.set_nonblocking(true).unwrap();
     assert!(listener.accept().is_ok(), "the run did not dial the chosen port");
+}
+
+#[test]
+fn a_flag_the_check_does_not_honour_fails_naming_the_flag() {
+    let o = zombo(&["run", "blacklist", "127.0.0.2", "--timeout-ms", "300"]);
+    assert!(!o.status.success());
+    assert_eq!(err(&o), "zombo: blacklist does not take --timeout-ms\n");
+    let o = zombo(&["run", "ports", "127.0.0.1", "--resolver", "127.0.0.1:9"]);
+    assert!(!o.status.success());
+    assert_eq!(err(&o), "zombo: ports does not take --resolver\n");
+    let o = zombo(&["run", "rdns", "127.0.0.1", "--selector", "x"]);
+    assert_eq!(err(&o), "zombo: rdns does not take --selector\n");
+}
+
+#[test]
+fn checks_json_lists_the_flags_and_no_query_limit_for_a_check_that_ignores_it() {
+    let o = zombo(&["checks", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let rows = v.as_array().unwrap();
+    let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap();
+    assert_eq!(row("email")["flags"], serde_json::json!(["timeout-ms", "resolver", "selector"]));
+    assert_eq!(row("tls-port")["flags"], serde_json::json!(["timeout-ms", "port"]));
+    assert_eq!(row("smtp")["flags"], serde_json::json!(["resolver", "port"]));
+    assert_eq!(row("ports")["flags"], serde_json::json!([]));
+    let no_query: Vec<_> =
+        rows.iter().filter(|r| r["query_secs"].is_null()).map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(no_query, ["ports", "smtp", "blacklist"]);
+    for r in rows {
+        let takes_timeout = r["flags"].as_array().unwrap().iter().any(|f| f == "timeout-ms");
+        assert_eq!(!r["query_secs"].is_null(), takes_timeout, "{}", r["id"]);
+    }
+}
+
+#[test]
+fn checks_text_shows_the_flags_and_a_dash_for_a_limit_that_does_not_apply() {
+    let text = out(&zombo(&["checks"]));
+    let line = |id: &str| text.lines().find(|l| l.starts_with(id)).unwrap().to_string();
+    assert!(line("email").contains("--timeout-ms --resolver --selector"), "{}", line("email"));
+    assert!(line("tls-port").contains("--timeout-ms --port"), "{}", line("tls-port"));
+    assert!(line("blacklist").contains("--resolver") && !line("blacklist").contains("--timeout-ms"));
+    assert!(!line("blacklist").contains("per query") && !line("ports").contains("per query"));
+}
+
+#[test]
+fn the_usage_says_a_flag_a_check_does_not_use_is_refused() {
+    let e = err(&zombo(&["run"]));
+    assert!(e.contains("refused") && e.contains("zombo checks"), "{e}");
 }

@@ -10,7 +10,7 @@ use common::{FakeDns, dnssec_zone};
 use pki::Ca;
 use zombo_core::{
     Finding, Severity,
-    check::{ALL, Fact, Outcome, Report, Request, RunArgs, RunError, Seams, run_by_id},
+    check::{ALL, Fact, Outcome, Report, Request, RunArgs, RunError, RunFlag, Seams, run_by_id},
     dnssec,
     propagation::Vantage,
     target::{Kind, parse_target},
@@ -278,7 +278,65 @@ fn every_check_has_its_default_port_pinned() {
 
 #[tokio::test]
 async fn smtp_without_a_port_dials_25_not_443() {
-    let args = RunArgs { timeout: Some(T), ..RunArgs::new("127.0.0.1") };
-    let report = run_by_id("smtp", &args).await.unwrap();
+    let report = run_by_id("smtp", &RunArgs::new("127.0.0.1")).await.unwrap();
     assert_eq!(rows(&report.outcome)[0], "Server: 127.0.0.1:25");
+}
+
+fn flag_args<'a>(flag: RunFlag, addr: &'a [std::net::SocketAddr], words: &'a [String]) -> RunArgs<'a> {
+    match flag {
+        RunFlag::Timeout => RunArgs { timeout: Some(T), ..RunArgs::new("127.0.0.1") },
+        RunFlag::Resolver => RunArgs { resolvers: addr, ..RunArgs::new("127.0.0.1") },
+        RunFlag::Selector => RunArgs { selectors: words, ..RunArgs::new("127.0.0.1") },
+    }
+}
+
+/// The flag check comes after the kind check, so a Check that takes no IP address is given a domain.
+#[tokio::test]
+async fn a_flag_the_check_does_not_honour_is_refused_naming_the_check_and_the_flag() {
+    let (addr, words) = (["127.0.0.1:9".parse().unwrap()], ["x".to_string()]);
+    let names = [(RunFlag::Timeout, "timeout-ms"), (RunFlag::Resolver, "resolver"), (RunFlag::Selector, "selector")];
+    for check in ALL {
+        for (flag, name) in names {
+            if check.honours.contains(&flag) {
+                continue; // Running a honoured flag needs a network; the next test and the unit matrix cover it.
+            }
+            let mut args = flag_args(flag, &addr, &words);
+            if !check.accepts.contains(&Kind::Ip) {
+                args.target = "example.com";
+            }
+            let want = RunError::BadOption(format!("{} does not take --{name}", check.id));
+            assert_eq!(run_by_id(check.id, &args).await.unwrap_err(), want);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_flag_the_check_honours_is_not_refused_when_it_can_run_on_loopback() {
+    let silent = FakeDns::silent().await;
+    let machine = [silent.addr];
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let not_refused = |r: &Result<Report, RunError>| !matches!(r, Err(RunError::BadOption(_)));
+    let seams = Seams { machine_resolvers: Some(&machine), ..Seams::default() };
+    let r = run_by_id("rdns", &RunArgs { timeout: Some(T), seams, ..RunArgs::new("203.0.113.7") }).await;
+    assert!(not_refused(&r), "{r:?}");
+    let r = run_by_id("rdns", &RunArgs { resolvers: &machine, timeout: Some(T), ..RunArgs::new("203.0.113.7") }).await;
+    assert!(not_refused(&r), "{r:?}");
+    let r = run_by_id("smtp", &RunArgs { resolvers: &machine, port: Some(closed), ..RunArgs::new("127.0.0.1") }).await;
+    assert!(not_refused(&r), "{r:?}");
+    let r = run_by_id("tls-port", &RunArgs { timeout: Some(T), port: Some(closed), ..RunArgs::new("127.0.0.1") }).await;
+    assert!(not_refused(&r), "{r:?}");
+}
+
+#[tokio::test]
+async fn blacklist_with_a_timeout_is_refused_and_reverse_dns_with_one_ends_on_it() {
+    let args = RunArgs { timeout: Some(T), ..RunArgs::new("127.0.0.2") };
+    let e = run_by_id("blacklist", &args).await.unwrap_err();
+    assert_eq!(e, RunError::BadOption("blacklist does not take --timeout-ms".into()));
+    // A resolver that never answers: the default query limit is 4 s, so 300 ms must be what ends the run.
+    let silent = FakeDns::silent().await;
+    let args =
+        RunArgs { timeout: Some(Duration::from_millis(300)), resolvers: &[silent.addr], ..RunArgs::new("203.0.113.7") };
+    let started = Instant::now();
+    let _ = run_by_id("rdns", &args).await;
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
 }

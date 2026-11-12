@@ -20,7 +20,7 @@ use crate::{
     registration::{self, Endpoints},
     resolver::system_resolvers,
     smtp,
-    target::{Kind, parse_target},
+    target::{Kind, Target, parse_target},
     text::single_line,
     tls, web,
 };
@@ -103,7 +103,7 @@ pub struct Request<'a> {
     /// parses as a host name. SMTP reads it: a domain or an email goes to its MX hosts, the rest is
     /// dialled as typed.
     pub kind: Kind,
-    /// How long one query may take. Every Check reads it.
+    /// How long one query may take. Ports, SMTP and Blacklist keep their own limits and do not read it.
     pub query: Duration,
     /// The resolvers that find the zone of `name`. Delegation, Email and DNSSEC read it.
     pub bootstrap: &'a [SocketAddr],
@@ -117,9 +117,10 @@ pub struct Request<'a> {
     /// Email reads it.
     pub selectors: &'a [String],
     /// The resolvers to ask instead of the defaults. Empty means the defaults. A seam still wins over
-    /// it. Reverse DNS, Blacklist, SMTP and Web ask them in place of this machine's resolvers, and
+    /// it. Reverse DNS, Blacklist and SMTP ask them in place of this machine's resolvers, and
     /// DNSSEC asks them in place of its validating list. Delegation, Email and DNSSEC find the zone
-    /// through `bootstrap`, which the runner sets to these. Registration, Ports and TLS do not read it.
+    /// through `bootstrap`, which the runner sets to these, and so does TLS for its CAA join. Web reads
+    /// only a seam. Registration and Ports read nothing here.
     /// The UI leaves it empty.
     pub resolvers: &'a [SocketAddr],
     /// Where a Check goes. Production leaves this at its default; only tests set it.
@@ -214,6 +215,28 @@ pub struct OnDemand {
     pub note: Option<&'static str>,
 }
 
+/// A flag of `zombo run` that only some Checks read. Port is not one: `takes_chosen_port` governs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunFlag {
+    /// `Request::query`.
+    Timeout,
+    /// `Request::resolvers`, and `bootstrap`, which the runner sets from it.
+    Resolver,
+    /// `Request::selectors`.
+    Selector,
+}
+
+impl RunFlag {
+    /// The flag's name without its dashes.
+    pub fn name(self) -> &'static str {
+        match self {
+            RunFlag::Timeout => "timeout-ms",
+            RunFlag::Resolver => "resolver",
+            RunFlag::Selector => "selector",
+        }
+    }
+}
+
 /// One Check as data: how it is named, when it runs, its default limits, the finding-code prefixes
 /// it owns, what it cannot see from this machine, and how to run it. A caller needs no knowledge
 /// of which Check it holds.
@@ -241,6 +264,9 @@ pub struct Check {
     pub takes_chosen_port: bool,
     /// The port this Check dials when the caller picks none.
     pub default_port: u16,
+    /// The flags of a run this Check reads. A run that sets any other is refused, so no flag does
+    /// nothing in silence. List a flag only after finding the line of `run` that reads it.
+    pub honours: &'static [RunFlag],
     pub(crate) run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
 
@@ -258,12 +284,26 @@ impl Check {
             blind_spots: &[],
             takes_chosen_port: false,
             default_port: 443,
+            honours: &[RunFlag::Timeout],
             run,
         }
     }
 
     pub fn is_on_demand(&self) -> bool {
         self.automatic_for.is_empty()
+    }
+
+    /// The name this Check runs on for the target: the domain part of an email address, an IP address
+    /// as typed where the Check accepts one, else the name as typed. `None` when the Check does not
+    /// accept the kind of the target.
+    pub fn subject(&self, target: &Target) -> Option<String> {
+        if !self.accepts.contains(&target.kind) {
+            return None;
+        }
+        match target.kind {
+            Kind::Email => target.value.split_once('@').map(|(_, domain)| domain.to_string()),
+            _ => Some(target.value.clone()),
+        }
     }
 
     pub async fn run(&self, request: &Request<'_>) -> Result<Outcome, String> {
@@ -379,18 +419,25 @@ fn whole_limit(budget_whole: Duration, timeout: Option<Duration>) -> Duration {
     timeout.map_or(budget_whole, |t| budget_whole.max(t.saturating_mul(5)))
 }
 
+/// The first flag the run sets that the Check does not read.
+fn unhonoured(check: &Check, args: &RunArgs<'_>) -> Option<RunFlag> {
+    let set = [
+        (RunFlag::Timeout, args.timeout.is_some()),
+        (RunFlag::Resolver, !args.resolvers.is_empty()),
+        (RunFlag::Selector, !args.selectors.is_empty()),
+    ];
+    set.into_iter().find(|(flag, set)| *set && !check.honours.contains(flag)).map(|(flag, _)| flag)
+}
+
 /// Run the Check with this id as the UI does: parse the target, derive its subject, and give the
 /// Check its limits.
 pub async fn run_by_id(id: &str, args: &RunArgs<'_>) -> Result<Report, RunError> {
     let check = find(id).ok_or_else(|| RunError::UnknownId(id.to_string()))?;
     let target = parse_target(args.target).map_err(RunError::BadTarget)?;
-    if !check.accepts.contains(&target.kind) {
-        return Err(RunError::NotAccepted { check: check.id, kind: target.kind });
+    let subject = check.subject(&target).ok_or(RunError::NotAccepted { check: check.id, kind: target.kind })?;
+    if let Some(flag) = unhonoured(check, args) {
+        return Err(RunError::BadOption(format!("{} does not take --{}", check.id, flag.name())));
     }
-    let subject = match target.kind {
-        Kind::Email => target.value.split_once('@').map_or(target.value.clone(), |(_, domain)| domain.to_string()),
-        _ => target.value,
-    };
     if args.port.is_some() && !check.takes_chosen_port {
         return Err(RunError::BadOption(format!("{} does not take a port", check.id)));
     }
@@ -427,5 +474,65 @@ mod tests {
         assert_eq!(whole_limit(whole, None), whole);
         assert_eq!(whole_limit(whole, Some(Duration::from_secs(1))), whole);
         assert_eq!(whole_limit(whole, Some(Duration::from_secs(10))), Duration::from_secs(50));
+    }
+
+    use RunFlag::{Resolver, Selector, Timeout};
+
+    const FLAGS: [RunFlag; 3] = [Timeout, Resolver, Selector];
+
+    #[test]
+    fn every_check_honours_exactly_the_flags_its_code_reads() {
+        let honours: Vec<_> = ALL.iter().map(|c| (c.id, c.honours)).collect();
+        assert_eq!(
+            honours,
+            [
+                ("delegation", &[Timeout, Resolver][..]),
+                ("dnssec", &[Timeout, Resolver]),
+                ("email", &[Timeout, Resolver, Selector]),
+                ("web", &[Timeout]),
+                ("tls", &[Timeout, Resolver]),
+                ("registration", &[Timeout]),
+                ("rdns", &[Timeout, Resolver]),
+                ("ports", &[]),
+                ("smtp", &[Resolver]),
+                ("tls-port", &[Timeout]),
+                ("blacklist", &[Resolver]),
+            ]
+        );
+    }
+
+    /// The flag check alone, with no query, for every Check and every flag: exactly the flags a Check
+    /// does not honour come back. `run_by_id` runs the same function before it asks anything.
+    #[test]
+    fn a_flag_is_refused_exactly_when_the_check_does_not_honour_it() {
+        let (addr, words) = (["127.0.0.1:9".parse().unwrap()], ["x".to_string()]);
+        for check in ALL {
+            for flag in FLAGS {
+                let args = match flag {
+                    Timeout => RunArgs { timeout: Some(Duration::from_millis(1)), ..RunArgs::new("127.0.0.1") },
+                    Resolver => RunArgs { resolvers: &addr, ..RunArgs::new("127.0.0.1") },
+                    Selector => RunArgs { selectors: &words, ..RunArgs::new("127.0.0.1") },
+                };
+                let want = (!check.honours.contains(&flag)).then_some(flag);
+                assert_eq!(unhonoured(check, &args), want, "{} {flag:?}", check.id);
+            }
+            assert_eq!(unhonoured(check, &RunArgs::new("127.0.0.1")), None, "{}", check.id);
+        }
+    }
+
+    fn t(value: &str, kind: Kind) -> crate::target::Target {
+        crate::target::Target { value: value.into(), kind }
+    }
+
+    #[test]
+    fn the_subject_is_the_name_the_check_runs_on_or_none_when_it_does_not_accept_the_kind() {
+        let on = |id: &str, value: &str, kind| find(id).unwrap().subject(&t(value, kind));
+        assert_eq!(on("dnssec", "example.com", Kind::Domain).as_deref(), Some("example.com"));
+        assert_eq!(on("dnssec", "www.example.com", Kind::Hostname).as_deref(), Some("www.example.com"));
+        assert_eq!(on("dnssec", "bob@mail.example.com", Kind::Email).as_deref(), Some("mail.example.com"));
+        assert_eq!(on("email", "bob@example.com", Kind::Email).as_deref(), Some("example.com"));
+        assert_eq!(on("dnssec", "192.0.2.1", Kind::Ip), None);
+        assert_eq!(on("rdns", "192.0.2.1", Kind::Ip).as_deref(), Some("192.0.2.1"));
+        assert_eq!(on("rdns", "bob@example.com", Kind::Email).as_deref(), Some("example.com"));
     }
 }

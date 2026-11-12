@@ -278,5 +278,6 @@ The project moved to `/mnt/steamssd/Projects/zombos-razor` (ext4, NVMe) on 2026-
 
 - [x] `zombo_core::check`: every Check has an id, the kinds it accepts and a default port, listed in `check::ALL`; `check::find` and `check::run_by_id` run one as the UI does, with a production `resolvers` input and a serialisable `Outcome`
 - [x] `zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]` and `zombo checks [--json]` in `crates/zombo/src/main.rs`, tested through the real binary in `crates/zombo/tests/run.rs` with fakes on loopback only
+- [x] A flag a Check does not read is refused (`Check::honours`), so `--timeout-ms`, `--resolver` and `--selector` never do nothing in silence; `zombo checks` lists the flags of each Check. `Check::subject` is the one rule for the name a Check runs on, shared by the runner and the UI
 - [x] Not done on purpose: the 13 old subcommands are untouched (their text and `--json` stay as shipped); the SSH remote Vantage is not built; `Finding` has no wire type of its own, so `--json` carries the Outcome's serde shape
 - [ ] Not seen live: `zombo run` against the real network (this network intercepts DNS on port 53)

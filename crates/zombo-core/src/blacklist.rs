@@ -16,7 +16,7 @@ use tokio::{sync::Semaphore, task::JoinSet, time::Instant};
 
 use crate::{
     Finding, Severity,
-    check::{Check, Fact, OnDemand, Outcome},
+    check::{Check, Fact, OnDemand, Outcome, RunFlag},
     email_auth::clip,
     resolver::Resolver,
     target::Kind,
@@ -542,6 +542,7 @@ pub static CHECK: Check = Check {
         "Whether a listing changes delivery: the receiving server decides.",
         "The sending reputation of the domain's mail history.",
     ],
+    honours: &[RunFlag::Resolver],
     ..Check::base(|request| {
         Box::pin(async move {
             let resolvers = request.machine()?;
