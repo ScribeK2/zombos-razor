@@ -23,10 +23,18 @@ const SHAPES: &[(&str, &str)] = &[
     ("chevron", r#"<path d="M6 4l4 4-4 4"/>"#),
 ];
 
+const WORDMARK: &str = include_str!("../assets/wordmark.svg");
+const WORDMARK_SLASH: &str = include_str!("../assets/wordmark-slash.svg");
+
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        match path {
+            "wordmark.svg" => return Ok(Some(Cow::Borrowed(WORDMARK.as_bytes()))),
+            "wordmark-slash.svg" => return Ok(Some(Cow::Borrowed(WORDMARK_SLASH.as_bytes()))),
+            _ => {}
+        }
         let name = path.strip_prefix("icons/").and_then(|p| p.strip_suffix(".svg"));
         Ok(SHAPES
             .iter()
