@@ -3,7 +3,6 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
-    email_auth::{EmailAuthResult, email_auth, email_findings},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
     resolver::{Resolver, system_resolvers},
@@ -24,7 +23,7 @@ use crate::{
 pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
     let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email => &[Dns, Email, Web],
+        Kind::Domain | Kind::Email => &[Dns, Web],
         Kind::Hostname => &[Dns, Web],
         Kind::Ip => &[],
     };
@@ -141,8 +140,8 @@ pub async fn run_section(
 }
 
 /// A Check that does not take the chosen port keeps the system port, so the automatic TLS row is
-/// the service on 443 whatever port the picker holds. The rep's proxy goes to every Check; each
-/// takes it or ignores it.
+/// the service on 443 whatever port the picker holds. The rep's proxy and DKIM selectors go to every
+/// Check; each takes them or ignores them.
 fn request_for<'a>(
     check: &Check,
     name: &'a str,
@@ -151,7 +150,11 @@ fn request_for<'a>(
     options: Options,
     settings: &'a Settings,
 ) -> Request<'a> {
-    let request = Request { proxy: settings.proxy.as_deref(), ..Request::system(name, query, bootstrap) };
+    let request = Request {
+        proxy: settings.proxy.as_deref(),
+        selectors: &settings.selectors,
+        ..Request::system(name, query, bootstrap)
+    };
     if check.takes_chosen_port { Request { tls_port: options.tls_port, ..request } } else { request }
 }
 
@@ -163,15 +166,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         return check.run(&request_for(check, name, query, &bootstrap, options, settings)).await;
     }
     match section {
-        Section::Email => {
-            let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
-            let r = email_auth(resolver, name, &settings.selectors, query).await;
-            if r.answered() {
-                Ok(email_outcome(name, &r))
-            } else {
-                Err(format!("no answer from DNS resolver {resolver}"))
-            }
-        }
         Section::Web => {
             let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
             let opts = WebOptions { timeout: query, ..WebOptions::default() };
@@ -204,23 +198,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
-}
-
-pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
-    let mut facts: Vec<Fact> = r.mx_hosts.iter().map(|h| Fact::new("MX", h)).collect();
-    facts.extend(r.spf.records.iter().map(|s| Fact::new("SPF", s)));
-    if r.spf.tree.is_some() {
-        facts.push(Fact::new("SPF lookups", format!("{} of {}", r.spf.lookups, zombo_core::email_auth::MAX_LOOKUPS)));
-    }
-    facts.extend(r.dmarc.records.iter().map(|s| Fact::new("DMARC", s)));
-    let mut details = vec![];
-    for k in &r.dkim.keys {
-        let bits = k.bits.map(|b| format!(" {b} bits")).unwrap_or_default();
-        let revoked = if k.revoked { ", revoked" } else { "" };
-        details.push(Fact::new(format!("DKIM {}", k.selector), format!("{}{bits}{revoked}", k.key_type)));
-    }
-    details.push(Fact::new("DKIM selectors tried", r.dkim.checked.len().to_string()));
-    Outcome { findings: email_findings(domain, r), facts, details_title: "DKIM keys", details }
 }
 
 pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
@@ -382,6 +359,20 @@ mod tests {
         let request =
             request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
         assert_eq!(request.proxy, None);
+    }
+
+    #[test]
+    fn every_check_is_handed_the_rep_dkim_selectors() {
+        let settings = Settings { selectors: vec!["acme2024".into(), "mail.k1".into()], ..Settings::default() };
+        let request = |c| request_for(c, "example.com", Duration::from_secs(1), &[], Options::default(), &settings);
+        for section in Section::ALL {
+            if let Some(check) = section.check() {
+                assert_eq!(request(check).selectors, ["acme2024", "mail.k1"], "{section:?}");
+            }
+        }
+        let none = Settings::default();
+        let bare = request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
+        assert!(bare.selectors.is_empty());
     }
 
     #[test]

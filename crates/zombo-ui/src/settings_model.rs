@@ -279,7 +279,6 @@ fn default_budget(section: Section) -> Budget {
         return Budget { whole: check.budget.0, query: check.budget.1 };
     }
     let (whole, query) = match section {
-        Section::Email => (25, 4),
         Section::Web => (12, 10),
         Section::Smtp => (40, 40),
         _ => (20, 4),

@@ -16,12 +16,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
         ],
         Section::Delegation => zombo_core::delegation::CHECK.blind_spots,
         Section::Dnssec => zombo_core::dnssec::CHECK.blind_spots,
-        Section::Email => &[
-            "Recipient-side filtering: spam filters, quarantine and allow lists decide delivery after DNS passes.",
-            "Mail that was really sent: DMARC reports and mail logs hold that, DNS does not.",
-            "DKIM keys under a selector this Check did not try.",
-            "The settings inside the sending service's own console.",
-        ],
+        Section::Email => zombo_core::email_auth::CHECK.blind_spots,
         Section::Web => &[
             "Application logs and errors behind the page.",
             "The CDN's origin server: the Check sees what the CDN returns, not what is behind it.",

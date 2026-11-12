@@ -1,4 +1,4 @@
-use zombo_core::{blacklist, check::Check, delegation, dnssec, ports, rdns, registration, tls};
+use zombo_core::{blacklist, check::Check, delegation, dnssec, email_auth, ports, rdns, registration, tls};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -44,11 +44,11 @@ impl Section {
         match self {
             Section::Summary => "Summary",
             Section::Dns => "DNS",
-            Section::Email => "Email",
             Section::Web => "Web",
             Section::Smtp => "SMTP banner",
             Section::Delegation
             | Section::Dnssec
+            | Section::Email
             | Section::Tls
             | Section::Registration
             | Section::TlsPort
@@ -66,6 +66,7 @@ impl Section {
         match self {
             Section::Delegation => Some(&delegation::CHECK),
             Section::Dnssec => Some(&dnssec::CHECK),
+            Section::Email => Some(&email_auth::CHECK),
             Section::Tls => Some(&tls::CHECK),
             Section::Registration => Some(&registration::CHECK),
             Section::TlsPort => Some(&tls::ON_PORT),
@@ -146,6 +147,7 @@ mod tests {
             [
                 &Section::Delegation,
                 &Section::Dnssec,
+                &Section::Email,
                 &Section::Tls,
                 &Section::Registration,
                 &Section::Rdns,
