@@ -36,7 +36,7 @@ use zombo_core::{
     tls_extras::{caa_findings, check_caa, ocsp_findings},
 };
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo checks [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     zombo_core::resolver::parse_addr(v)
@@ -73,6 +73,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("ports") => ports(it).await,
         Some("smtp") => smtp(it).await,
         Some("caa") => caa(it).await,
+        Some("checks") => checks(it),
         _ => Err(USAGE.into()),
     }
 }
@@ -1136,5 +1137,51 @@ async fn caa(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     println!();
     print_findings(&findings);
+    Ok(())
+}
+
+const CHECKS_USAGE: &str = "usage: zombo checks [--json]";
+
+fn kind_name(k: Kind) -> String {
+    format!("{k:?}").to_lowercase()
+}
+
+fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let mut json = false;
+    for a in it {
+        match a.as_str() {
+            "--json" => json = true,
+            _ => return Err(CHECKS_USAGE.into()),
+        }
+    }
+    let kinds = |c: &zombo_core::check::Check| c.accepts.iter().map(|k| kind_name(*k)).collect::<Vec<_>>();
+    if json {
+        let rows: Vec<_> = zombo_core::check::ALL
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id,
+                    "label": c.label,
+                    "accepts": kinds(c),
+                    "automatic": !c.is_on_demand(),
+                    "query_secs": c.budget.1.as_secs_f64(),
+                    "whole_secs": c.budget.0.as_secs_f64(),
+                })
+            })
+            .collect();
+        return print_json(&serde_json::Value::Array(rows));
+    }
+    for c in zombo_core::check::ALL {
+        let when = if c.is_on_demand() { "on demand" } else { "automatic" };
+        println!(
+            "{:<13} {:<20} {:<28} {:<10} {}s per query, {}s whole",
+            c.id,
+            c.label,
+            kinds(c).join(","),
+            when,
+            c.budget.1.as_secs_f64(),
+            c.budget.0.as_secs_f64()
+        );
+    }
     Ok(())
 }
