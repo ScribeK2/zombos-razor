@@ -18,8 +18,7 @@ use pki::{Ca, NOW};
 use scripted::Reply;
 use zombo_core::{
     Finding, Severity,
-    tls::{TlsResult, check_tls_via},
-    tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
+    tls::{CaaResult, TlsResult, caa_findings, check_caa, check_tls_via, ocsp_findings},
 };
 
 const HOST: &str = "www.example.test";

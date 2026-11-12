@@ -124,6 +124,6 @@ pub fn tls_chain(data: &[u8]) -> Vec<Finding> {
         ocsp_stapled: false,
     };
     let mut f = crate::tls::tls_findings("example.com", 443, &r);
-    f.extend(crate::tls_extras::ocsp_findings("example.com", 443, &r));
+    f.extend(crate::tls::ocsp_findings("example.com", 443, &r));
     f
 }
