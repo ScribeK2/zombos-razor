@@ -50,7 +50,7 @@ impl Outcome {
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
 /// zone. The last nine fields are what a test swaps for a fake, or the rep's settings fill in;
 /// production takes them from [`Request::system`]. Each is read by one Check family: the first three
-/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS (and the Web Check's HTTPS port), the
+/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS (and, when `dial` is set, the Web Check's HTTPS port), the
 /// fifth by the Checks that ask this machine's resolvers (the Web Check's hosting questions too),
 /// `proxy` and `endpoints` by Registration, `selectors` by Email, `dial` by Web.
 ///

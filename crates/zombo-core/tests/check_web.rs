@@ -116,6 +116,26 @@ async fn the_path_and_query_of_the_target_are_asked_and_the_scheme_and_fragment_
 }
 
 #[tokio::test]
+async fn the_requests_tls_port_is_where_https_is_tried_first() {
+    let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let https = ln.local_addr().unwrap().port();
+    let tried = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = tried.clone();
+    let listener = tokio::spawn(async move {
+        while let Ok((s, _)) = ln.accept().await {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            drop(s);
+        }
+    });
+    let rig = Rig { https, ..Rig::new("", |_| Resp::ok("ok")).await };
+    let o = rig.run("www.example.com", T).await.unwrap();
+    listener.abort();
+    assert!(tried.load(std::sync::atomic::Ordering::SeqCst) >= 1, "nothing dialled the request's tls_port");
+    assert!(o.facts.iter().any(|f| f.key == "HTTPS error"), "{:?}", rows(&o.facts));
+    assert_eq!(rows(&o.facts)[0], format!("URL: {}", rig.url("/")), "the plain HTTP fallback answered");
+}
+
+#[tokio::test]
 async fn an_invalid_target_gives_the_parse_text_and_asks_nothing() {
     let rig = Rig::new("", |_| Resp::ok("ok")).await;
     for bad in ["192.0.2.1", "localhost", ""] {
@@ -150,11 +170,15 @@ async fn the_requests_proxy_is_not_used() {
 async fn the_requests_query_bounds_the_whole_check() {
     let rig = Rig::new("", |_| Resp { delay: Duration::from_secs(20), ..Resp::ok("late") }).await;
     let started = Instant::now();
-    let o = rig.run("www.example.com", Duration::from_millis(300)).await.unwrap();
+    let o = rig.run("https://www.example.com/#frag", Duration::from_millis(300)).await.unwrap();
     assert!(started.elapsed() < Duration::from_secs(4), "the request's query was not used: {:?}", started.elapsed());
     assert!(found(&o).contains(&("website_inspection_unreachable", Severity::Critical)), "{:?}", found(&o));
     assert_eq!(rows(&o.facts)[0], format!("URL: {}", rig.url("/")));
     assert!(o.facts.iter().all(|f| f.key != "Status"));
+    // The findings name the host the Check parsed, not what the rep typed.
+    let unreachable = o.findings.iter().find(|f| f.code == "website_inspection_unreachable").unwrap();
+    let rec = unreachable.recommendation.as_deref().unwrap();
+    assert!(rec.contains("DNS points www.example.com at it"), "{rec}");
 }
 
 #[test]
