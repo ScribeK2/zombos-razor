@@ -278,11 +278,7 @@ fn default_budget(section: Section) -> Budget {
     if let Some(check) = section.check() {
         return Budget { whole: check.budget.0, query: check.budget.1 };
     }
-    let (whole, query) = match section {
-        Section::Smtp => (40, 40),
-        _ => (20, 4),
-    };
-    Budget { whole: secs(whole), query: secs(query) }
+    Budget { whole: secs(20), query: secs(4) }
 }
 
 /// The settings timeout, or the Check's default. The query limit scales with the whole limit.

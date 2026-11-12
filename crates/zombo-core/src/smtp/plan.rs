@@ -1,16 +1,15 @@
 //! Which host the SMTP Check dials. A domain's mail goes to its MX hosts, so the Check asks for
 //! them first and runs against the most preferred host that answers. A host name or an IP
-//! address is dialled as typed. No UI here: the dialling itself is injected.
+//! address is dialled as typed. The dialling itself is injected.
 
 use std::future::Future;
 
-use zombo_core::{
+use super::{Reach, SmtpResult};
+use crate::{
+    check::Fact,
     resolver::{Mx, Resolver},
-    smtp::{Reach, SmtpResult},
     target::Kind,
 };
-
-use crate::outcome::Fact;
 
 /// The ports a rep can pick, in the order the field shows them.
 pub const PORTS: [u16; 3] = [25, 587, 465];
@@ -18,9 +17,10 @@ pub const PORTS: [u16; 3] = [25, 587, 465];
 /// Hosts tried before giving up on finding one that answers. Each silent host costs a connect timeout.
 const MAX_TRIES: usize = 3;
 
-/// What the shell asks the Check to do, taken from the tab.
+/// What the Check asks of the plan: the port, and whether the name is a mail domain that goes
+/// through its MX hosts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Request {
+pub(super) struct Request {
     pub port: u16,
     pub via_mx: bool,
 }
@@ -31,15 +31,9 @@ impl Request {
     }
 }
 
-impl Default for Request {
-    fn default() -> Self {
-        Request { port: PORTS[0], via_mx: false }
-    }
-}
-
 /// How the dialled host was chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Source {
+pub(super) enum Source {
     /// The name was dialled as typed.
     Typed,
     /// The domain has no MX record, so its own name was dialled (RFC 5321 implicit MX).
@@ -53,7 +47,7 @@ pub enum Source {
 }
 
 #[derive(Debug, Clone)]
-pub struct Plan {
+pub(super) struct Plan {
     pub mx: Vec<Mx>,
     pub host: String,
     pub source: Source,
@@ -65,7 +59,7 @@ fn answered(r: &SmtpResult) -> bool {
 }
 
 /// Resolve MX first when `req` asks for it, then dial hosts in preference order until one answers.
-pub async fn run<F, Fut>(name: &str, req: Request, resolver: &Resolver, dial: F) -> Plan
+pub(super) async fn run<F, Fut>(name: &str, req: Request, resolver: &Resolver, dial: F) -> Plan
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = SmtpResult>,
@@ -108,7 +102,7 @@ where
 }
 
 /// The lines that say where the Check went and why, shown above the server's own answer.
-pub fn facts(p: &Plan) -> Vec<Fact> {
+pub(super) fn facts(p: &Plan) -> Vec<Fact> {
     let mut out: Vec<Fact> = p.mx.iter().map(|m| Fact::new("MX", format!("{} {}", m.preference, m.host))).collect();
     let chosen = match &p.source {
         Source::Typed => return out,
@@ -126,9 +120,8 @@ pub fn facts(p: &Plan) -> Vec<Fact> {
 mod tests {
     use std::sync::Mutex;
 
-    use zombo_core::smtp::{SmtpOptions, check_smtp};
-
     use super::*;
+    use crate::smtp::{SmtpOptions, check_smtp};
 
     /// A real result from a local port nobody listens on, with the reach set by the test.
     async fn result(host: &str, reach: Reach) -> SmtpResult {

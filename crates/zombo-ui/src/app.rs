@@ -272,7 +272,7 @@ impl Shell {
         }
         let key = key.to_string();
         let Some(name) = checks::name_for(section, &tab.target) else { return };
-        let options = tab.options();
+        let (kind, port) = (tab.target.kind, tab.chosen_port(section));
         if section == Section::Dns {
             let settings = self.config.settings.clone();
             let (mut rx, cancel) = runtime::stream(move |tx| checks::run_propagation(name, settings, tx));
@@ -298,8 +298,8 @@ impl Shell {
             .detach();
             return;
         }
-        let options = match options {
-            Ok(o) => o,
+        let port = match port {
+            Ok(p) => p,
             Err(e) => {
                 self.toast = Some((e.into(), Instant::now()));
                 return;
@@ -309,7 +309,7 @@ impl Shell {
             tab.run_mut(section).apply(CheckEvent::Started);
         }
         let settings = self.config.settings.clone();
-        let (mut rx, cancel) = runtime::stream(move |tx| checks::run_section(section, name, settings, options, tx));
+        let (mut rx, cancel) = runtime::stream(move |tx| checks::run_section(section, name, kind, settings, port, tx));
         self.jobs.insert((key.clone(), section), cancel);
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.recv().await {

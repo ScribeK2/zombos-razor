@@ -341,19 +341,19 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `rdns_no_address` | crates/zombo-core/src/rdns.rs:204 | warning | `zombo-core/tests/rdns.rs::a_host_with_no_address_is_reported` |
 | `rdns_no_ptr` | crates/zombo-core/src/rdns.rs:237 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+3) |
 | `rdns_not_confirmed` | crates/zombo-core/src/rdns.rs:276 | warning | `zombo-core/tests/rdns.rs::a_ptr_resolving_to_another_address_fails_forward_confirmation`, `zombo-core/tests/rdns.rs::a_ptr_name_with_no_address_fails_forward_confirmation` (+2) |
-| `smtp_auth_before_tls` | crates/zombo-core/src/smtp/findings.rs:161 | warning | `zombo-core/tests/smtp.rs::auth_offered_before_tls_is_a_warning` |
-| `smtp_banner_name_mismatch` | crates/zombo-core/src/smtp/findings.rs:123 | info | `zombo-core/tests/smtp.rs::the_greeting_name_is_compared_with_the_expected_names` |
-| `smtp_banner_rejected` | crates/zombo-core/src/smtp/findings.rs:111 | warning | `zombo-core/tests/smtp.rs::a_greeting_that_is_not_220_stops_the_dialogue` |
-| `smtp_connect_failed` | crates/zombo-core/src/smtp/findings.rs:72 | warning | NONE |
-| `smtp_no_answer` | crates/zombo-core/src/smtp/findings.rs:45 | info | `zombo-core/tests/smtp.rs::silence_on_a_mail_port_says_no_answer_and_names_the_network` |
-| `smtp_no_greeting` | crates/zombo-core/src/smtp/findings.rs:85 | warning | `zombo-core/tests/smtp.rs::a_silent_server_is_reported_as_no_greeting` |
-| `smtp_no_route` | crates/zombo-core/src/smtp/findings.rs:63 | info | NONE |
-| `smtp_no_starttls` | crates/zombo-core/src/smtp/findings.rs:135 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/smtp.rs::a_server_without_starttls_is_flagged_and_quit_politely` |
-| `smtp_protocol_error` | crates/zombo-core/src/smtp/findings.rs:99 | warning | `zombo-core/tests/smtp.rs::a_server_that_rejects_ehlo_is_reported` |
-| `smtp_refused` | crates/zombo-core/src/smtp/findings.rs:54 | warning | `zombo-core/tests/smtp.rs::a_closed_port_is_refused_not_silent` |
-| `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:142 | warning | `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code`, `zombo-core/tests/smtp.rs::a_failed_handshake_after_starttls_is_reported` |
-| `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:92 | critical | NONE |
-| `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:177 | ok | `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail`, `zombo-core/tests/smtp.rs::implicit_tls_reads_the_greeting_inside_the_tunnel` |
+| `smtp_auth_before_tls` | crates/zombo-core/src/smtp/findings.rs:162 | warning | `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings`, `zombo-core/tests/smtp.rs::auth_offered_before_tls_is_a_warning` |
+| `smtp_banner_name_mismatch` | crates/zombo-core/src/smtp/findings.rs:124 | info | `zombo-core/tests/check_smtp.rs::the_greeting_is_compared_with_the_ptr_names_of_the_address_that_answered`, `zombo-core/tests/check_smtp.rs::a_machine_with_no_resolver_skips_the_ptr_step_even_when_the_bootstrap_resolvers_know_one` (+2) |
+| `smtp_banner_rejected` | crates/zombo-core/src/smtp/findings.rs:112 | warning | `zombo-core/tests/smtp.rs::a_greeting_that_is_not_220_stops_the_dialogue` |
+| `smtp_connect_failed` | crates/zombo-core/src/smtp/findings.rs:73 | warning | NONE |
+| `smtp_no_answer` | crates/zombo-core/src/smtp/findings.rs:46 | info | `zombo-core/tests/smtp.rs::silence_on_a_mail_port_says_no_answer_and_names_the_network` |
+| `smtp_no_greeting` | crates/zombo-core/src/smtp/findings.rs:86 | warning | `zombo-core/tests/smtp.rs::a_silent_server_is_reported_as_no_greeting` |
+| `smtp_no_route` | crates/zombo-core/src/smtp/findings.rs:64 | info | NONE |
+| `smtp_no_starttls` | crates/zombo-core/src/smtp/findings.rs:136 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings` (+1) |
+| `smtp_protocol_error` | crates/zombo-core/src/smtp/findings.rs:100 | warning | `zombo-core/tests/smtp.rs::a_server_that_rejects_ehlo_is_reported` |
+| `smtp_refused` | crates/zombo-core/src/smtp/findings.rs:55 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/check_smtp.rs::only_the_first_three_mx_hosts_are_tried_and_the_report_is_about_the_most_preferred` (+1) |
+| `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:143 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code` (+1) |
+| `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:93 | critical | NONE |
+| `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:178 | ok | `zombo-core/tests/check_smtp.rs::a_server_that_upgrades_gives_the_tls_rows_and_the_after_starttls_details`, `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail` (+1) |
 | `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls.rs:562 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
 | `ssl_inspection_weak_key` | crates/zombo-core/src/tls.rs:633 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
 | `ssl_inspection_weak_signature` | crates/zombo-core/src/tls.rs:642 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |

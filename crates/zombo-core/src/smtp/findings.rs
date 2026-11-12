@@ -4,8 +4,9 @@ use std::borrow::Cow;
 
 use time::OffsetDateTime;
 
-use super::{Mode, Reach, SmtpResult, Stage, Starttls};
+use super::{Extensions, Mode, Reach, SmtpResult, Stage, Starttls};
 use crate::{
+    check::{Fact, Outcome},
     email_auth::clip,
     finding::{Finding, Severity},
     tls::tls_findings_at,
@@ -182,4 +183,99 @@ pub fn smtp_findings_at(r: &SmtpResult, expect_names: &[String], now: OffsetDate
         ));
     }
     out
+}
+
+fn extensions_text(e: &Extensions) -> String {
+    let mut parts = vec![];
+    for (on, name) in [(e.starttls, "STARTTLS"), (e.pipelining, "PIPELINING"), (e.eight_bit_mime, "8BITMIME")] {
+        if on {
+            parts.push(name.to_string());
+        }
+    }
+    if let Some(n) = e.size {
+        parts.push(format!("SIZE {n}"));
+    }
+    if !e.auth.is_empty() {
+        parts.push(format!("AUTH {}", e.auth.join(" ")));
+    }
+    parts.extend(e.other.iter().cloned());
+    if parts.is_empty() { "nothing".into() } else { parts.join(", ") }
+}
+
+pub(super) fn outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
+    let peer = r.peer.map(|p| format!(" ({p})")).unwrap_or_default();
+    let mut facts = vec![
+        Fact::new("Server", format!("{}:{}{peer}", r.host, r.port)),
+        Fact::new(
+            "Reached",
+            match r.reach {
+                Reach::Answered => "answered",
+                Reach::NoAnswer => "no answer",
+                Reach::Refused => "refused",
+                Reach::NoRoute => "no route from this network",
+                Reach::Failed => "failed",
+            },
+        ),
+    ];
+    if let Some(b) = &r.banner {
+        facts.push(Fact::new("Banner", format!("{} {}", b.code, b.text)));
+    }
+    if let Some(e) = &r.extensions {
+        facts.push(Fact::new("Offers", extensions_text(e)));
+    }
+    facts.push(Fact::new(
+        "STARTTLS",
+        match &r.starttls {
+            Starttls::NotApplicable => "not used, the port starts TLS at once".to_string(),
+            Starttls::NotAttempted => "not tried".to_string(),
+            Starttls::NotOffered => "not offered".to_string(),
+            Starttls::Refused { code, text } => format!("refused: {code} {text}"),
+            Starttls::HandshakeFailed(why) => format!("handshake failed: {why}"),
+            Starttls::Upgraded => "upgraded to TLS".to_string(),
+        },
+    ));
+    if let Some(t) = &r.tls {
+        facts.push(Fact::new("Protocol", &t.version));
+        facts.push(Fact::new("Cipher", &t.cipher));
+        facts.push(Fact::new("Trust", format!("{:?}", t.trust)));
+        if let Some(leaf) = t.chain.first() {
+            facts.push(Fact::new("Certificate", format!("{}, expires {}", leaf.subject, leaf.not_after)));
+        }
+    }
+    if let Some(f) = &r.failure {
+        facts.push(Fact::new("Stopped", format!("{:?}: {}", f.stage, f.message)));
+    }
+    let details = r
+        .extensions_after_tls
+        .as_ref()
+        .map(|e| vec![Fact::new("Offers after STARTTLS", extensions_text(e))])
+        .unwrap_or_default();
+    Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_smtp_server_that_never_answered_is_reported_as_no_answer_with_the_cores_finding() {
+        let r = SmtpResult {
+            host: "mail.example.com".into(),
+            port: 25,
+            mode: Mode::Starttls,
+            reach: Reach::NoAnswer,
+            peer: None,
+            banner: None,
+            extensions: None,
+            starttls: Starttls::NotAttempted,
+            tls: None,
+            extensions_after_tls: None,
+            failure: None,
+        };
+        let o = outcome(&r, &[]);
+        let lines = o.records();
+        assert!(lines.contains(&"Reached: no answer".to_string()));
+        assert!(lines.contains(&"STARTTLS: not tried".to_string()));
+        assert!(!o.findings.is_empty());
+    }
 }

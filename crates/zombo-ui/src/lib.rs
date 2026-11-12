@@ -23,7 +23,6 @@ pub mod runtime;
 pub mod section;
 pub mod session;
 pub mod settings_model;
-pub mod smtp_plan;
 pub mod status;
 pub mod theme;
 pub mod this_machine;
