@@ -14,17 +14,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Answers given only to some networks (split-horizon DNS) or regions beyond the resolvers asked.",
             "The DNS provider's panel: records saved there but not yet served.",
         ],
-        Section::Delegation => zombo_core::delegation::CHECK.blind_spots,
-        Section::Dnssec => zombo_core::dnssec::CHECK.blind_spots,
-        Section::Email => zombo_core::email_auth::CHECK.blind_spots,
-        Section::Web => zombo_core::web::CHECK.blind_spots,
-        Section::Tls => zombo_core::tls::CHECK.blind_spots,
-        Section::Registration => zombo_core::registration::CHECK.blind_spots,
-        Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
-        Section::Ports => zombo_core::ports::CHECK.blind_spots,
-        Section::Smtp => zombo_core::smtp::CHECK.blind_spots,
-        Section::TlsPort => zombo_core::tls::ON_PORT.blind_spots,
-        Section::Blacklist => zombo_core::blacklist::CHECK.blind_spots,
+        s => s.check().map_or(&[], |check| check.blind_spots),
     }
 }
 

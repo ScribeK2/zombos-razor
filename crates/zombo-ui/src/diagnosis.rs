@@ -337,14 +337,14 @@ impl Tab {
         self.tls_port.choose(next);
     }
 
-    /// The port this section's own picker holds. A typed TLS port that is not a port is an error
-    /// for the TLS on a port section only, so that Check never runs on a port the rep did not ask
-    /// for. A section with no picker gets the first TLS chip, which no Check reads.
-    pub fn chosen_port(&self, section: Section) -> Result<u16, &'static str> {
+    /// The port this section's own picker holds, or `None` for a section with no picker. A typed
+    /// TLS port that is not a port is an error for the TLS on a port section only, so that Check
+    /// never runs on a port the rep did not ask for.
+    pub fn chosen_port(&self, section: Section) -> Result<Option<u16>, &'static str> {
         match section {
-            Section::Smtp => Ok(self.smtp_port),
-            Section::TlsPort => self.tls_port.to_run(),
-            _ => Ok(crate::tls_port::PRESETS[0]),
+            Section::Smtp => Ok(Some(self.smtp_port)),
+            Section::TlsPort => self.tls_port.to_run().map(Some),
+            _ => Ok(None),
         }
     }
 
@@ -800,16 +800,16 @@ mod tests {
     fn the_tls_port_runs_what_was_chosen_and_never_a_bad_typed_port() {
         let mut t = tab();
         let port = |t: &Tab| t.chosen_port(Section::TlsPort);
-        assert_eq!(port(&t), Ok(443));
+        assert_eq!(port(&t), Ok(Some(443)));
         t.step_tls_port(1);
-        assert_eq!(port(&t), Ok(465));
+        assert_eq!(port(&t), Ok(Some(465)));
         t.step_tls_port(-1);
         t.step_tls_port(-1);
-        assert_eq!(port(&t), Ok(8443));
+        assert_eq!(port(&t), Ok(Some(8443)));
         t.tls_port.typed("0");
         assert_eq!(port(&t), Err(crate::tls_port::INVALID));
         t.tls_port.typed("2525");
-        assert_eq!(port(&t), Ok(2525));
+        assert_eq!(port(&t), Ok(Some(2525)));
     }
 
     #[test]
@@ -818,9 +818,9 @@ mod tests {
         t.tls_port.typed("0");
         assert_eq!(t.chosen_port(Section::TlsPort), Err(crate::tls_port::INVALID));
         t.step_port(1);
-        assert_eq!(t.chosen_port(Section::Smtp), Ok(587));
-        for s in [Section::Tls, Section::Web, Section::Ports, Section::Blacklist] {
-            assert_eq!(t.chosen_port(s), Ok(443), "{s:?}");
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(Some(587)));
+        for s in [Section::Tls, Section::Web, Section::Ports, Section::Blacklist, Section::Dns, Section::Summary] {
+            assert_eq!(t.chosen_port(s), Ok(None), "{s:?}");
         }
     }
 
@@ -937,14 +937,14 @@ mod tests {
     #[test]
     fn the_smtp_port_steps_through_the_three_ports() {
         let mut t = tab();
-        assert_eq!(t.chosen_port(Section::Smtp), Ok(25));
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(Some(25)));
         t.step_port(1);
         t.step_port(1);
         assert_eq!(t.smtp_port, 465);
         t.step_port(1);
         assert_eq!(t.smtp_port, 25);
         t.step_port(-1);
-        assert_eq!(t.chosen_port(Section::Smtp), Ok(465));
+        assert_eq!(t.chosen_port(Section::Smtp), Ok(Some(465)));
     }
 
     #[test]
