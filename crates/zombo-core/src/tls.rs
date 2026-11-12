@@ -39,8 +39,9 @@ use x509_parser::{
 };
 
 use crate::{
-    check::{Check, Fact, Outcome, Request},
+    check::{Check, Fact, OnDemand, Outcome, Request},
     finding::{Finding, Severity},
+    target::Kind,
     tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
 };
 
@@ -685,32 +686,41 @@ struct Observed {
 const LIMITS: (Duration, Duration) = (Duration::from_secs(10), Duration::from_secs(8));
 
 /// The automatic TLS row: the handshake and the CAA records, on `Request::tls_port`.
-pub static CHECK: Check = Check::new(
-    LIMITS,
-    &["ssl_", "tls_", "caa_"],
-    &[
+pub static CHECK: Check = Check {
+    label: "TLS",
+    automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
+    budget: LIMITS,
+    owns: &["ssl_", "tls_", "caa_"],
+    blind_spots: &[
         "Other ports: the TLS on a port Check asks for those.",
         "Protocol versions below TLS 1.2: this tool speaks only 1.2 and 1.3.",
         "Cipher suites the server accepts but did not choose.",
         "Revocation at the CA: only an OCSP response stapled by the server is seen.",
     ],
-    false,
-    |request| Box::pin(observe(request, true)),
-);
+    ..Check::base(|request| Box::pin(observe(request, true)))
+};
 
 /// The on-demand TLS row: the handshake alone, on the port the rep picked. It emits `ssl_` and
 /// `tls_` findings too, but [`CHECK`] owns those prefixes.
-pub static ON_PORT: Check = Check::new(
-    LIMITS,
-    &[],
-    &[
+pub static ON_PORT: Check = Check {
+    label: "TLS on a port",
+    on_demand: Some(OnDemand {
+        run_label: "Run TLS check",
+        what: "Opens a TLS connection to one port of the target and reads the certificate and protocol it presents. It sends no mail and no web request.",
+        contacts: "The target's own server, on the port you pick below: its first address, found by this machine's resolver. The target sees one TLS handshake.",
+        note: Some(
+            "Port 443 is the website. Mail servers present their own certificate on 465, 993 and 995. A server that starts TLS with STARTTLS on 25 or 587 is checked in the SMTP banner check.",
+        ),
+    }),
+    budget: LIMITS,
+    blind_spots: &[
         "Services that start TLS after a plain greeting (STARTTLS): the SMTP banner check covers those.",
         "A server that requires a client certificate.",
         "Protocol versions below TLS 1.2, and revocation at the CA.",
     ],
-    true,
-    |request| Box::pin(observe(request, false)),
-);
+    takes_chosen_port: true,
+    ..Check::base(|request| Box::pin(observe(request, false)))
+};
 
 async fn observe(request: &Request<'_>, with_caa: bool) -> Result<Outcome, String> {
     let (name, port, query) = (request.name, request.tls_port, request.query);
@@ -785,6 +795,17 @@ fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Outcome
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_descriptors_say_how_each_row_is_named_when_it_runs_and_what_it_tells_the_rep() {
+        assert_eq!((CHECK.label, ON_PORT.label), ("TLS", "TLS on a port"));
+        assert_eq!(CHECK.automatic_for, [Kind::Domain, Kind::Hostname, Kind::Email]);
+        assert!(!CHECK.is_on_demand() && CHECK.on_demand.is_none());
+        assert!(ON_PORT.is_on_demand());
+        let brief = ON_PORT.on_demand.unwrap();
+        assert_eq!(brief.run_label, "Run TLS check");
+        assert!(brief.what.starts_with("Opens a TLS connection") && brief.contacts.contains("on the port you pick"));
+    }
 
     fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
         tls_outcome_on(host, 443, r)

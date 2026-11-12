@@ -400,7 +400,7 @@ impl Shell {
 
     fn start_automatic(&mut self, cx: &mut Context<Self>) {
         let Some(kind) = self.ws.current().map(|t| t.target.kind) else { return };
-        for &section in checks::automatic(kind) {
+        for section in checks::automatic(kind) {
             self.start_section(section, cx);
         }
     }

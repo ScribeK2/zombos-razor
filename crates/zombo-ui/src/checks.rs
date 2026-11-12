@@ -27,13 +27,20 @@ use crate::{
 };
 
 /// The Checks that run on their own when a target is submitted (DESIGN.md, "Checks per target kind").
-pub fn automatic(kind: Kind) -> &'static [Section] {
+pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
-    match kind {
-        Kind::Domain | Kind::Email => &[Dns, Delegation, Dnssec, Email, Web, Tls, Registration],
-        Kind::Hostname => &[Dns, Web, Tls, Registration],
+    let listed: &[Section] = match kind {
+        Kind::Domain | Kind::Email => &[Dns, Delegation, Email, Web, Registration],
+        Kind::Hostname => &[Dns, Web, Registration],
         Kind::Ip => &[Rdns],
-    }
+    };
+    Section::ALL
+        .into_iter()
+        .filter(|s| match s.check() {
+            Some(check) => check.automatic_for.contains(&kind),
+            None => listed.contains(s),
+        })
+        .collect()
 }
 
 /// Whether this build has a Check behind the rail section.

@@ -137,6 +137,25 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 - [ ] Not seen live: a Spamhaus 'refused' answer (Spamhaus answered normally through 8.8.8.8 today); web `--origin` against a real origin that differs from its CDN
 - [ ] UI note: the `dnssec` nameserver list repeats identical lines per address; collapse identical rows in the UI
 
+## Check registry refactor
+
+Branch: `refactor/section-registry`. Goal: a new Check costs one core module plus a registry line, and the UI holds no per-Check knowledge. A descriptor (`check::Check`, written as `Check { label: "X", ..Check::base(run) }`) holds the label, the automatic target kinds (empty means on demand), the on-demand brief and run label, the default budget, the finding prefixes and the blind spots.
+
+End state: `Section` stays a small enum used as an index. A new Check adds one variant line, one `ALL` line and one `check()` arm in `section.rs`. `Section` is not built from the registry. DNS propagation, Summary and Evidence stay outside the registry.
+
+`crates/zombo-ui/tests/section_facts.rs` pins every fact of the 13 sections as literals. It must pass unchanged after every step.
+
+- [x] Step 1: characterization test; DNSSEC, TLS and TLS on a port read their label, automatic kinds, brief and run label from their descriptors
+- [ ] Rdns
+- [ ] Blacklist
+- [ ] Delegation
+- [ ] Registration
+- [ ] Ports
+- [ ] Email
+- [ ] Web
+- [ ] Smtp, last and alone
+- [ ] Remove the leftover `Section` tables (`label`, `is_on_demand`, the `automatic` lists, the `ondemand` match arms, `blind_spots` and `default_budget` matches)
+
 ## Network egress (what the app contacts), to document in `docs/network-egress.md`
 
 - [x] Written: `docs/network-egress.md` (the target's own servers; the resolvers (public list, system resolver, nameservers found by discovery); RDAP bootstrap bases and registry WHOIS servers (port 43); Team Cymru DNS (`*.asn.cymru.com`); the DNSBL zones in the blacklist table; the release endpoint for updates. Nothing else, no telemetry)

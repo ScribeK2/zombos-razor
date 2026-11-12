@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{finding::Finding, propagation::Vantage, text::single_line};
+use crate::{finding::Finding, propagation::Vantage, target::Kind, text::single_line};
 
 /// One line of a Check's data: a label and a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,9 +73,28 @@ impl<'a> Request<'a> {
 
 type Running<'a> = Pin<Box<dyn Future<Output = Result<Outcome, String>> + Send + 'a>>;
 
-/// One Check as data: its default limits, the finding-code prefixes it owns, what it cannot see
-/// from this machine, and how to run it. A caller needs no knowledge of which Check it holds.
+/// What the rep reads before an on-demand Check runs: what it does, whom it contacts, and the button text.
+#[derive(Debug, Clone, Copy)]
+pub struct OnDemand {
+    pub run_label: &'static str,
+    pub what: &'static str,
+    pub contacts: &'static str,
+    pub note: Option<&'static str>,
+}
+
+/// One Check as data: how it is named, when it runs, its default limits, the finding-code prefixes
+/// it owns, what it cannot see from this machine, and how to run it. A caller needs no knowledge
+/// of which Check it holds.
+///
+/// Write a descriptor as `Check { label: "X", ..Check::base(run) }`, so that a new field only
+/// touches `base` and breaks no descriptor.
 pub struct Check {
+    /// The name of the Check's section on the rail.
+    pub label: &'static str,
+    /// The target kinds this Check runs on by itself. Empty means it runs only when the rep asks.
+    pub automatic_for: &'static [Kind],
+    /// What an on-demand Check tells the rep before it runs. `None` for an automatic Check.
+    pub on_demand: Option<OnDemand>,
     /// Default `(whole, per query)` limits.
     pub budget: (Duration, Duration),
     /// Finding-code prefixes this Check emits.
@@ -84,18 +103,26 @@ pub struct Check {
     /// True when this Check dials the port the rep picked, not the default. The caller then copies
     /// that port into [`Request::tls_port`].
     pub takes_chosen_port: bool,
-    run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
+    pub(crate) run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
 
 impl Check {
-    pub(crate) const fn new(
-        budget: (Duration, Duration),
-        owns: &'static [&'static str],
-        blind_spots: &'static [&'static str],
-        takes_chosen_port: bool,
-        run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
-    ) -> Check {
-        Check { budget, owns, blind_spots, takes_chosen_port, run }
+    /// A Check that runs by itself on no kind of target, with the default limits and nothing else set.
+    pub(crate) const fn base(run: for<'a> fn(&'a Request<'a>) -> Running<'a>) -> Check {
+        Check {
+            label: "",
+            automatic_for: &[],
+            on_demand: None,
+            budget: (Duration::from_secs(20), Duration::from_secs(4)),
+            owns: &[],
+            blind_spots: &[],
+            takes_chosen_port: false,
+            run,
+        }
+    }
+
+    pub fn is_on_demand(&self) -> bool {
+        self.automatic_for.is_empty()
     }
 
     pub async fn run(&self, request: &Request<'_>) -> Result<Outcome, String> {
