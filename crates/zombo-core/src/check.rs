@@ -46,6 +46,9 @@ impl Outcome {
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
 /// zone. The last four fields are what a test swaps for a fake; production takes them from
 /// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the last by TLS.
+///
+/// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
+/// touches `system` and breaks no caller.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub name: &'a str,

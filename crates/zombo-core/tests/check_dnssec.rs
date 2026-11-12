@@ -29,13 +29,10 @@ async fn run(parent: &str, zone: &str, at: u64) -> Result<Outcome, String> {
     let validating = [Vantage::resolver("Fake", "Test", resolver.addr)];
     CHECK
         .run(&Request {
-            name: &format!("www.{APEX}"),
-            query: T,
-            bootstrap: &[rec.addr],
             ns_port: ns.addr.port(),
             now: UNIX_EPOCH + Duration::from_secs(at),
             validating: Some(&validating),
-            tls_port: 443,
+            ..Request::system(&format!("www.{APEX}"), T, &[rec.addr])
         })
         .await
 }
