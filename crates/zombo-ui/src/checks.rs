@@ -15,8 +15,6 @@ use zombo_core::{
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
-    tls::{TlsResult, check_tls, tls_findings},
-    tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
     web::{WebOptions, WebResult, check_web, parse_web_target, web_findings},
 };
 
@@ -144,12 +142,27 @@ pub async fn run_section(
     let _ = tx.send(event);
 }
 
+/// The automatic TLS row is the service on 443 whatever port the picker holds.
+fn request_for<'a>(
+    section: Section,
+    name: &'a str,
+    query: Duration,
+    bootstrap: &'a [SocketAddr],
+    options: Options,
+) -> Request<'a> {
+    let mut request = Request::system(name, query, bootstrap);
+    if section == Section::TlsPort {
+        request.tls_port = options.tls_port;
+    }
+    request
+}
+
 async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
     let smtp = options.smtp;
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     if let Some(check) = section.check() {
-        return check.run(&Request::system(name, query, &bootstrap)).await;
+        return check.run(&request_for(section, name, query, &bootstrap, options)).await;
     }
     match section {
         Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
@@ -170,14 +183,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             let opts = WebOptions { timeout: query, ..WebOptions::default() };
             Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
         }
-        Section::Tls => {
-            let (tls, caa) = tokio::join!(check_tls(name, 443, query), check_caa(&bootstrap, name, query));
-            tls.map(|r| with_caa(tls_outcome(name, &r), &caa, Some(&r))).map_err(|e| e.to_string())
-        }
-        Section::TlsPort => check_tls(name, options.tls_port, query)
-            .await
-            .map(|r| tls_outcome_on(name, options.tls_port, &r))
-            .map_err(|e| e.to_string()),
         Section::Registration => {
             check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
                 .await
@@ -300,60 +305,6 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
         })
         .collect();
     Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
-}
-
-pub fn tls_outcome(host: &str, r: &TlsResult) -> Outcome {
-    tls_outcome_on(host, 443, r)
-}
-
-/// The TLS section's rows and findings for a handshake on any port. Off 443 the port is the
-/// first row, so a copied section says which service it describes.
-pub fn tls_outcome_on(host: &str, port: u16, r: &TlsResult) -> Outcome {
-    let mut facts = vec![];
-    if port != 443 {
-        facts.push(Fact::new("Port", port.to_string()));
-    }
-    facts.extend([
-        Fact::new("Protocol", &r.version),
-        Fact::new("Cipher", &r.cipher),
-        Fact::new("Trust", format!("{:?}", r.trust)),
-        Fact::new("Name matches", if r.hostname_match { "yes" } else { "no" }),
-    ]);
-    if let Some(leaf) = r.chain.first() {
-        facts.push(Fact::new("Subject", &leaf.subject));
-        facts.push(Fact::new("Issuer", &leaf.issuer));
-        facts.push(Fact::new("Expires", leaf.not_after.to_string()));
-    }
-    let details = r
-        .chain
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            Fact::new(format!("Certificate {}", i + 1), format!("{} issued by {}, {}", c.subject, c.issuer, c.key))
-        })
-        .collect();
-    let mut findings = tls_findings(host, port, r);
-    findings.extend(ocsp_findings(host, port, r));
-    Outcome { findings, facts, details_title: "Certificate chain", details }
-}
-
-/// The CAA records that apply to the name, as rows and findings in the TLS section.
-pub fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Outcome {
-    match (&caa.error, caa.found_at.as_deref()) {
-        (Some(e), _) => o.facts.push(Fact::new("CAA", format!("lookup failed: {e}"))),
-        (None, None) => o.facts.push(Fact::new("CAA", "none: any certificate authority may issue")),
-        (None, Some(at)) => {
-            for r in &caa.records {
-                o.facts.push(Fact::new(
-                    format!("CAA at {at}"),
-                    format!("{} {} \"{}\"", if r.critical { 128 } else { 0 }, r.tag, r.value),
-                ));
-            }
-        }
-    }
-    o.findings.extend(caa_findings(caa, tls));
-    o.findings = crate::diagnosis::ordered(&o.findings);
-    o
 }
 
 pub fn registration_outcome(target: &str, r: &Registration) -> Outcome {
@@ -566,40 +517,11 @@ mod tests {
         assert_eq!(err, "Summary has no Check behind it");
     }
 
-    fn tls_result() -> TlsResult {
-        use zombo_core::tls::{KeyInfo, TlsCert, Trust};
-        let now = time::OffsetDateTime::now_utc();
-        TlsResult {
-            version: "TLS 1.3".into(),
-            cipher: "TLS_AES_128_GCM_SHA256".into(),
-            chain: vec![TlsCert {
-                subject: "other.example".into(),
-                issuer: "Test CA".into(),
-                sans: vec!["other.example".into()],
-                not_before: now - time::Duration::days(30),
-                not_after: now + time::Duration::days(300),
-                self_signed: false,
-                is_ca: false,
-                key: KeyInfo::Rsa(2048),
-                signature: "SHA256-RSA".into(),
-            }],
-            hostname_match: false,
-            verified: false,
-            trust: Trust::Ok,
-            verify_error: None,
-            ocsp_stapled: false,
-        }
-    }
-
     #[test]
-    fn a_tls_check_on_another_port_names_the_port_in_its_rows_and_findings() {
-        let on_993 = tls_outcome_on("mail.example.com", 993, &tls_result());
-        assert_eq!(on_993.facts[0], Fact::new("Port", "993"));
-        assert!(on_993.findings.iter().any(|f| f.message.contains("mail.example.com:993")), "{:?}", on_993.findings);
-        assert!(on_993.findings.iter().all(|f| !f.message.contains(":443")), "{:?}", on_993.findings);
-        let on_443 = tls_outcome("mail.example.com", &tls_result());
-        assert_eq!(on_443.facts[0].key, "Protocol");
-        assert!(on_443.findings.iter().any(|f| f.message.contains("mail.example.com:443")));
+    fn only_the_on_demand_tls_row_takes_the_picked_port() {
+        let options = Options { tls_port: 993, ..Options::default() };
+        let port = |s| request_for(s, "example.com", Duration::from_secs(1), &[], options).tls_port;
+        assert_eq!((port(Section::Tls), port(Section::TlsPort)), (443, 993));
     }
 
     #[test]
@@ -662,54 +584,6 @@ mod tests {
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
             assert!(automatic(kind).iter().all(|s| !s.is_on_demand()));
         }
-    }
-
-    fn caa(found_at: Option<&str>, records: &[(bool, &str, &str)], error: Option<&str>) -> CaaResult {
-        CaaResult {
-            name: "www.example.com".into(),
-            found_at: found_at.map(Into::into),
-            records: records
-                .iter()
-                .map(|(c, t, v)| zombo_core::tls_extras::CaaRecord {
-                    critical: *c,
-                    tag: t.to_string(),
-                    value: v.to_string(),
-                })
-                .collect(),
-            error: error.map(Into::into),
-        }
-    }
-
-    #[test]
-    fn caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings() {
-        let o =
-            with_caa(Outcome::default(), &caa(Some("example.com"), &[(false, "issue", "letsencrypt.org")], None), None);
-        assert_eq!(o.records(), ["CAA at example.com: 0 issue \"letsencrypt.org\""]);
-        assert!(
-            o.findings.iter().any(|f| f.code == "caa_ok"),
-            "{:?}",
-            o.findings.iter().map(|f| f.code).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn no_caa_record_is_stated_and_flagged_not_left_blank() {
-        let o = with_caa(Outcome::default(), &caa(None, &[], None), None);
-        assert_eq!(o.records(), ["CAA: none: any certificate authority may issue"]);
-        assert!(o.findings.iter().any(|f| f.code == "caa_none"));
-    }
-
-    #[test]
-    fn a_caa_lookup_that_failed_says_so_and_is_a_warning() {
-        let o = with_caa(Outcome::default(), &caa(None, &[], Some("timed out")), None);
-        assert_eq!(o.records(), ["CAA: lookup failed: timed out"]);
-        assert!(o.findings.iter().any(|f| f.code == "caa_lookup_failed"));
-    }
-
-    #[test]
-    fn a_critical_flag_is_shown_as_128() {
-        let o = with_caa(Outcome::default(), &caa(Some("example.com"), &[(true, "issue", ";")], None), None);
-        assert!(o.records()[0].contains(": 128 issue"));
     }
 
     #[test]

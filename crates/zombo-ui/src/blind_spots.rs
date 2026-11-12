@@ -32,12 +32,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Pages behind a login, and content that JavaScript builds.",
             "How the site answers other regions or networks than this one.",
         ],
-        Section::Tls => &[
-            "Other ports: the TLS on a port Check asks for those.",
-            "Protocol versions below TLS 1.2: this tool speaks only 1.2 and 1.3.",
-            "Cipher suites the server accepts but did not choose.",
-            "Revocation at the CA: only an OCSP response stapled by the server is seen.",
-        ],
+        Section::Tls => zombo_core::tls::CHECK.blind_spots,
         Section::Registration => &[
             "The registrar account: ownership contact, locks, billing and auto-renew.",
             "Contact details hidden by a privacy service.",
@@ -60,11 +55,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "MX hosts after the first three tried.",
             "Whether this network blocks the port, when there is no answer.",
         ],
-        Section::TlsPort => &[
-            "Services that start TLS after a plain greeting (STARTTLS): the SMTP banner check covers those.",
-            "A server that requires a client certificate.",
-            "Protocol versions below TLS 1.2, and revocation at the CA.",
-        ],
+        Section::TlsPort => zombo_core::tls::ON_PORT.blind_spots,
         Section::Blacklist => &[
             "Lists that are not in the table this Check asks.",
             "Private block lists inside the receiving company.",
