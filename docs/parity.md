@@ -179,13 +179,13 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `blacklist_refused` | info | info | same | same | same | `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` |
 | `blacklist_unknown` | dynamic | info/warning | same | same | same | `zombo-core/tests/blacklist.rs::timeouts_are_unknown_not_clean`, `zombo-core/tests/blacklist.rs::one_silent_blocklist_does_not_delay_the_others` (+1) |
 | `check_failed` | warning | absent | - | - | - | - |
-| `dkim_found` | ok | ok | same | same | same | `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings`, `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` (+1) |
+| `dkim_found` | ok | ok | same | same | same | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/check_email.rs::a_custom_selector_in_the_request_is_tried_and_found_and_without_it_is_not` (+3) |
 | `dkim_invalid_key` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` |
 | `dkim_missing` | warning | warning | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+4) |
 | `dkim_revoked` | info | info | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code`, `zombo-core/tests/email_findings.rs::a_revoked_key_alone_is_a_missing_key` |
 | `dkim_short_key` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` |
 | `dkim_weak_key` | critical | critical | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` |
-| `dmarc_enforced` | ok | ok | DIFF | DIFF | same | `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings`, `zombo-core/tests/email_findings.rs::dmarc_policies_and_their_titles` |
+| `dmarc_enforced` | ok | ok | DIFF | DIFF | same | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings` (+1) |
 | `dmarc_invalid_policy` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::dmarc_policies_and_their_titles` |
 | `dmarc_lookup_failed` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::a_dead_resolver_gives_lookup_failed_findings_not_missing_ones` |
 | `dmarc_missing` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::a_domain_with_no_mail_records_is_told_so`, `zombo-core/tests/email_findings.rs::a_dead_resolver_gives_lookup_failed_findings_not_missing_ones` |
@@ -237,7 +237,7 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `registration_ok` | ok | ok | same | same | same | `zombo-core/tests/check_registration.rs::a_registered_domain_gives_the_registry_rows_and_one_ok_finding`, `zombo-core/tests/registration.rs::findings_by_expiry_and_status` (+5) |
 | `registration_on_hold` | critical | critical | same | same | same | `zombo-core/tests/registration.rs::findings_by_expiry_and_status`, `zombo-core/tests/registration.rs::the_finding_wording_is_the_go_wording` (+3) |
 | `registration_pending_delete` | critical | critical | same | same | same | `zombo-core/tests/registration.rs::findings_by_expiry_and_status`, `zombo-core/tests/registration.rs::an_rdap_server_error_or_garbage_is_an_error_not_a_panic` (+1) |
-| `spf_fail_all` | ok | ok | same | same | same | `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings`, `zombo-core/tests/email_findings.rs::thirteen_lookups_are_too_many` (+1) |
+| `spf_fail_all` | ok | ok | same | same | same | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings` (+2) |
 | `spf_lookup_failed` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::failed_lookups_inside_the_tree_are_listed`, `zombo-core/tests/email_findings.rs::a_dead_resolver_gives_lookup_failed_findings_not_missing_ones` |
 | `spf_missing` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::a_domain_with_no_mail_records_is_told_so`, `zombo-core/tests/email_findings.rs::a_dead_resolver_gives_lookup_failed_findings_not_missing_ones` |
 | `spf_missing_provider` | warning | warning | DIFF | same | DIFF | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/email_findings.rs::spf_missing_the_mail_provider_is_flagged` (+3) |
@@ -311,25 +311,25 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `dnssec_secure` | crates/zombo-core/src/dnssec.rs:715 | ok | `zombo-core/tests/check_dnssec.rs::a_healthy_signed_zone_gives_zone_resolver_ds_and_key_rows`, `zombo-core/tests/dnssec.rs::healthy_dnssec_says_so_and_nothing_else` (+6) |
 | `dnssec_signature_expired` | crates/zombo-core/src/dnssec.rs:638 | critical | `zombo-core/tests/dnssec.rs::a_signature_past_its_expiration_is_critical`, `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning` |
 | `dnssec_signature_expiring` | crates/zombo-core/src/dnssec.rs:647 | warning | `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning`, `zombo-core/tests/dnssec.rs::under_three_days_left_on_a_long_signature_is_a_warning` |
-| `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:440 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
-| `email_bimi_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:431 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_bimi_missing` | crates/zombo-core/src/email_auth/findings.rs:449 | info | `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem`, `zombo-core/tests/email_records.rs::a_record_with_another_version_or_a_stray_txt_is_not_one_of_them` |
-| `email_bimi_multiple` | crates/zombo-core/src/email_auth/findings.rs:480 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_bimi_ok` | crates/zombo-core/src/email_auth/findings.rs:461 | ok | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go` (+2) |
+| `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:443 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
+| `email_bimi_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:434 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_bimi_missing` | crates/zombo-core/src/email_auth/findings.rs:452 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_bimi_multiple` | crates/zombo-core/src/email_auth/findings.rs:483 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_bimi_ok` | crates/zombo-core/src/email_auth/findings.rs:464 | ok | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go` (+2) |
 | `email_headers_clock_skew` | crates/zombo-core/src/evidence/headers.rs:719 | info | `zombo-core/tests/evidence_headers.rs::hops_dated_backwards_are_an_anomaly` |
 | `email_headers_multiple_from` | crates/zombo-core/src/evidence/headers.rs:710 | warning | `zombo-core/tests/evidence_headers.rs::two_from_headers_are_an_anomaly` |
 | `email_headers_too_many_hops` | crates/zombo-core/src/evidence/headers.rs:729 | info | NONE |
 | `email_headers_truncated` | crates/zombo-core/src/evidence/headers.rs:738 | info | `zombo-core/tests/evidence_headers.rs::a_megabyte_single_line_is_bounded` |
-| `email_mtasts_invalid` | crates/zombo-core/src/email_auth/findings.rs:524 | warning | `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
-| `email_mtasts_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:494 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_mtasts_missing` | crates/zombo-core/src/email_auth/findings.rs:504 | info | `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem`, `zombo-core/tests/email_records.rs::a_record_with_another_version_or_a_stray_txt_is_not_one_of_them` |
-| `email_mtasts_multiple` | crates/zombo-core/src/email_auth/findings.rs:535 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_mtasts_ok` | crates/zombo-core/src/email_auth/findings.rs:515 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
-| `email_tlsrpt_invalid` | crates/zombo-core/src/email_auth/findings.rs:401 | warning | `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
-| `email_tlsrpt_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:381 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_tlsrpt_missing` | crates/zombo-core/src/email_auth/findings.rs:392 | info | `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem`, `zombo-core/tests/email_records.rs::a_record_with_another_version_or_a_stray_txt_is_not_one_of_them` |
-| `email_tlsrpt_multiple` | crates/zombo-core/src/email_auth/findings.rs:417 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:410 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
+| `email_mtasts_invalid` | crates/zombo-core/src/email_auth/findings.rs:527 | warning | `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
+| `email_mtasts_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:497 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_mtasts_missing` | crates/zombo-core/src/email_auth/findings.rs:507 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_mtasts_multiple` | crates/zombo-core/src/email_auth/findings.rs:538 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_mtasts_ok` | crates/zombo-core/src/email_auth/findings.rs:518 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
+| `email_tlsrpt_invalid` | crates/zombo-core/src/email_auth/findings.rs:404 | warning | `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
+| `email_tlsrpt_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:384 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_tlsrpt_missing` | crates/zombo-core/src/email_auth/findings.rs:395 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_tlsrpt_multiple` | crates/zombo-core/src/email_auth/findings.rs:420 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:413 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
 | `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:308 | info | `zombo-core/src/ports.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
 | `mail_log_truncated` | crates/zombo-core/src/evidence/maillog.rs:709 | info | `zombo-core/tests/evidence_maillog.rs::a_megabyte_single_line_is_bounded` |
 | `rdns_addresses` | crates/zombo-core/src/rdns.rs:213 | info | `zombo-core/tests/check_rdns.rs::a_host_name_target_lists_its_addresses`, `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
