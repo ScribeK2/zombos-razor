@@ -6,7 +6,7 @@ use std::{net::SocketAddr, time::Duration};
 use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 
-use super::{TlsResult, finding};
+use super::TlsResult;
 use crate::{
     email_auth::clip,
     finding::{Finding, Severity},
@@ -158,24 +158,28 @@ pub fn ca_identifiers(issuer: &str) -> Option<&'static [&'static str]> {
 pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
     let name = &r.name;
     if let Some(e) = &r.error {
-        return vec![finding(
-            "caa_lookup_failed",
-            Severity::Warning,
-            "CAA lookup failed",
-            format!("The CAA records for {name} could not be read: {e}. A CA that cannot read them must not issue."),
-            Some("Check that the domain's nameservers answer CAA questions.".into()),
-        )];
+        return vec![
+            Finding::new(
+                "caa_lookup_failed",
+                Severity::Warning,
+                "CAA lookup failed",
+                format!(
+                    "The CAA records for {name} could not be read: {e}. A CA that cannot read them must not issue."
+                ),
+            )
+            .recommend("Check that the domain's nameservers answer CAA questions."),
+        ];
     }
     let Some(at) = &r.found_at else {
-        return vec![finding(
+        return vec![Finding::new(
             "caa_none",
             Severity::Info,
             "No CAA record",
             format!(
                 "{name} and its parent names have no CAA record, so any certificate authority may issue certificates for it."
             ),
-            Some("Add a CAA record naming the CA you use, for example: 0 issue \"letsencrypt.org\".".into()),
-        )];
+        )
+            .recommend("Add a CAA record naming the CA you use, for example: 0 issue \"letsencrypt.org\".")];
     };
     let place = if at == name { name.clone() } else { format!("{name} (the records are on {at})") };
     let issue = allowed(&r.records, "issue");
@@ -190,26 +194,30 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
     };
 
     match effective {
-        None => out.push(finding(
-            "caa_no_issue",
-            Severity::Info,
-            "CAA does not restrict issuance",
-            format!("{place} has CAA records, but none with the {tag} tag, so every CA may issue."),
-            Some("Add a CAA issue record naming the CA you use.".into()),
-        )),
-        Some(list) if list.is_empty() => out.push(finding(
-            "caa_forbids_all",
-            Severity::Warning,
-            "CAA forbids all issuance",
-            format!(
-                "{place} has a CAA {tag} record with no CA in it, so no CA may issue or renew certificates for it."
-            ),
-            Some("Name the CA you use in the CAA record before the certificate has to be renewed.".into()),
-        )),
+        None => out.push(
+            Finding::new(
+                "caa_no_issue",
+                Severity::Info,
+                "CAA does not restrict issuance",
+                format!("{place} has CAA records, but none with the {tag} tag, so every CA may issue."),
+            )
+            .recommend("Add a CAA issue record naming the CA you use."),
+        ),
+        Some(list) if list.is_empty() => out.push(
+            Finding::new(
+                "caa_forbids_all",
+                Severity::Warning,
+                "CAA forbids all issuance",
+                format!(
+                    "{place} has a CAA {tag} record with no CA in it, so no CA may issue or renew certificates for it."
+                ),
+            )
+            .recommend("Name the CA you use in the CAA record before the certificate has to be renewed."),
+        ),
         Some(list) => {
             let names = list.join(", ");
             match leaf.map(|l| (l, ca_identifiers(&l.issuer))) {
-                Some((l, Some(ids))) if !ids.iter().any(|id| list.iter().any(|a| a == id)) => out.push(finding(
+                Some((l, Some(ids))) if !ids.iter().any(|id| list.iter().any(|a| a == id)) => out.push(Finding::new(
                     "caa_forbids_issuer",
                     Severity::Critical,
                     format!("CAA does not allow {}", clip(&l.issuer)),
@@ -217,16 +225,15 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
                         "The certificate served for {name} was issued by {}, but the CAA {tag} records on {at} allow only {names}. A CA checks CAA when it issues, so renewal from this CA will be refused.",
                         clip(&l.issuer)
                     ),
-                    Some("Add the issuing CA to the CAA record, or move to a CA the record allows.".into()),
-                )),
-                Some((l, None)) => out.push(finding(
+                )
+                    .recommend("Add the issuing CA to the CAA record, or move to a CA the record allows.")),
+                Some((l, None)) => out.push(Finding::new(
                     "caa_issuer_unknown",
                     Severity::Info,
                     "Could not match the issuer to a CAA entry",
                     format!("{place} allows only {names}; the certificate's issuer, {}, is not one this tool can map to a CAA name, so compare them by hand.", clip(&l.issuer)),
-                    None,
                 )),
-                _ => out.push(finding("caa_ok", Severity::Ok, "CAA restricts issuance", format!("Only {names} may issue certificates for {place}."), None)),
+                _ => out.push(Finding::new("caa_ok", Severity::Ok, "CAA restricts issuance", format!("Only {names} may issue certificates for {place}."))),
             }
         }
     }
@@ -237,7 +244,7 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
         } else {
             format!("{place} allows wildcard certificates only from {}.", list.join(", "))
         };
-        out.push(finding("caa_issuewild", Severity::Info, "CAA has a wildcard rule", msg, None));
+        out.push(Finding::new("caa_issuewild", Severity::Info, "CAA has a wildcard rule", msg));
     }
     out
 }

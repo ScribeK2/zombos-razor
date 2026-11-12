@@ -3,7 +3,6 @@
 //! wording are the Go engine's.
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -383,29 +382,23 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: impl Into<Cow<'static, str>>,
-    message: String,
-    recommendation: impl Into<Cow<'static, str>>,
-) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation: Some(recommendation.into()) }
-}
-
 pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
     use Severity::*;
     if r.ipv6 {
-        return vec![finding(
-            "blacklist_ipv6",
-            Info,
-            "IPv6 not checked",
-            format!(
-                "DNS blocklist coverage for IPv6 is limited, so {} was not checked. This is not a clean result.",
-                printable(&clip(target))
+        return vec![
+            Finding::new(
+                "blacklist_ipv6",
+                Info,
+                "IPv6 not checked",
+                format!(
+                    "DNS blocklist coverage for IPv6 is limited, so {} was not checked. This is not a clean result.",
+                    printable(&clip(target))
+                ),
+            )
+            .recommend(
+                "Check the sending IPv4 address instead, or look the address up on the providers' own websites.",
             ),
-            "Check the sending IPv4 address instead, or look the address up on the providers' own websites.",
-        )];
+        ];
     }
     let mut out = vec![];
     let (mut addresses, mut answered) = (0, 0);
@@ -446,13 +439,13 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
                         sev = Warning;
                         msg += " PBL lists address ranges that shouldn't send mail directly to other servers; it is not an abuse listing.";
                     }
-                    out.push(finding(
+                    out.push(Finding::new(
                         "blacklist_listed",
                         sev,
                         format!("{subject} listed on {}", l.name),
                         msg,
-                        format!("Find and stop the cause (a compromised account, open relay or bulk sending), then request removal at {}.", l.delist),
-                    ));
+                    )
+                        .recommend(format!("Find and stop the cause (a compromised account, open relay or bulk sending), then request removal at {}.", l.delist)));
                 }
                 State::Clean => {
                     answered += 1;
@@ -476,16 +469,13 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
                 printable(&clip(target))
             ),
         };
-        out.push(finding(
-            "blacklist_no_addresses",
-            Warning,
-            "No addresses to check",
-            msg,
-            "Check the domain's MX and A records, or run this Check on the sending IP directly.",
-        ));
+        out.push(
+            Finding::new("blacklist_no_addresses", Warning, "No addresses to check", msg)
+                .recommend("Check the domain's MX and A records, or run this Check on the sending IP directly."),
+        );
     }
     if !refused.is_empty() {
-        out.push(finding(
+        out.push(Finding::new(
             "blacklist_refused",
             Info,
             "Some blocklists refused to answer",
@@ -493,17 +483,19 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
                 "{} refused the query, so those results are unknown, not clean. Spamhaus blocks queries that arrive through public resolvers such as 8.8.8.8 or 1.1.1.1.",
                 refused.iter().copied().collect::<Vec<_>>().join(", ")
             ),
-            "Re-run from a network whose DNS resolver is not a public one, or check the address on the list's own website.",
-        ));
+        )
+            .recommend("Re-run from a network whose DNS resolver is not a public one, or check the address on the list's own website."));
     }
     if !unknown.is_empty() {
-        out.push(finding(
-            "blacklist_unknown",
-            if answered == 0 { Warning } else { Info },
-            "Some blocklists didn't answer",
-            format!("No verdict from {}.", unknown.join(", ")),
-            "Re-run; if lists keep timing out, outbound DNS may be filtered on this network.",
-        ));
+        out.push(
+            Finding::new(
+                "blacklist_unknown",
+                if answered == 0 { Warning } else { Info },
+                "Some blocklists didn't answer",
+                format!("No verdict from {}.", unknown.join(", ")),
+            )
+            .recommend("Re-run; if lists keep timing out, outbound DNS may be filtered on this network."),
+        );
     }
     if answered > 0 && !out.iter().any(|f| f.code == "blacklist_listed") {
         let mut what = plural(addresses, "address", "addresses");

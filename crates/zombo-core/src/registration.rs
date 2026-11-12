@@ -11,8 +11,6 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
-use std::borrow::Cow;
-
 use crate::{
     check::{Check, Fact, Outcome},
     finding::{Finding, Severity},
@@ -647,13 +645,6 @@ pub fn registration_findings(_target: &str, r: &Registration) -> Vec<Finding> {
 /// `registration_findings` against a given clock.
 pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Finding> {
     let d = &r.domain;
-    let finding = |code, severity, title: &'static str, message, recommendation: Option<Cow<'static, str>>| Finding {
-        code,
-        severity,
-        title: title.into(),
-        message,
-        recommendation,
-    };
     // Go named the registrar inside these recommendations: "Renew it at the registrar (X) now".
     let at = match r.registrar.as_deref() {
         Some(name) if !name.is_empty() => format!(" ({name})"),
@@ -666,13 +657,13 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
                 format!("The WHOIS reply for {d} carries no registrar or dates, which means it is not registered.")
             }
         };
-        return vec![finding(
+        return vec![Finding::new(
             "registration_not_registered",
             Severity::Critical,
             "Not registered",
             via,
-            Some("Check the spelling; if it is the customer's domain, it has lapsed or was never registered, so register it (or restore it at the registrar) as soon as possible.".into()),
-        )];
+        )
+            .recommend("Check the spelling; if it is the customer's domain, it has lapsed or was never registered, so register it (or restore it at the registrar) as soon as possible.")];
     }
     let mut out = vec![];
     if let Some(RegDate::At(exp)) = &r.expires {
@@ -680,34 +671,34 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
         let days = left.whole_days();
         let when = format!("{} {} {}", exp.day(), exp.month(), exp.year());
         if left.is_negative() {
-            out.push(finding(
-                "registration_expired",
-                Severity::Critical,
-                "Domain expired",
-                format!("{d} expired on {when}. Websites and email on it may stop working at any time."),
-                Some(
-                    format!(
-                        "Renew it at the registrar{at} now, before it enters redemption and costs more to restore."
-                    )
-                    .into(),
-                ),
-            ));
+            out.push(
+                Finding::new(
+                    "registration_expired",
+                    Severity::Critical,
+                    "Domain expired",
+                    format!("{d} expired on {when}. Websites and email on it may stop working at any time."),
+                )
+                .recommend(format!(
+                    "Renew it at the registrar{at} now, before it enters redemption and costs more to restore."
+                )),
+            );
         } else if days <= 30 {
             let n = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
-            out.push(finding(
-                "registration_expiring_soon",
-                Severity::Warning,
-                "Expires within 30 days",
-                format!("{d} expires on {when}, in {n}."),
-                Some("Renew it now, or confirm auto-renew is on and the payment card on file is valid.".into()),
-            ));
+            out.push(
+                Finding::new(
+                    "registration_expiring_soon",
+                    Severity::Warning,
+                    "Expires within 30 days",
+                    format!("{d} expires on {when}, in {n}."),
+                )
+                .recommend("Renew it now, or confirm auto-renew is on and the payment card on file is valid."),
+            );
         } else if days <= 60 {
-            out.push(finding(
+            out.push(Finding::new(
                 "registration_expiring",
                 Severity::Info,
                 "Expires within 60 days",
                 format!("{d} expires on {when}, in {days} days. Worth confirming auto-renew is on."),
-                None,
             ));
         }
     }
@@ -715,23 +706,23 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
         |set: &[&str]| r.statuses.iter().filter(|s| set.contains(&s.as_str())).cloned().collect::<Vec<_>>().join(", ");
     let holds = among(&HOLDS);
     if !holds.is_empty() {
-        out.push(finding(
+        out.push(Finding::new(
             "registration_on_hold",
             Severity::Critical,
             "Domain is on hold",
             format!("{d} has status {holds}: the registry has removed it from DNS, so its website and email are down. A clientHold is set by the registrar (often an unpaid renewal or unverified contact email); a serverHold by the registry (often a legal or abuse action)."),
-            Some(format!("Contact the registrar{at} to find out why and get the hold lifted.").into()),
-        ));
+        )
+            .recommend(format!("Contact the registrar{at} to find out why and get the hold lifted.")));
     }
     let deleting = among(&DELETION);
     if !deleting.is_empty() {
-        out.push(finding(
+        out.push(Finding::new(
             "registration_pending_delete",
             Severity::Critical,
             "Domain is being deleted",
             format!("{d} has status {deleting}: it expired and is on its way to being released. During the redemption period the registrar can still restore it, for a fee; once pending delete it cannot be saved."),
-            Some(format!("Ask the registrar{at} to restore it immediately if it is still in redemption.").into()),
-        ));
+        )
+            .recommend(format!("Ask the registrar{at} to restore it immediately if it is still in redemption.")));
     }
     if !out.iter().any(|f| matches!(f.severity, Severity::Critical | Severity::Warning)) {
         let mut msg = format!("{d} is registered");
@@ -741,7 +732,7 @@ pub fn registration_findings_at(r: &Registration, now: OffsetDateTime) -> Vec<Fi
         if let Some(RegDate::At(exp)) = &r.expires {
             msg += &format!(" until {} {} {}", exp.day(), exp.month(), exp.year());
         }
-        out.push(finding("registration_ok", Severity::Ok, "Registered", msg + ".", None));
+        out.push(Finding::new("registration_ok", Severity::Ok, "Registered", msg + "."));
     }
     out
 }

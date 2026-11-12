@@ -37,7 +37,6 @@ use x509_parser::{
     x509::AlgorithmIdentifier,
 };
 
-use super::finding;
 use crate::finding::{Finding, Severity};
 
 /// A server that sends more certificates than this is not building a chain.
@@ -514,45 +513,50 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
     let renew = "Renew the certificate and install it, with its intermediates, on the server.";
     let days = (soonest.not_after - now).whole_seconds().div_euclid(86_400);
     if days < 0 {
-        out.push(finding(
-            "ssl_inspection_expired",
-            Severity::Critical,
-            "Certificate expired",
-            format!(
-                "{which} on {place} expired on {expiry} ({} ago); browsers and mail clients reject it.",
-                plural(-days, "day", "days")
-            ),
-            Some(renew.into()),
-        ));
+        out.push(
+            Finding::new(
+                "ssl_inspection_expired",
+                Severity::Critical,
+                "Certificate expired",
+                format!(
+                    "{which} on {place} expired on {expiry} ({} ago); browsers and mail clients reject it.",
+                    plural(-days, "day", "days")
+                ),
+            )
+            .recommend(renew),
+        );
     } else if days <= 14 {
-        out.push(finding(
-            "ssl_inspection_expiring",
-            Severity::Warning,
-            "Certificate expires within two weeks",
-            format!("{which} on {place} expires on {expiry} (in {}).", plural(days, "day", "days")),
-            Some(format!("{renew} If renewal is automated, check why it hasn't happened yet.").into()),
-        ));
+        out.push(
+            Finding::new(
+                "ssl_inspection_expiring",
+                Severity::Warning,
+                "Certificate expires within two weeks",
+                format!("{which} on {place} expires on {expiry} (in {}).", plural(days, "day", "days")),
+            )
+            .recommend(format!("{renew} If renewal is automated, check why it hasn't happened yet.")),
+        );
     } else if days <= 30 {
-        out.push(finding(
+        out.push(Finding::new(
             "ssl_inspection_expiring_soon",
             Severity::Info,
             "Certificate expires within a month",
             format!("{which} on {place} expires on {expiry} (in {}).", plural(days, "day", "days")),
-            None,
         ));
     }
 
     if leaf.not_before > now {
-        out.push(finding(
-            "ssl_inspection_not_yet_valid",
-            Severity::Critical,
-            "Certificate not yet valid",
-            format!(
-                "The certificate on {place} is not valid until {}; browsers and mail clients reject it until then.",
-                date(leaf.not_before)
-            ),
-            Some("Check the clock on the server, or wait until the certificate's start date.".into()),
-        ));
+        out.push(
+            Finding::new(
+                "ssl_inspection_not_yet_valid",
+                Severity::Critical,
+                "Certificate not yet valid",
+                format!(
+                    "The certificate on {place} is not valid until {}; browsers and mail clients reject it until then.",
+                    date(leaf.not_before)
+                ),
+            )
+            .recommend("Check the clock on the server, or wait until the certificate's start date."),
+        );
     }
 
     if !r.hostname_match {
@@ -561,27 +565,29 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
         let shown = names.iter().take(MAX_NAMES_LISTED).copied().collect::<Vec<_>>().join(", ");
         let more = names.len().saturating_sub(MAX_NAMES_LISTED);
         let more = if more > 0 { format!(" and {more} more") } else { String::new() };
-        out.push(finding(
-            "ssl_inspection_hostname_mismatch",
-            Severity::Critical,
-            format!("Certificate doesn't cover {host}"),
-            format!("The certificate on {place} is for {shown}{more}, not {host}."),
-            Some(
-                format!("Issue a certificate that includes {host}, or point {host} at the server that has one.").into(),
-            ),
-        ));
+        out.push(
+            Finding::new(
+                "ssl_inspection_hostname_mismatch",
+                Severity::Critical,
+                format!("Certificate doesn't cover {host}"),
+                format!("The certificate on {place} is for {shown}{more}, not {host}."),
+            )
+            .recommend(format!(
+                "Issue a certificate that includes {host}, or point {host} at the server that has one."
+            )),
+        );
     }
 
     let Some(last) = r.chain.last() else { return out };
     match r.trust {
-        Trust::SelfSigned => out.push(finding(
+        Trust::SelfSigned => out.push(Finding::new(
             "ssl_inspection_self_signed",
             Severity::Critical,
             "Self-signed certificate",
             format!("The certificate on {place} is signed by itself, not by a certificate authority, so no browser or mail client trusts it."),
-            Some("Replace it with a certificate from a public CA (e.g. Let's Encrypt).".into()),
-        )),
-        Trust::MissingIntermediate => out.push(finding(
+        )
+            .recommend("Replace it with a certificate from a public CA (e.g. Let's Encrypt).")),
+        Trust::MissingIntermediate => out.push(Finding::new(
             "ssl_inspection_incomplete_chain",
             Severity::Critical,
             "Incomplete certificate chain",
@@ -589,22 +595,22 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
                 "The chain on {place} stops at {}, issued by {}: the server isn't sending its intermediate certificate. Some browsers paper over this; most mail clients, apps and APIs fail.",
                 last.subject, last.issuer
             ),
-            Some("Install the full chain (the CA's fullchain or bundle file) on the server, not just the certificate.".into()),
-        )),
-        Trust::UnknownAuthority => out.push(finding(
+        )
+            .recommend("Install the full chain (the CA's fullchain or bundle file) on the server, not just the certificate.")),
+        Trust::UnknownAuthority => out.push(Finding::new(
             "ssl_inspection_untrusted",
             Severity::Critical,
             "Certificate not trusted",
             format!("The chain on {place} leads to {}, which isn't a trusted root (a private CA, or a CA clients don't recognise).", last.issuer),
-            Some("Use a certificate from a publicly trusted CA, or install this private CA's root on every client that connects.".into()),
-        )),
-        Trust::Invalid => out.push(finding(
+        )
+            .recommend("Use a certificate from a publicly trusted CA, or install this private CA's root on every client that connects.")),
+        Trust::Invalid => out.push(Finding::new(
             "ssl_inspection_untrusted",
             Severity::Critical,
             "Certificate chain doesn't verify",
             format!("The chain on {place} fails verification: {}", r.verify_error.as_deref().unwrap_or("unknown error")),
-            Some("Reinstall the certificate with its current, complete chain from the CA.".into()),
-        )),
+        )
+            .recommend("Reinstall the certificate with its current, complete chain from the CA.")),
         Trust::Ok => {}
     }
 
@@ -614,40 +620,44 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
         if let KeyInfo::Rsa(bits) = c.key
             && bits < 2048
         {
-            out.push(finding(
+            out.push(Finding::new(
                 "ssl_inspection_weak_key",
                 Severity::Warning,
                 "Weak RSA key",
                 format!("{what} on {place} has an RSA {bits}-bit key; keys under 2048 bits are considered breakable and current clients reject them."),
-                Some("Reissue the certificate with a 2048-bit or larger RSA key, or an ECDSA key.".into()),
-            ));
+            )
+                .recommend("Reissue the certificate with a 2048-bit or larger RSA key, or an ECDSA key."));
         }
         if is_weak_signature(&c.signature) {
-            out.push(finding(
-                "ssl_inspection_weak_signature",
-                Severity::Warning,
-                "Weak certificate signature",
-                format!(
-                    "{what} on {place} is signed with {}, which is broken; current clients reject it.",
-                    c.signature
-                ),
-                Some("Reissue the certificate: CAs no longer sign with SHA-1 or MD5.".into()),
-            ));
+            out.push(
+                Finding::new(
+                    "ssl_inspection_weak_signature",
+                    Severity::Warning,
+                    "Weak certificate signature",
+                    format!(
+                        "{what} on {place} is signed with {}, which is broken; current clients reject it.",
+                        c.signature
+                    ),
+                )
+                .recommend("Reissue the certificate: CAs no longer sign with SHA-1 or MD5."),
+            );
         }
     }
 
     if r.version == "TLS 1.0" || r.version == "TLS 1.1" {
-        out.push(finding(
-            "ssl_inspection_old_protocol",
-            Severity::Warning,
-            format!("{} negotiated", r.version),
-            format!("{place} negotiated {}, which is deprecated; current browsers refuse it.", r.version),
-            Some("Enable TLS 1.2 and 1.3 on the server and disable TLS 1.0/1.1.".into()),
-        ));
+        out.push(
+            Finding::new(
+                "ssl_inspection_old_protocol",
+                Severity::Warning,
+                format!("{} negotiated", r.version),
+                format!("{place} negotiated {}, which is deprecated; current browsers refuse it.", r.version),
+            )
+            .recommend("Enable TLS 1.2 and 1.3 on the server and disable TLS 1.0/1.1."),
+        );
     }
 
     if r.verified {
-        out.push(finding(
+        out.push(Finding::new(
             "ssl_inspection_valid",
             Severity::Ok,
             "Certificate valid",
@@ -656,7 +666,6 @@ pub fn tls_findings_at(host: &str, port: u16, r: &TlsResult, now: OffsetDateTime
                 leaf.issuer,
                 date(leaf.not_after)
             ),
-            None,
         ));
     }
     out

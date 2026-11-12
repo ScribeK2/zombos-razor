@@ -277,14 +277,14 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 
 | Code | Source | Severity | Tests naming the code |
 |---|---|---|---|
-| `caa_forbids_all` | crates/zombo-core/src/tls/caa.rs:201 | warning | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates`, `zombo-core/tests/tls_caa_ocsp.rs::records_that_do_not_restrict_issuance_say_so` |
-| `caa_forbids_issuer` | crates/zombo-core/src/tls/caa.rs:213 | critical | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls_caa_ocsp.rs::a_ca_the_records_forbid_is_critical` (+1) |
-| `caa_issuer_unknown` | crates/zombo-core/src/tls/caa.rs:223 | info | `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` |
-| `caa_issuewild` | crates/zombo-core/src/tls/caa.rs:240 | info | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
-| `caa_lookup_failed` | crates/zombo-core/src/tls/caa.rs:162 | warning | `zombo-core/src/tls/mod.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_caa_ocsp.rs::a_failed_question_is_not_read_as_no_caa` |
-| `caa_no_issue` | crates/zombo-core/src/tls/caa.rs:194 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section` (+1) |
-| `caa_none` | crates/zombo-core/src/tls/caa.rs:171 | info | `zombo-core/src/tls/mod.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one` (+1) |
-| `caa_ok` | crates/zombo-core/src/tls/caa.rs:229 | ok | `zombo-core/src/tls/mod.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
+| `caa_forbids_all` | crates/zombo-core/src/tls/caa.rs:208 | warning | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates`, `zombo-core/tests/tls_caa_ocsp.rs::records_that_do_not_restrict_issuance_say_so` |
+| `caa_forbids_issuer` | crates/zombo-core/src/tls/caa.rs:221 | critical | `zombo-core/tests/check_tls.rs::the_automatic_check_gives_handshake_rows_then_caa_rows_and_findings_worst_first`, `zombo-core/tests/tls_caa_ocsp.rs::a_ca_the_records_forbid_is_critical` (+1) |
+| `caa_issuer_unknown` | crates/zombo-core/src/tls/caa.rs:231 | info | `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` |
+| `caa_issuewild` | crates/zombo-core/src/tls/caa.rs:247 | info | `zombo-core/tests/tls_caa_ocsp.rs::issuewild_is_noted_and_judges_wildcard_certificates` |
+| `caa_lookup_failed` | crates/zombo-core/src/tls/caa.rs:163 | warning | `zombo-core/src/tls/mod.rs::a_caa_lookup_that_failed_says_so_and_is_a_warning`, `zombo-core/tests/tls_caa_ocsp.rs::a_failed_question_is_not_read_as_no_caa` |
+| `caa_no_issue` | crates/zombo-core/src/tls/caa.rs:199 | info | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_certificate_finding_in_the_tls_port_pane_does_not_send_the_rep_to_the_other_tls_section` (+1) |
+| `caa_none` | crates/zombo-core/src/tls/caa.rs:175 | info | `zombo-core/src/tls/mod.rs::no_caa_record_is_stated_and_flagged_not_left_blank`, `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one` (+1) |
+| `caa_ok` | crates/zombo-core/src/tls/caa.rs:236 | ok | `zombo-core/src/tls/mod.rs::caa_records_join_the_tls_rows_and_its_findings_join_the_tls_findings`, `zombo-core/tests/tls_caa_ocsp.rs::an_allowed_or_unmapped_issuer_is_not_critical` (+1) |
 | `dns_authoritative_behind` | crates/zombo-core/src/propagation.rs:514 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
 | `dns_authoritative_consistent` | crates/zombo-core/src/propagation.rs:695 | ok | `zombo-core/tests/authoritative.rs::everything_matching_the_nameservers_says_so` |
 | `dns_authoritative_mismatch` | crates/zombo-core/src/propagation.rs:532 | critical | `zombo-core/tests/authoritative.rs::resolvers_serving_old_records_are_called_cached_not_broken`, `zombo-core/tests/authoritative.rs::a_nameserver_on_an_older_serial_is_behind_not_broken` (+2) |
@@ -311,66 +311,66 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `dnssec_secure` | crates/zombo-core/src/dnssec.rs:715 | ok | `zombo-core/tests/check_dnssec.rs::a_healthy_signed_zone_gives_zone_resolver_ds_and_key_rows`, `zombo-core/tests/check_live.rs::dnssec_a_signed_zone_is_secure` (+9) |
 | `dnssec_signature_expired` | crates/zombo-core/src/dnssec.rs:638 | critical | `zombo-core/tests/dnssec.rs::a_signature_past_its_expiration_is_critical`, `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning` |
 | `dnssec_signature_expiring` | crates/zombo-core/src/dnssec.rs:647 | warning | `zombo-core/tests/dnssec.rs::a_signature_about_to_expire_is_a_warning`, `zombo-core/tests/dnssec.rs::under_three_days_left_on_a_long_signature_is_a_warning` |
-| `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:443 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
-| `email_bimi_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:434 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_bimi_missing` | crates/zombo-core/src/email_auth/findings.rs:452 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
-| `email_bimi_multiple` | crates/zombo-core/src/email_auth/findings.rs:483 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_bimi_ok` | crates/zombo-core/src/email_auth/findings.rs:464 | ok | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go` (+2) |
+| `email_bimi_invalid` | crates/zombo-core/src/email_auth/findings.rs:451 | warning | `zombo-core/tests/email_records.rs::bimi_needs_an_https_logo` |
+| `email_bimi_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:439 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_bimi_missing` | crates/zombo-core/src/email_auth/findings.rs:460 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_bimi_multiple` | crates/zombo-core/src/email_auth/findings.rs:489 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_bimi_ok` | crates/zombo-core/src/email_auth/findings.rs:472 | ok | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go` (+2) |
 | `email_headers_clock_skew` | crates/zombo-core/src/evidence/headers.rs:719 | info | `zombo-core/tests/evidence_headers.rs::hops_dated_backwards_are_an_anomaly` |
 | `email_headers_multiple_from` | crates/zombo-core/src/evidence/headers.rs:710 | warning | `zombo-core/tests/evidence_headers.rs::two_from_headers_are_an_anomaly` |
 | `email_headers_too_many_hops` | crates/zombo-core/src/evidence/headers.rs:729 | info | NONE |
 | `email_headers_truncated` | crates/zombo-core/src/evidence/headers.rs:738 | info | `zombo-core/tests/evidence_headers.rs::a_megabyte_single_line_is_bounded` |
-| `email_mtasts_invalid` | crates/zombo-core/src/email_auth/findings.rs:527 | warning | `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
-| `email_mtasts_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:497 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_mtasts_missing` | crates/zombo-core/src/email_auth/findings.rs:507 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
-| `email_mtasts_multiple` | crates/zombo-core/src/email_auth/findings.rs:538 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_mtasts_ok` | crates/zombo-core/src/email_auth/findings.rs:518 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
-| `email_tlsrpt_invalid` | crates/zombo-core/src/email_auth/findings.rs:404 | warning | `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
-| `email_tlsrpt_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:384 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
-| `email_tlsrpt_missing` | crates/zombo-core/src/email_auth/findings.rs:395 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
-| `email_tlsrpt_multiple` | crates/zombo-core/src/email_auth/findings.rs:420 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
-| `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:413 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
-| `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:309 | info | `zombo-core/src/ports.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
+| `email_mtasts_invalid` | crates/zombo-core/src/email_auth/findings.rs:532 | warning | `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
+| `email_mtasts_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:504 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_mtasts_missing` | crates/zombo-core/src/email_auth/findings.rs:515 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_mtasts_multiple` | crates/zombo-core/src/email_auth/findings.rs:541 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_mtasts_ok` | crates/zombo-core/src/email_auth/findings.rs:524 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::an_mta_sts_id_is_one_to_thirty_two_letters_and_digits` |
+| `email_tlsrpt_invalid` | crates/zombo-core/src/email_auth/findings.rs:409 | warning | `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
+| `email_tlsrpt_lookup_failed` | crates/zombo-core/src/email_auth/findings.rs:389 | warning | `zombo-core/tests/email_records.rs::a_failed_lookup_is_a_warning_not_a_missing_record` |
+| `email_tlsrpt_missing` | crates/zombo-core/src/email_auth/findings.rs:400 | info | `zombo-core/tests/check_email.rs::a_healthy_domain_gives_spf_dmarc_and_dkim_rows_and_ok_findings`, `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem` (+1) |
+| `email_tlsrpt_multiple` | crates/zombo-core/src/email_auth/findings.rs:424 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
+| `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:418 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
+| `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:300 | info | `zombo-core/src/ports.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
 | `mail_log_truncated` | crates/zombo-core/src/evidence/maillog.rs:709 | info | `zombo-core/tests/evidence_maillog.rs::a_megabyte_single_line_is_bounded` |
-| `rdns_addresses` | crates/zombo-core/src/rdns.rs:213 | info | `zombo-core/tests/check_rdns.rs::a_host_name_target_lists_its_addresses`, `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
-| `rdns_confirmed` | crates/zombo-core/src/rdns.rs:298 | ok | `zombo-core/tests/check_rdns.rs::an_address_with_a_confirmed_ptr_gives_the_address_ptr_and_forward_rows`, `zombo-core/tests/check_run.rs::resolvers_stand_in_for_this_machines_resolvers` (+5) |
-| `rdns_forward_unknown` | crates/zombo-core/src/rdns.rs:259 | info | `zombo-core/tests/rdns.rs::a_silent_forward_lookup_is_unknown_not_a_failure` |
-| `rdns_generic_name` | crates/zombo-core/src/rdns.rs:287 | info | `zombo-core/tests/rdns.rs::a_name_that_embeds_the_address_looks_generated` |
-| `rdns_lookup_failed` | crates/zombo-core/src/rdns.rs:196 | warning | `zombo-core/tests/check_rdns.rs::a_resolver_that_never_answers_is_a_finding_not_an_error_after_one_query_timeout`, `zombo-core/tests/rdns.rs::a_silent_resolver_is_a_failed_lookup_not_a_missing_ptr` (+1) |
-| `rdns_multiple_ptr` | crates/zombo-core/src/rdns.rs:248 | info | `zombo-core/tests/rdns.rs::several_ptrs_are_reported_and_each_is_confirmed`, `zombo-core/tests/rdns.rs::one_bad_name_among_several_denies_confirmation` |
-| `rdns_no_address` | crates/zombo-core/src/rdns.rs:204 | warning | `zombo-core/tests/rdns.rs::a_host_with_no_address_is_reported` |
-| `rdns_no_ptr` | crates/zombo-core/src/rdns.rs:237 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+4) |
-| `rdns_not_confirmed` | crates/zombo-core/src/rdns.rs:276 | warning | `zombo-core/tests/rdns.rs::a_ptr_resolving_to_another_address_fails_forward_confirmation`, `zombo-core/tests/rdns.rs::a_ptr_name_with_no_address_fails_forward_confirmation` (+2) |
-| `smtp_auth_before_tls` | crates/zombo-core/src/smtp/findings.rs:162 | warning | `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings`, `zombo-core/tests/smtp.rs::auth_offered_before_tls_is_a_warning` |
-| `smtp_banner_name_mismatch` | crates/zombo-core/src/smtp/findings.rs:124 | info | `zombo-core/tests/check_smtp.rs::the_greeting_is_compared_with_the_ptr_names_of_the_address_that_answered`, `zombo-core/tests/check_smtp.rs::a_machine_with_no_resolver_skips_the_ptr_step_even_when_the_bootstrap_resolvers_know_one` (+2) |
-| `smtp_banner_rejected` | crates/zombo-core/src/smtp/findings.rs:112 | warning | `zombo-core/tests/smtp.rs::a_greeting_that_is_not_220_stops_the_dialogue` |
-| `smtp_connect_failed` | crates/zombo-core/src/smtp/findings.rs:73 | warning | NONE |
-| `smtp_no_answer` | crates/zombo-core/src/smtp/findings.rs:46 | info | `zombo-core/tests/smtp.rs::silence_on_a_mail_port_says_no_answer_and_names_the_network` |
-| `smtp_no_greeting` | crates/zombo-core/src/smtp/findings.rs:86 | warning | `zombo-core/tests/smtp.rs::a_silent_server_is_reported_as_no_greeting` |
-| `smtp_no_route` | crates/zombo-core/src/smtp/findings.rs:64 | info | NONE |
-| `smtp_no_starttls` | crates/zombo-core/src/smtp/findings.rs:136 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings` (+1) |
-| `smtp_protocol_error` | crates/zombo-core/src/smtp/findings.rs:100 | warning | `zombo-core/tests/smtp.rs::a_server_that_rejects_ehlo_is_reported` |
-| `smtp_refused` | crates/zombo-core/src/smtp/findings.rs:55 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/check_smtp.rs::only_the_first_three_mx_hosts_are_tried_and_the_report_is_about_the_most_preferred` (+1) |
-| `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:143 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code` (+1) |
-| `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:93 | critical | NONE |
-| `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:178 | ok | `zombo-core/tests/check_smtp.rs::a_server_that_upgrades_gives_the_tls_rows_and_the_after_starttls_details`, `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail` (+1) |
-| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/handshake.rs:547 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
-| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/handshake.rs:618 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/handshake.rs:627 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `tls_no_ocsp_staple` | crates/zombo-core/src/tls/ocsp.rs:22 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
+| `rdns_addresses` | crates/zombo-core/src/rdns.rs:207 | info | `zombo-core/tests/check_rdns.rs::a_host_name_target_lists_its_addresses`, `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
+| `rdns_confirmed` | crates/zombo-core/src/rdns.rs:293 | ok | `zombo-core/tests/check_rdns.rs::an_address_with_a_confirmed_ptr_gives_the_address_ptr_and_forward_rows`, `zombo-core/tests/check_run.rs::resolvers_stand_in_for_this_machines_resolvers` (+5) |
+| `rdns_forward_unknown` | crates/zombo-core/src/rdns.rs:254 | info | `zombo-core/tests/rdns.rs::a_silent_forward_lookup_is_unknown_not_a_failure` |
+| `rdns_generic_name` | crates/zombo-core/src/rdns.rs:282 | info | `zombo-core/tests/rdns.rs::a_name_that_embeds_the_address_looks_generated` |
+| `rdns_lookup_failed` | crates/zombo-core/src/rdns.rs:187 | warning | `zombo-core/tests/check_rdns.rs::a_resolver_that_never_answers_is_a_finding_not_an_error_after_one_query_timeout`, `zombo-core/tests/rdns.rs::a_silent_resolver_is_a_failed_lookup_not_a_missing_ptr` (+1) |
+| `rdns_multiple_ptr` | crates/zombo-core/src/rdns.rs:243 | info | `zombo-core/tests/rdns.rs::several_ptrs_are_reported_and_each_is_confirmed`, `zombo-core/tests/rdns.rs::one_bad_name_among_several_denies_confirmation` |
+| `rdns_no_address` | crates/zombo-core/src/rdns.rs:197 | warning | `zombo-core/tests/rdns.rs::a_host_with_no_address_is_reported` |
+| `rdns_no_ptr` | crates/zombo-core/src/rdns.rs:232 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+4) |
+| `rdns_not_confirmed` | crates/zombo-core/src/rdns.rs:271 | warning | `zombo-core/tests/rdns.rs::a_ptr_resolving_to_another_address_fails_forward_confirmation`, `zombo-core/tests/rdns.rs::a_ptr_name_with_no_address_fails_forward_confirmation` (+2) |
+| `smtp_auth_before_tls` | crates/zombo-core/src/smtp/findings.rs:154 | warning | `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings`, `zombo-core/tests/smtp.rs::auth_offered_before_tls_is_a_warning` |
+| `smtp_banner_name_mismatch` | crates/zombo-core/src/smtp/findings.rs:116 | info | `zombo-core/tests/check_smtp.rs::the_greeting_is_compared_with_the_ptr_names_of_the_address_that_answered`, `zombo-core/tests/check_smtp.rs::a_machine_with_no_resolver_skips_the_ptr_step_even_when_the_bootstrap_resolvers_know_one` (+2) |
+| `smtp_banner_rejected` | crates/zombo-core/src/smtp/findings.rs:104 | warning | `zombo-core/tests/smtp.rs::a_greeting_that_is_not_220_stops_the_dialogue` |
+| `smtp_connect_failed` | crates/zombo-core/src/smtp/findings.rs:67 | warning | NONE |
+| `smtp_no_answer` | crates/zombo-core/src/smtp/findings.rs:35 | info | `zombo-core/tests/smtp.rs::silence_on_a_mail_port_says_no_answer_and_names_the_network` |
+| `smtp_no_greeting` | crates/zombo-core/src/smtp/findings.rs:79 | warning | `zombo-core/tests/smtp.rs::a_silent_server_is_reported_as_no_greeting` |
+| `smtp_no_route` | crates/zombo-core/src/smtp/findings.rs:57 | info | NONE |
+| `smtp_no_starttls` | crates/zombo-core/src/smtp/findings.rs:128 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/check_smtp.rs::a_greeting_on_the_chosen_port_gives_the_server_rows_and_the_findings` (+1) |
+| `smtp_protocol_error` | crates/zombo-core/src/smtp/findings.rs:93 | warning | `zombo-core/tests/smtp.rs::a_server_that_rejects_ehlo_is_reported` |
+| `smtp_refused` | crates/zombo-core/src/smtp/findings.rs:46 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/check_smtp.rs::only_the_first_three_mx_hosts_are_tried_and_the_report_is_about_the_most_preferred` (+1) |
+| `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:135 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code` (+1) |
+| `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:86 | critical | NONE |
+| `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:170 | ok | `zombo-core/tests/check_smtp.rs::a_server_that_upgrades_gives_the_tls_rows_and_the_after_starttls_details`, `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail` (+1) |
+| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/handshake.rs:550 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
+| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/handshake.rs:624 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/handshake.rs:634 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `tls_no_ocsp_staple` | crates/zombo-core/src/tls/ocsp.rs:21 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `tls_ocsp_stapled` | crates/zombo-core/src/tls/ocsp.rs:12 | ok | `zombo-core/tests/tls_caa_ocsp.rs::a_server_that_staples_is_detected` |
-| `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:97 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
-| `web_redirect_downgrade` | crates/zombo-core/src/web/findings.rs:71 | warning | `zombo-core/src/web/mod.rs::the_downgrade_finding_names_both_urls`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` |
-| `website_asn` | crates/zombo-core/src/web/findings.rs:288 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
-| `website_cdn_detected` | crates/zombo-core/src/web/findings.rs:261 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn` (+1) |
-| `website_host_detected` | crates/zombo-core/src/web/findings.rs:262 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
+| `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:87 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
+| `web_redirect_downgrade` | crates/zombo-core/src/web/findings.rs:61 | warning | `zombo-core/src/web/mod.rs::the_downgrade_finding_names_both_urls`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` |
+| `website_asn` | crates/zombo-core/src/web/findings.rs:292 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
+| `website_cdn_detected` | crates/zombo-core/src/web/findings.rs:266 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn` (+1) |
+| `website_host_detected` | crates/zombo-core/src/web/findings.rs:267 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
 | `website_origin_cert_rejected` | crates/zombo-core/src/web/origin.rs:96 | warning | `zombo-core/tests/web_tls.rs::a_rejected_origin_certificate_is_not_reported_as_silence`, `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
 | `website_origin_headers_differ` | crates/zombo-core/src/web/origin.rs:178 | info | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::an_origin_that_answers_alike_is_ok_and_header_changes_are_info` |
 | `website_origin_matches` | crates/zombo-core/src/web/origin.rs:169 | ok | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::an_origin_that_answers_alike_is_ok_and_header_changes_are_info` |
 | `website_origin_redirect_differs` | crates/zombo-core/src/web/origin.rs:153 | warning | `zombo-core/tests/web.rs::redirects_that_differ_are_reported` |
 | `website_origin_status_differs` | crates/zombo-core/src/web/origin.rs:143 | warning | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::a_cdn_masking_a_broken_origin_is_called_out` (+1) |
 | `website_origin_unreachable` | crates/zombo-core/src/web/origin.rs:109 | warning | `zombo-core/tests/web.rs::an_origin_that_does_not_answer_is_reported_without_blaming`, `zombo-core/tests/web_tls.rs::a_rejected_origin_certificate_is_not_reported_as_silence` |
-| `website_provider_dns_failed` | crates/zombo-core/src/web/findings.rs:297 | info | NONE |
+| `website_provider_dns_failed` | crates/zombo-core/src/web/findings.rs:300 | info | NONE |
 
 #### Rust codes that no test body names (6)
 
