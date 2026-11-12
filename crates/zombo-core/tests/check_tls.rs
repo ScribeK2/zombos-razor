@@ -120,7 +120,7 @@ fn the_two_descriptors_carry_the_limits_prefixes_and_blind_spots_the_ui_used_to_
         assert_eq!(c.budget, (Duration::from_secs(10), Duration::from_secs(8)));
     }
     assert_eq!(CHECK.owns, ["ssl_", "tls_", "caa_"]);
-    assert_eq!(ON_PORT.owns, ["ssl_", "tls_"]);
+    assert!(ON_PORT.owns.is_empty());
     assert_eq!(
         CHECK.blind_spots,
         [

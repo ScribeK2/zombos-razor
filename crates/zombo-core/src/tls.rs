@@ -698,11 +698,11 @@ pub static CHECK: Check = Check::new(
     |request| Box::pin(observe(request, true)),
 );
 
-/// The on-demand TLS row: the handshake alone, on the port the rep picked. It emits `ssl_` and `tls_`
-/// findings too; the rail resolves that shared ownership to [`CHECK`]'s section.
+/// The on-demand TLS row: the handshake alone, on the port the rep picked. It emits `ssl_` and
+/// `tls_` findings too, but [`CHECK`] owns those prefixes.
 pub static ON_PORT: Check = Check::new(
     LIMITS,
-    &["ssl_", "tls_"],
+    &[],
     &[
         "Services that start TLS after a plain greeting (STARTTLS): the SMTP banner check covers those.",
         "A server that requires a client certificate.",

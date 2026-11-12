@@ -36,8 +36,8 @@ static TABLE: LazyLock<Vec<Row>> = LazyLock::new(|| {
 });
 
 /// The longest prefix that `code` starts with wins, wherever its row sits. Two rows with the same
-/// prefix tie, and the earlier row wins: both TLS descriptors own `ssl_` and `tls_`, and the
-/// automatic section comes before the on-demand one in `Section::ALL`.
+/// prefix tie and the earlier row wins, so the lookup stays deterministic; no registered prefix
+/// relies on that, as `no_two_registered_rows_declare_the_same_prefix` checks.
 fn longest<'a>(table: &'a [Row], code: &str) -> Option<&'a Row> {
     table.iter().filter(|(prefix, _)| code.starts_with(prefix)).min_by_key(|(prefix, _)| Reverse(prefix.len()))
 }
@@ -168,7 +168,15 @@ mod tests {
     }
 
     #[test]
-    fn the_shared_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one() {
+    fn no_two_registered_rows_declare_the_same_prefix() {
+        let mut prefixes: Vec<_> = TABLE.iter().map(|(p, _)| *p).collect();
+        prefixes.sort_unstable();
+        let dupes: Vec<_> = prefixes.windows(2).filter(|w| w[0] == w[1]).map(|w| w[0]).collect();
+        assert!(dupes.is_empty(), "declared twice: {dupes:?}");
+    }
+
+    #[test]
+    fn the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one() {
         for code in ["ssl_inspection_expired", "tls_no_ocsp_staple", "caa_none"] {
             assert_eq!(owner(code), Some(Section::Tls), "{code}");
         }
