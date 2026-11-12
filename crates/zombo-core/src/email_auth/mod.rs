@@ -27,7 +27,34 @@ use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 
 use serde::Serialize;
 
+use crate::{check::Check, target::Kind};
 use query::Dns;
+
+/// The Email row: SPF, DKIM, DMARC and the DNS records around them, asked of the first bootstrap
+/// resolver. `selectors` are the rep's own DKIM selectors; the request's `query` limits each question.
+pub static CHECK: Check = Check {
+    label: "Email",
+    automatic_for: &[Kind::Domain, Kind::Email],
+    budget: (Duration::from_secs(25), Duration::from_secs(4)),
+    owns: &["spf_", "dkim_", "dmarc_", "email_"],
+    blind_spots: &[
+        "Recipient-side filtering: spam filters, quarantine and allow lists decide delivery after DNS passes.",
+        "Mail that was really sent: DMARC reports and mail logs hold that, DNS does not.",
+        "DKIM keys under a selector this Check did not try.",
+        "The settings inside the sending service's own console.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let resolver = request.bootstrap.first().copied().ok_or("no resolver is configured")?;
+            let r = email_auth(resolver, request.name, request.selectors, request.query).await;
+            if r.answered() {
+                Ok(findings::outcome(request.name, &r))
+            } else {
+                Err(format!("no answer from DNS resolver {resolver}"))
+            }
+        })
+    })
+};
 
 /// Everything `email_auth` found for one domain.
 #[derive(Debug, Clone, Default, Serialize)]

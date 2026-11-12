@@ -15,6 +15,7 @@ use serde::Serialize;
 use tokio::{io::AsyncReadExt, net::TcpStream, sync::Semaphore, task::JoinSet};
 
 use crate::{
+    check::{Check, Fact, OnDemand, Outcome},
     finding::{Finding, Severity},
     text::strip,
 };
@@ -395,4 +396,88 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
         None,
     ));
     out
+}
+
+/// The Port scan row: it runs only when the rep asks. It resolves the name with this machine's
+/// resolver for 4 seconds, and probes with the module's own timing, not the request's query timeout.
+pub static CHECK: Check = Check {
+    label: "Port scan",
+    on_demand: Some(OnDemand {
+        run_label: "Run port scan",
+        what: "Tries to open a connection to the common service ports and reports which ones answer.",
+        // The ports are QUICK; a test in tests/check_ports.rs keeps this text equal to them.
+        contacts: "The target's own servers, on TCP ports 80, 443, 25, 587, 993, 22, 21, 3306: its first IPv4 address, and its first IPv6 address if this machine has IPv6. This machine's resolver looks up the name first.",
+        note: Some(
+            "A port that gives no answer is reported as no answer, not as down: many networks block outbound mail ports.",
+        ),
+    }),
+    owns: &["hosting_reachability_"],
+    blind_spots: &[
+        "UDP services: only TCP ports are tried.",
+        "Ports outside the quick list.",
+        "Whether a firewall that allows only some source addresses is hiding a service from this machine.",
+        "Whether this network or the target blocks a port that gives no answer.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let addresses = resolve_target(request.name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
+            Ok(outcome(request.name, &probe(&addresses, QUICK, Timing::default()).await))
+        })
+    })
+};
+
+fn outcome(target: &str, r: &PortsResult) -> Outcome {
+    let addresses = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+    let mut facts = vec![Fact::new("Addresses probed", if addresses.is_empty() { "none" } else { &addresses })];
+    for p in &r.ports {
+        let state = match p.state {
+            PortState::Open => "open",
+            PortState::Closed => "closed (refused)",
+            PortState::Filtered => "no answer",
+            PortState::NoRoute => "no route from this network",
+        };
+        let banner = p.banner.as_deref().map(|b| format!(", banner: {b}")).unwrap_or_default();
+        facts.push(Fact::new(format!("Port {} {}", p.port, p.service), format!("{state} on {}{banner}", p.address)));
+    }
+    Outcome { findings: ports_findings(target, r), facts, ..Outcome::default() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_silent_mail_port_reads_as_no_answer_and_not_as_down() {
+        let r = PortsResult {
+            addresses: vec!["192.0.2.1".parse().unwrap()],
+            ports: vec![PortProbe {
+                address: "192.0.2.1".parse().unwrap(),
+                port: 25,
+                service: "SMTP",
+                state: PortState::Filtered,
+                banner: None,
+            }],
+        };
+        let o = outcome("mail.example.com", &r);
+        assert!(o.records().contains(&"Port 25 SMTP: no answer on 192.0.2.1".to_string()));
+        assert_eq!(o.findings.len(), 1);
+        assert_eq!(o.findings[0].code, "hosting_reachability_mail_filtered");
+        assert_eq!(o.findings[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn a_banner_and_an_open_port_show_together() {
+        let ip: IpAddr = "192.0.2.1".parse().unwrap();
+        let r = PortsResult {
+            addresses: vec![ip],
+            ports: vec![PortProbe {
+                address: ip,
+                port: 22,
+                service: "SSH",
+                state: PortState::Open,
+                banner: Some("SSH-2.0-x".into()),
+            }],
+        };
+        assert!(outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string()));
+    }
 }

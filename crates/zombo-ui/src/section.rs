@@ -1,4 +1,4 @@
-use zombo_core::{blacklist, check::Check, delegation, dnssec, rdns, registration, tls};
+use zombo_core::{blacklist, check::Check, delegation, dnssec, email_auth, ports, rdns, registration, tls, web};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -44,16 +44,16 @@ impl Section {
         match self {
             Section::Summary => "Summary",
             Section::Dns => "DNS",
-            Section::Email => "Email",
-            Section::Web => "Web",
-            Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
             Section::Delegation
             | Section::Dnssec
+            | Section::Email
+            | Section::Web
             | Section::Tls
             | Section::Registration
             | Section::TlsPort
             | Section::Rdns
+            | Section::Ports
             | Section::Blacklist => {
                 unreachable!("{self:?} reads its descriptor")
             }
@@ -66,10 +66,13 @@ impl Section {
         match self {
             Section::Delegation => Some(&delegation::CHECK),
             Section::Dnssec => Some(&dnssec::CHECK),
+            Section::Email => Some(&email_auth::CHECK),
+            Section::Web => Some(&web::CHECK),
             Section::Tls => Some(&tls::CHECK),
             Section::Registration => Some(&registration::CHECK),
             Section::TlsPort => Some(&tls::ON_PORT),
             Section::Rdns => Some(&rdns::CHECK),
+            Section::Ports => Some(&ports::CHECK),
             Section::Blacklist => Some(&blacklist::CHECK),
             _ => None,
         }
@@ -78,7 +81,7 @@ impl Section {
     pub fn is_on_demand(self) -> bool {
         match self.check() {
             Some(check) => check.is_on_demand(),
-            None => matches!(self, Section::Ports | Section::Smtp),
+            None => matches!(self, Section::Smtp),
         }
     }
 
@@ -138,16 +141,19 @@ mod tests {
     }
 
     #[test]
-    fn only_delegation_dnssec_the_tls_rows_registration_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
+    fn only_the_checks_migrated_so_far_are_behind_a_descriptor() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
         assert_eq!(
             behind,
             [
                 &Section::Delegation,
                 &Section::Dnssec,
+                &Section::Email,
+                &Section::Web,
                 &Section::Tls,
                 &Section::Registration,
                 &Section::Rdns,
+                &Section::Ports,
                 &Section::TlsPort,
                 &Section::Blacklist
             ]

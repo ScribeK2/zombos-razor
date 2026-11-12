@@ -3,14 +3,11 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
-    email_auth::{EmailAuthResult, email_auth, email_findings},
-    ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
-    web::{WebOptions, WebResult, check_web, parse_web_target, web_findings},
 };
 
 use crate::{
@@ -25,8 +22,7 @@ use crate::{
 pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
     let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email => &[Dns, Email, Web],
-        Kind::Hostname => &[Dns, Web],
+        Kind::Domain | Kind::Email | Kind::Hostname => &[Dns],
         Kind::Ip => &[],
     };
     Section::ALL
@@ -142,8 +138,8 @@ pub async fn run_section(
 }
 
 /// A Check that does not take the chosen port keeps the system port, so the automatic TLS row is
-/// the service on 443 whatever port the picker holds. The rep's proxy goes to every Check; each
-/// takes it or ignores it.
+/// the service on 443 whatever port the picker holds. The rep's proxy and DKIM selectors go to every
+/// Check; each takes them or ignores them.
 fn request_for<'a>(
     check: &Check,
     name: &'a str,
@@ -152,7 +148,11 @@ fn request_for<'a>(
     options: Options,
     settings: &'a Settings,
 ) -> Request<'a> {
-    let request = Request { proxy: settings.proxy.as_deref(), ..Request::system(name, query, bootstrap) };
+    let request = Request {
+        proxy: settings.proxy.as_deref(),
+        selectors: &settings.selectors,
+        ..Request::system(name, query, bootstrap)
+    };
     if check.takes_chosen_port { Request { tls_port: options.tls_port, ..request } } else { request }
 }
 
@@ -164,24 +164,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         return check.run(&request_for(check, name, query, &bootstrap, options, settings)).await;
     }
     match section {
-        Section::Email => {
-            let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
-            let r = email_auth(resolver, name, &settings.selectors, query).await;
-            if r.answered() {
-                Ok(email_outcome(name, &r))
-            } else {
-                Err(format!("no answer from DNS resolver {resolver}"))
-            }
-        }
-        Section::Web => {
-            let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
-            let opts = WebOptions { timeout: query, ..WebOptions::default() };
-            Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
-        }
-        Section::Ports => {
-            let addresses = resolve_target(name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
-            Ok(ports_outcome(name, &probe(&addresses, QUICK, PortTiming::default()).await))
-        }
         Section::Smtp => {
             let resolvers = system_resolvers();
             let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
@@ -209,72 +191,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
-}
-
-pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
-    let mut facts: Vec<Fact> = r.mx_hosts.iter().map(|h| Fact::new("MX", h)).collect();
-    facts.extend(r.spf.records.iter().map(|s| Fact::new("SPF", s)));
-    if r.spf.tree.is_some() {
-        facts.push(Fact::new("SPF lookups", format!("{} of {}", r.spf.lookups, zombo_core::email_auth::MAX_LOOKUPS)));
-    }
-    facts.extend(r.dmarc.records.iter().map(|s| Fact::new("DMARC", s)));
-    let mut details = vec![];
-    for k in &r.dkim.keys {
-        let bits = k.bits.map(|b| format!(" {b} bits")).unwrap_or_default();
-        let revoked = if k.revoked { ", revoked" } else { "" };
-        details.push(Fact::new(format!("DKIM {}", k.selector), format!("{}{bits}{revoked}", k.key_type)));
-    }
-    details.push(Fact::new("DKIM selectors tried", r.dkim.checked.len().to_string()));
-    Outcome { findings: email_findings(domain, r), facts, details_title: "DKIM keys", details }
-}
-
-pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
-    let mut facts = vec![Fact::new("URL", &r.url)];
-    if let Some(u) = &r.final_url {
-        facts.push(Fact::new("Final URL", u));
-    }
-    if let Some(s) = r.status {
-        facts.push(Fact::new("Status", s.to_string()));
-    }
-    if let Some(s) = &r.server {
-        facts.push(Fact::new("Server", s));
-    }
-    if let Some(e) = &r.https_error {
-        facts.push(Fact::new("HTTPS error", e));
-    }
-    let details = r
-        .chain
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            Fact::new(
-                format!("Hop {}", i + 1),
-                format!(
-                    "{} {}{}",
-                    h.status,
-                    h.url,
-                    h.location.as_ref().map(|l| format!(" to {l}")).unwrap_or_default()
-                ),
-            )
-        })
-        .collect();
-    Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
-}
-
-pub fn ports_outcome(target: &str, r: &PortsResult) -> Outcome {
-    let addresses = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-    let mut facts = vec![Fact::new("Addresses probed", if addresses.is_empty() { "none" } else { &addresses })];
-    for p in &r.ports {
-        let state = match p.state {
-            PortState::Open => "open",
-            PortState::Closed => "closed (refused)",
-            PortState::Filtered => "no answer",
-            PortState::NoRoute => "no route from this network",
-        };
-        let banner = p.banner.as_deref().map(|b| format!(", banner: {b}")).unwrap_or_default();
-        facts.push(Fact::new(format!("Port {} {}", p.port, p.service), format!("{state} on {}{banner}", p.address)));
-    }
-    Outcome { findings: ports_findings(target, r), facts, ..Outcome::default() }
 }
 
 fn extensions_text(e: &Extensions) -> String {
@@ -406,6 +322,20 @@ mod tests {
     }
 
     #[test]
+    fn every_check_is_handed_the_rep_dkim_selectors() {
+        let settings = Settings { selectors: vec!["acme2024".into(), "mail.k1".into()], ..Settings::default() };
+        let request = |c| request_for(c, "example.com", Duration::from_secs(1), &[], Options::default(), &settings);
+        for section in Section::ALL {
+            if let Some(check) = section.check() {
+                assert_eq!(request(check).selectors, ["acme2024", "mail.k1"], "{section:?}");
+            }
+        }
+        let none = Settings::default();
+        let bare = request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
+        assert!(bare.selectors.is_empty());
+    }
+
+    #[test]
     fn an_ip_target_runs_reverse_dns_on_its_own_and_no_other_target_does() {
         assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email] {
@@ -447,45 +377,6 @@ mod tests {
                 assert!(!automatic(kind).contains(s), "{s:?} would start by itself for {kind:?}");
             }
         }
-    }
-
-    #[test]
-    fn a_silent_mail_port_reads_as_no_answer_and_not_as_down() {
-        use zombo_core::ports::PortProbe;
-        let r = PortsResult {
-            addresses: vec!["192.0.2.1".parse().unwrap()],
-            ports: vec![PortProbe {
-                address: "192.0.2.1".parse().unwrap(),
-                port: 25,
-                service: "SMTP",
-                state: PortState::Filtered,
-                banner: None,
-            }],
-        };
-        let o = ports_outcome("mail.example.com", &r);
-        assert!(o.records().contains(&"Port 25 SMTP: no answer on 192.0.2.1".to_string()));
-        assert_eq!(o.findings.len(), 1);
-        assert_eq!(o.findings[0].code, "hosting_reachability_mail_filtered");
-        assert_eq!(o.findings[0].severity, zombo_core::Severity::Info);
-    }
-
-    #[test]
-    fn a_banner_and_an_open_port_show_together() {
-        use zombo_core::ports::PortProbe;
-        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
-        let r = PortsResult {
-            addresses: vec![ip],
-            ports: vec![PortProbe {
-                address: ip,
-                port: 22,
-                service: "SSH",
-                state: PortState::Open,
-                banner: Some("SSH-2.0-x".into()),
-            }],
-        };
-        assert!(
-            ports_outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string())
-        );
     }
 
     #[test]

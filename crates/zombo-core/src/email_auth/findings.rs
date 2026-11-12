@@ -7,7 +7,10 @@ use super::{
 };
 use std::borrow::Cow;
 
-use crate::{Finding, Severity};
+use crate::{
+    Finding, Severity,
+    check::{Fact, Outcome},
+};
 
 fn finding(
     code: &'static str,
@@ -551,4 +554,22 @@ pub fn email_findings(domain: &str, r: &EmailAuthResult) -> Vec<Finding> {
     fs.extend(bimi_findings(domain, &r.bimi));
     fs.extend(mta_sts_findings(domain, &r.mta_sts));
     fs
+}
+
+/// What the Email row shows: the MX hosts, the SPF and DMARC records and the DKIM keys found, with the Findings.
+pub(super) fn outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
+    let mut facts: Vec<Fact> = r.mx_hosts.iter().map(|h| Fact::new("MX", h)).collect();
+    facts.extend(r.spf.records.iter().map(|s| Fact::new("SPF", s)));
+    if r.spf.tree.is_some() {
+        facts.push(Fact::new("SPF lookups", format!("{} of {}", r.spf.lookups, MAX_LOOKUPS)));
+    }
+    facts.extend(r.dmarc.records.iter().map(|s| Fact::new("DMARC", s)));
+    let mut details = vec![];
+    for k in &r.dkim.keys {
+        let bits = k.bits.map(|b| format!(" {b} bits")).unwrap_or_default();
+        let revoked = if k.revoked { ", revoked" } else { "" };
+        details.push(Fact::new(format!("DKIM {}", k.selector), format!("{}{bits}{revoked}", k.key_type)));
+    }
+    details.push(Fact::new("DKIM selectors tried", r.dkim.checked.len().to_string()));
+    Outcome { findings: email_findings(domain, r), facts, details_title: "DKIM keys", details }
 }
