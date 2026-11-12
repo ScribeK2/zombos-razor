@@ -11,7 +11,14 @@ use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 use tokio::task::JoinSet;
 
-use crate::{Finding, Severity, email_auth::clip, resolver::Resolver, text::printable};
+use crate::{
+    Finding, Severity,
+    check::{Check, Fact, Outcome},
+    email_auth::clip,
+    resolver::{Resolver, system_resolvers},
+    target::Kind,
+    text::printable,
+};
 
 const MAX_PTR_NAMES: usize = 8;
 const MAX_ADDRESSES: usize = 32;
@@ -301,4 +308,107 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
         }
     }
     out
+}
+
+/// The Reverse DNS row: an IP address gets its PTR names confirmed forward, a name gets its
+/// addresses. It runs by itself on an IP address and is never asked about a name unless the rep
+/// opens it there.
+pub static CHECK: Check = Check {
+    label: "Reverse DNS",
+    automatic_for: &[Kind::Ip],
+    owns: &["rdns_"],
+    blind_spots: &[
+        "The hosting provider's panel, where the PTR record is set.",
+        "Reverse names published only to some networks.",
+        "Whether a mail server's greeting name matches its PTR: only the DNS side is read.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let own;
+            let resolvers = match request.machine_resolvers {
+                Some(r) => r,
+                None => {
+                    own = system_resolvers();
+                    &own
+                }
+            };
+            if resolvers.is_empty() {
+                return Err("this machine has no DNS resolver configured".into());
+            }
+            Ok(outcome(&check_rdns(resolvers, request.name, request.query).await))
+        })
+    })
+};
+
+/// The PTR names of an address and whether each resolves back to it, or a host's addresses.
+fn outcome(r: &RdnsResult) -> Outcome {
+    let mut facts = vec![];
+    match r {
+        RdnsResult::Ip { ip, ptr_query, ptrs, ptr_error } => {
+            facts.push(Fact::new("Address", ip.to_string()));
+            facts.push(Fact::new("PTR question", ptr_query));
+            if ptrs.is_empty() && ptr_error.is_none() {
+                facts.push(Fact::new("PTR", "none"));
+            }
+            for p in ptrs {
+                facts.push(Fact::new("PTR", &p.name));
+                let forward = match (&p.forward_error, p.confirmed) {
+                    (Some(e), _) => format!("no answer: {e}"),
+                    (None, true) => format!("{}, which confirms {ip}", addresses_text(&p.addresses)),
+                    (None, false) => format!("{}, which does not confirm {ip}", addresses_text(&p.addresses)),
+                };
+                facts.push(Fact::new(format!("Forward lookup of {}", p.name), forward));
+            }
+        }
+        RdnsResult::Host { host, addresses, .. } => {
+            facts.push(Fact::new("Host", host));
+            facts.extend(addresses.iter().map(|a| Fact::new("Address", a.to_string())));
+        }
+    }
+    Outcome { findings: rdns_findings(r), facts, ..Outcome::default() }
+}
+
+fn addresses_text(a: &[IpAddr]) -> String {
+    if a.is_empty() { "no address".into() } else { a.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reverse_lookup_lists_each_ptr_with_its_forward_confirmation() {
+        let ip: IpAddr = "192.0.2.1".parse().unwrap();
+        let r = RdnsResult::Ip {
+            ip,
+            ptr_query: "1.2.0.192.in-addr.arpa.".into(),
+            ptr_error: None,
+            ptrs: vec![
+                Ptr { name: "mail.example.com".into(), addresses: vec![ip], forward_error: None, confirmed: true },
+                Ptr { name: "old.example.com".into(), addresses: vec![], forward_error: None, confirmed: false },
+            ],
+        };
+        let o = outcome(&r);
+        let rows: Vec<String> = o.facts.iter().map(Fact::record).collect();
+        assert!(
+            rows.contains(&"Forward lookup of mail.example.com: 192.0.2.1, which confirms 192.0.2.1".to_string()),
+            "{rows:?}"
+        );
+        assert!(
+            rows.contains(
+                &"Forward lookup of old.example.com: no address, which does not confirm 192.0.2.1".to_string()
+            ),
+            "{rows:?}"
+        );
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn an_address_with_no_ptr_says_none_and_a_failed_lookup_does_not() {
+        let ip: IpAddr = "192.0.2.1".parse().unwrap();
+        let none = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: None, ptrs: vec![] };
+        assert!(outcome(&none).facts.iter().any(|f| f.record() == "PTR: none"));
+        let failed = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: Some("timed out".into()), ptrs: vec![] };
+        assert!(!outcome(&failed).facts.iter().any(|f| f.key == "PTR"));
+    }
 }
