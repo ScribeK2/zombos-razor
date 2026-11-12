@@ -202,13 +202,7 @@ mod tests {
 
     #[test]
     fn findings_settle_worst_first_and_count_problems() {
-        let f = |sev, code: &'static str| Finding {
-            code,
-            severity: sev,
-            title: code.into(),
-            message: String::new(),
-            recommendation: None,
-        };
+        let f = |sev, code: &'static str| Finding::new(code, sev, code, String::new());
         let mut r = Run::new();
         r.apply(CheckEvent::Started);
         r.apply(CheckEvent::Finished(Box::new(Ok(Outcome {

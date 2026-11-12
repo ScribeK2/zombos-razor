@@ -531,7 +531,7 @@ mod tests {
     use super::*;
 
     fn finding(sev: Severity, title: &'static str) -> Finding {
-        Finding { code: "t", severity: sev, title: title.into(), message: "m".into(), recommendation: None }
+        Finding::new("t", sev, title, "m".into())
     }
 
     fn answer(name: &str, kind_ns: bool, value: &str) -> VantageAnswer {

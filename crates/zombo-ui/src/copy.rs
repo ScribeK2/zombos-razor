@@ -189,13 +189,8 @@ mod tests {
 
     fn tab_with_web() -> Tab {
         let mut t = Tab::new(Target { value: "example.com".into(), kind: Kind::Domain });
-        let f = Finding {
-            code: "web_x",
-            severity: Severity::Warning,
-            title: "No HSTS".into(),
-            message: "Add the header.\u{1b}[31m".into(),
-            recommendation: Some("Set it.".into()),
-        };
+        let f = Finding::new("web_x", Severity::Warning, "No HSTS", "Add the header.\u{1b}[31m".into())
+            .recommend("Set it.");
         let o = Outcome {
             findings: vec![f],
             facts: vec![Fact::new("Status", "200"), Fact::new("Server", "a`\u{202e}\u{200b}b")],

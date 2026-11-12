@@ -50,7 +50,7 @@ mod tests {
     use super::*;
 
     fn f(severity: Severity) -> Finding {
-        Finding { code: "t", severity, title: "t".into(), message: String::new(), recommendation: None }
+        Finding::new("t", severity, "t", String::new())
     }
 
     fn line(section: Section, problems: usize, sev: &[Severity]) -> String {

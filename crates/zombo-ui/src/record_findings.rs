@@ -189,13 +189,7 @@ mod tests {
         let r = result(vec![], vec![answer("ns1", true, Rcode::NxDomain, &[])]);
         let t = target("nope.example", Kind::Domain);
         assert_eq!(codes(&record_findings(&t, "nope.example", &r, &[])), ["dns_nxdomain"]);
-        let said = Finding {
-            code: "dns_propagation_nxdomain",
-            severity: zombo_core::Severity::Warning,
-            title: "x".into(),
-            message: String::new(),
-            recommendation: None,
-        };
+        let said = Finding::new("dns_propagation_nxdomain", zombo_core::Severity::Warning, "x", String::new());
         assert!(record_findings(&t, "nope.example", &r, &[said]).is_empty());
     }
 

@@ -208,12 +208,10 @@ async fn an_outcome_serialises_to_four_keys_and_lowercase_severities() {
 }
 
 fn finding(severity: Severity, title: &'static str, recommendation: Option<&'static str>) -> Finding {
-    Finding {
-        code: "x_test",
-        severity,
-        title: title.into(),
-        message: "A message.".into(),
-        recommendation: recommendation.map(Into::into),
+    let f = Finding::new("x_test", severity, title, "A message.".into());
+    match recommendation {
+        Some(r) => f.recommend(r),
+        None => f,
     }
 }
 
