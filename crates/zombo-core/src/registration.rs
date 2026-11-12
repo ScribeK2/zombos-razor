@@ -14,7 +14,9 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use std::borrow::Cow;
 
 use crate::{
+    check::{Check, Fact, Outcome},
     finding::{Finding, Severity},
+    target::Kind,
     text::printable,
 };
 
@@ -58,6 +60,53 @@ impl Default for Endpoints {
             proxy: None,
         }
     }
+}
+
+/// The Registration row: who holds the domain, until when, and in what state. It runs for a domain
+/// and for a host name, which it looks up as its registrable domain. The request's `proxy` carries
+/// the RDAP requests and its `endpoints` say where to ask; its `query` time is the limit of the whole
+/// lookup, however many servers it asks.
+pub static CHECK: Check = Check {
+    label: "Registration",
+    automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
+    budget: (Duration::from_secs(15), Duration::from_secs(12)),
+    owns: &["registration_"],
+    blind_spots: &[
+        "The registrar account: ownership contact, locks, billing and auto-renew.",
+        "Contact details hidden by a privacy service.",
+        "Changes the registry has not yet published to RDAP or WHOIS.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let mut endpoints = request.endpoints.cloned().unwrap_or_default();
+            if let Some(proxy) = request.proxy {
+                endpoints.proxy = Some(proxy.into());
+            }
+            check_registration(request.name, &endpoints, request.query)
+                .await
+                .map(|r| outcome(request.name, &r))
+                .map_err(|e| e.to_string())
+        })
+    })
+};
+
+fn outcome(target: &str, r: &Registration) -> Outcome {
+    let mut facts =
+        vec![Fact::new("Domain", &r.domain), Fact::new("Registered", if r.registered { "yes" } else { "no" })];
+    if let Some(v) = &r.registrar {
+        facts.push(Fact::new("Registrar", v));
+    }
+    for (k, d) in [("Created", &r.created), ("Updated", &r.updated), ("Expires", &r.expires)] {
+        if let Some(d) = d {
+            facts.push(Fact::new(k, d.to_string()));
+        }
+    }
+    facts.extend(r.statuses.iter().map(|s| Fact::new("Status", s)));
+    facts.extend(r.nameservers.iter().map(|n| Fact::new("Nameserver", n)));
+    if let Some(d) = r.dnssec {
+        facts.push(Fact::new("DNSSEC", if d { "signed" } else { "not signed" }));
+    }
+    Outcome { findings: registration_findings(target, r), facts, ..Outcome::default() }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -772,6 +821,19 @@ fn parse_date(s: &str) -> Option<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_registration_becomes_findings_plus_a_short_table() {
+        let mut r = Registration::empty("example.com", Source::Rdap, "https://rdap.example");
+        r.registered = true;
+        r.registrar = Some("Registrar Inc".into());
+        r.nameservers = vec!["ns1.example.com".into()];
+        let o = outcome("example.com", &r);
+        let lines = o.records();
+        assert!(lines.contains(&"Registrar: Registrar Inc".to_string()));
+        assert!(lines.contains(&"Nameserver: ns1.example.com".to_string()));
+        assert!(o.details.is_empty());
+    }
 
     #[test]
     fn the_bundled_bootstrap_maps_tlds_to_https_bases() {

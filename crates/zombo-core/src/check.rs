@@ -8,7 +8,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{finding::Finding, propagation::Vantage, resolver::system_resolvers, target::Kind, text::single_line};
+use crate::{
+    finding::Finding, propagation::Vantage, registration::Endpoints, resolver::system_resolvers, target::Kind,
+    text::single_line,
+};
 
 /// One line of a Check's data: a label and a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,9 +48,10 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last five fields are what a test swaps for a fake; production takes them from
-/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC (`ns_port` also by
-/// Delegation), the fourth by TLS, the last by the Checks that ask this machine's resolvers.
+/// zone. The last seven fields are what a test swaps for a fake, or the rep's settings fill in;
+/// production takes them from [`Request::system`]. Each is read by one Check family: the first three
+/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS, the fifth by the Checks that ask this
+/// machine's resolvers, the last two by Registration.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -66,6 +70,11 @@ pub struct Request<'a> {
     pub tls_port: u16,
     /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine has none.
     pub machine_resolvers: Option<&'a [SocketAddr]>,
+    /// The `http://` or `https://` proxy the Checks that honour one go through. `None` leaves each
+    /// Check its own default.
+    pub proxy: Option<&'a str>,
+    /// Where Registration asks. `None` means the real registries; a test points it at fakes.
+    pub endpoints: Option<&'a Endpoints>,
 }
 
 impl<'a> Request<'a> {
@@ -80,6 +89,8 @@ impl<'a> Request<'a> {
             validating: None,
             tls_port: 443,
             machine_resolvers: None,
+            proxy: None,
+            endpoints: None,
         }
     }
 }
