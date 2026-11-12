@@ -7,8 +7,9 @@
 use std::{net::SocketAddr, time::Duration};
 
 use tokio::{
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpSocket, TcpStream},
     sync::Mutex,
+    time::timeout,
 };
 use zombo_core::{
     Severity,
@@ -33,7 +34,8 @@ async fn expected_rows(also_open: Option<u16>) -> (Vec<String>, usize) {
     let mut rows = vec!["Addresses probed: 127.0.0.1".to_string()];
     let mut open = 0;
     for p in QUICK {
-        let up = Some(p.port) == also_open || TcpStream::connect(("127.0.0.1", p.port)).await.is_ok();
+        let dial = timeout(Duration::from_millis(300), TcpStream::connect(("127.0.0.1", p.port)));
+        let up = Some(p.port) == also_open || matches!(dial.await, Ok(Ok(_)));
         open += usize::from(up);
         let state = if up { "open" } else { "closed (refused)" };
         rows.push(format!("Port {} {}: {state} on 127.0.0.1", p.port, p.service));
@@ -85,6 +87,12 @@ async fn a_name_that_cannot_resolve_gives_the_resolve_error_text() {
     let err = CHECK.run(&Request::system(&name, T, &[])).await.unwrap_err();
     assert!(err.starts_with(&format!("could not resolve {name}: ")), "{err}");
     assert!(!err.ends_with("timed out"), "{err}");
+    // The words after the colon are the operating system's.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    assert_eq!(
+        err,
+        format!("could not resolve {name}: failed to lookup address information: Name or service not known")
+    );
 }
 
 #[tokio::test]
@@ -100,6 +108,41 @@ async fn a_zero_query_timeout_neither_cuts_the_lookup_short_nor_makes_a_dial_ans
     assert_eq!(o.facts.len(), 1 + QUICK.len());
     let answered = |f: &Fact| f.value.starts_with("open on 127.0.0.1") || f.value == "closed (refused) on 127.0.0.1";
     assert!(o.facts[1..].iter().all(answered), "{:?}", rows(&o));
+}
+
+#[tokio::test]
+async fn a_port_that_never_answers_is_waited_for_by_the_modules_own_dial_limit_not_the_requests_query() {
+    let _lock = LOOPBACK.lock().await;
+    // A listener that never accepts, with a backlog of one: once its queue is full, Linux drops the
+    // next connection attempt, so that dial gets no answer at all.
+    let Ok(socket) = TcpSocket::new_v4() else { return };
+    let addr: SocketAddr = "127.0.0.1:3306".parse().unwrap();
+    let Ok(()) = socket.bind(addr) else {
+        eprintln!("skipped: cannot bind 127.0.0.1:3306");
+        return;
+    };
+    let _listener = socket.listen(1).unwrap();
+    let mut held = vec![];
+    let mut stalled = false;
+    for _ in 0..4 {
+        match timeout(Duration::from_millis(300), TcpStream::connect(addr)).await {
+            Ok(Ok(s)) => held.push(s),
+            _ => {
+                stalled = true;
+                break;
+            }
+        }
+    }
+    if !stalled {
+        eprintln!("skipped: this machine's full accept queue still answers");
+        return;
+    }
+    let (mut expected, _) = expected_rows(None).await;
+    expected[1 + QUICK.iter().position(|p| p.port == 3306).unwrap()] = "Port 3306 MySQL: no answer on 127.0.0.1".into();
+    let started = std::time::Instant::now();
+    let o = CHECK.run(&Request::system("127.0.0.1", Duration::from_millis(50), &[])).await.unwrap();
+    assert_eq!(without_banners(&rows(&o)), expected);
+    assert!(started.elapsed() >= Duration::from_secs(2), "the request's query timeout cut the dial short");
 }
 
 #[test]
