@@ -10,7 +10,6 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("dns_glue_", Some(Section::Delegation)),
     ("dns_ns_", Some(Section::Delegation)),
     ("dns_", Some(Section::Dns)),
-    ("dnssec_", Some(Section::Dnssec)),
     ("spf_", Some(Section::Email)),
     ("dkim_", Some(Section::Email)),
     ("dmarc_", Some(Section::Email)),
@@ -27,13 +26,17 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("blacklist_", Some(Section::Blacklist)),
 ];
 
-pub fn row(code: &str) -> Option<&'static (&'static str, Option<Section>)> {
-    OWNERS.iter().find(|(prefix, _)| code.starts_with(prefix))
+/// The owner row for `code`: a migrated Check owns the prefixes its descriptor lists, and the
+/// table above holds the rest. `Some(None)` is a deliberate "no section owns this".
+pub fn row(code: &str) -> Option<Option<Section>> {
+    let migrated =
+        Section::ALL.into_iter().find(|s| s.check().is_some_and(|c| c.owns.iter().any(|p| code.starts_with(p))));
+    migrated.map(Some).or_else(|| OWNERS.iter().find(|(prefix, _)| code.starts_with(prefix)).map(|(_, s)| *s))
 }
 
 /// The section a finding belongs to, or `None` when no section owns it.
 pub fn owner(code: &str) -> Option<Section> {
-    row(code).and_then(|(_, s)| *s)
+    row(code).flatten()
 }
 
 /// The section a "go there" button should open from `current`: the owner, unless the rep is

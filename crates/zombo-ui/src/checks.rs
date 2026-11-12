@@ -1,15 +1,12 @@
-use std::{
-    net::SocketAddr,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, time::Duration};
 
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     blacklist::{
         BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
     },
+    check::Request,
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
-    dnssec::{self, check_dnssec, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
@@ -151,14 +148,13 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
     let smtp = options.smtp;
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
+    if let Some(check) = section.check() {
+        return check.run(&Request { name, query, bootstrap: &bootstrap }).await;
+    }
     match section {
         Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
             .await
             .map(|r| delegation_outcome(&r))
-            .map_err(|e| e.to_string()),
-        Section::Dnssec => check_dnssec(&bootstrap, &validating_resolvers(), name, 53, SystemTime::now(), query)
-            .await
-            .map(|r| dnssec::outcome(&r))
             .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;

@@ -275,6 +275,9 @@ const fn secs(n: u64) -> Duration {
 /// The limits a Check has with no setting: `(whole, query)`. An on-demand Check has no
 /// query limit of its own here; its module keeps its own.
 fn default_budget(section: Section) -> Budget {
+    if let Some(check) = section.check() {
+        return Budget { whole: check.budget.0, query: check.budget.1 };
+    }
     let (whole, query) = match section {
         Section::Registration => (15, 12),
         Section::Email => (25, 4),

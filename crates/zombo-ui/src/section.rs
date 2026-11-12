@@ -1,3 +1,5 @@
+use zombo_core::{check::Check, dnssec};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     Summary,
@@ -50,6 +52,15 @@ impl Section {
             Section::Smtp => "SMTP banner",
             Section::TlsPort => "TLS on a port",
             Section::Blacklist => "Blacklist",
+        }
+    }
+
+    /// The Check behind this section when it is a migrated one: the section then holds no Check
+    /// knowledge of its own. `None` for the rest, until each moves behind a descriptor.
+    pub fn check(self) -> Option<&'static Check> {
+        match self {
+            Section::Dnssec => Some(&dnssec::CHECK),
+            _ => None,
         }
     }
 
@@ -110,6 +121,12 @@ mod tests {
         assert_eq!(Section::at(7), Some(Section::Registration));
         assert_eq!(Section::at(Section::FIRST_ON_DEMAND), Some(Section::Ports));
         assert_eq!(Section::at(13), None);
+    }
+
+    #[test]
+    fn only_dnssec_is_behind_a_descriptor_so_far() {
+        let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
+        assert_eq!(behind, [&Section::Dnssec]);
     }
 
     #[test]
