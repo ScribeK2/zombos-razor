@@ -3,7 +3,6 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
-    delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
@@ -27,7 +26,7 @@ use crate::{
 pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
     let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email => &[Dns, Delegation, Email, Web, Registration],
+        Kind::Domain | Kind::Email => &[Dns, Email, Web, Registration],
         Kind::Hostname => &[Dns, Web, Registration],
         Kind::Ip => &[],
     };
@@ -164,10 +163,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         return check.run(&request_for(check, name, query, &bootstrap, options)).await;
     }
     match section {
-        Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
-            .await
-            .map(|r| delegation_outcome(&r))
-            .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
             let r = email_auth(resolver, name, &settings.selectors, query).await;
@@ -219,27 +214,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
-}
-
-fn addresses(set: &std::collections::BTreeSet<std::net::IpAddr>) -> String {
-    set.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
-}
-
-pub fn delegation_outcome(r: &DelegationResult) -> Outcome {
-    let mut facts = vec![Fact::new("Zone", &r.apex), Fact::new("Parent zone", &r.parent)];
-    facts.extend(r.parent_ns.iter().map(|n| Fact::new("Delegated nameserver", n)));
-    for (name, set) in &r.glue {
-        facts.push(Fact::new(format!("Glue {name}"), addresses(set)));
-    }
-    for s in &r.servers {
-        let state = match &s.state {
-            ServerState::Ok { serial } => format!("answers, SOA serial {serial}"),
-            ServerState::Unreachable => "unreachable".to_string(),
-            ServerState::Lame { why, .. } => format!("lame: {why}"),
-        };
-        facts.push(Fact::new(format!("Server {}", s.name), state));
-    }
-    Outcome { findings: delegation_findings(r), facts, ..Outcome::default() }
 }
 
 pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
@@ -477,28 +451,6 @@ mod tests {
         assert!(o.details.is_empty());
     }
 
-    #[test]
-    fn a_delegation_lists_each_server_with_its_state() {
-        use std::collections::{BTreeMap, BTreeSet};
-        let r = DelegationResult {
-            apex: "example.com".into(),
-            parent: "com".into(),
-            parent_ns: BTreeSet::from(["ns1.example.com".to_string()]),
-            glue: BTreeMap::new(),
-            servers: vec![zombo_core::delegation::DelegatedServer {
-                name: "ns1.example.com".into(),
-                address: None,
-                state: ServerState::Unreachable,
-                child_ns: None,
-            }],
-            glue_served: BTreeMap::new(),
-            unresolvable: vec![],
-            cnames: vec![],
-        };
-        let lines = delegation_outcome(&r).records();
-        assert!(lines.contains(&"Server ns1.example.com: unreachable".to_string()));
-        assert!(lines.contains(&"Delegated nameserver: ns1.example.com".to_string()));
-    }
     #[test]
     fn an_on_demand_check_can_be_asked_about_an_ip_but_an_automatic_one_cannot() {
         let ip = t("192.0.2.1", Kind::Ip);

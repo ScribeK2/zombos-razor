@@ -14,11 +14,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Answers given only to some networks (split-horizon DNS) or regions beyond the resolvers asked.",
             "The DNS provider's panel: records saved there but not yet served.",
         ],
-        Section::Delegation => &[
-            "The registrar account where the nameservers are set.",
-            "Nameservers that answer only some networks: a server that is silent here may answer elsewhere.",
-            "Why a nameserver is lame: its configuration and logs are on its own host.",
-        ],
+        Section::Delegation => zombo_core::delegation::CHECK.blind_spots,
         Section::Dnssec => zombo_core::dnssec::CHECK.blind_spots,
         Section::Email => &[
             "Recipient-side filtering: spam filters, quarantine and allow lists decide delivery after DNS passes.",
