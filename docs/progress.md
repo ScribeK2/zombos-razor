@@ -141,7 +141,7 @@ Go sources to port: `website.go`, `origin.go`, `ssl.go`, `hosting.go`.
 
 Branch: `refactor/section-registry`. Goal: a new Check costs one core module plus a registry line, and the UI holds no per-Check knowledge. A descriptor (`check::Check`, written as `Check { label: "X", ..Check::base(run) }`) holds the label, the automatic target kinds (empty means on demand), the on-demand brief and run label, the default budget, the finding prefixes and the blind spots.
 
-End state: `Section` stays a small enum used as an index. A new Check adds one variant line, one `ALL` line and one `check()` arm in `section.rs`. `Section` is not built from the registry. DNS propagation, Summary and Evidence stay outside the registry.
+End state: `Section` stays a small enum used as an index. A new Check adds one variant line, one `ALL` line and one `Section::home()` arm in `section.rs`, the one `match` that names every variant. `Section` is not built from the registry. DNS propagation, Summary and Evidence stay outside the registry.
 
 `crates/zombo-ui/tests/section_facts.rs` pins every fact of the 13 sections as literals. It must pass unchanged after every step.
 
@@ -154,7 +154,14 @@ End state: `Section` stays a small enum used as an index. A new Check adds one v
 - [x] Email: `Request::selectors` is the rep's DKIM selectors, copied for every Check; the first bootstrap resolver is asked, and its two error texts are pinned
 - [x] Web: `Request::dial` is the address the Web Check connects to instead of resolving its name, with the plain-HTTP port; the HTTPS port is `Request::port` and the hosting questions go to the first of `machine_resolvers`. A test pins that the request's proxy is not used
 - [x] Smtp: `Request::port` (was `tls_port`) is the port the Check dials, and a descriptor with `takes_chosen_port` gets the rep's pick for it; `Request::kind` is the target kind, copied for every Check, because an email's domain part can parse as a host name; the MX plan, its 5 s lookup, the 3 s PTR step and the first-three-hosts limit live in core; the tab hands each run the one port its own section chose, so a bad typed TLS port stops only TLS on a port
-- [ ] Remove the leftover `Section` tables (`label`, `is_on_demand`, the `automatic` lists, the `ondemand` match arms, `blind_spots` and `default_budget` matches)
+- [x] Cleanup: `Section::label` and `check()` both read `Section::home()`, which gives `Summary` and `Dns` a literal label and every other section its descriptor, so no `unreachable!` and no wildcard is left; `blind_spots`, `checks::automatic`, `ondemand::on_demand` and `default_budget` read the descriptors; `Tab::chosen_port` returns `Ok(None)` for a section with no picker, and `request_for` copies a port only when it is `Some` and the descriptor takes the chosen port. A throwaway 14th variant needs only the `ALL` length and the `home()` arm to compile (baseline: the `label` match, the `blind_spots` match and the `ALL` length)
+- [x] Regroup: `Request` keeps the 7 inputs the UI sets (`name`, `kind`, `query`, `bootstrap`, `port`, `proxy`, `selectors`) and holds the 8 test seams in `Request::seams: Seams` (`ns_port`, `now`, `validating`, `machine_resolvers`, `endpoints`, `pin`, `http_port`, `https_port`). `Seams::default()` is the production value of each; a new seam touches only `Seams` and its `Default`. `dial` is split into `pin`, `http_port` and `https_port`, and Web no longer reads `port`. A UI test pins that `request_for` leaves every seam at its default for every Check. A throwaway field in `Seams` and `Default` alone compiled the whole workspace with all test files
+
+Left after the registry work:
+
+- [x] Live run from the clean-network VPS (2026-11-12, `crates/zombo-core/tests/check_live.rs`, 11 tests through each descriptor, all pass in 6 s): DNSSEC secure for cloudflare.com on all four validating resolvers and bogus with `dnssec_ds_mismatch` for dnssec-failed.org (the `validating: None` path), TLS with the CAA join over real DNS, Delegation, Registration over RDAP, Email, Web, Reverse DNS (confirmed PTR for 1.1.1.1), Blacklist (127.0.0.2 listed on 6 of 8 lists, one refused, one unknown), Port scan of the VPS's own address. SMTP to a Google MX on port 25 reported `smtp_no_answer` (outbound 25 is blocked there), so the SMTP success path is still not seen live. The older `live_*` tests in the `check_*.rs` files are weak (they accept a documented error) and are superseded by `check_live.rs`; the Ports one scans example.com, so run it only on purpose
+- [ ] Look at the UI by eye (rail labels, on-demand briefs, port pickers, blind-spot blocks); only unit tests and the characterization test ran
+- [ ] A new section still needs by hand: a key binding if it has one, its widgets (a port picker), its position in `ALL` and `FIRST_ON_DEMAND`, and the tests that pin the 13-section rail
 
 ## Network egress (what the app contacts), to document in `docs/network-egress.md`
 

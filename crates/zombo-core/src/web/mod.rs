@@ -47,15 +47,17 @@ pub static CHECK: Check = Check {
     ..Check::base(|request| {
         Box::pin(async move {
             let (host, path) = parse_web_target(request.name).map_err(|e| e.to_string())?;
-            let ports = match request.dial {
-                Some(a) => Ports { http: a.port(), https: request.port },
-                None => Ports::default(),
+            let seams = &request.seams;
+            let default = Ports::default();
+            let ports = Ports {
+                http: seams.http_port.unwrap_or(default.http),
+                https: seams.https_port.unwrap_or(default.https),
             };
             let opts = WebOptions {
                 timeout: request.query,
-                resolver: request.machine_resolvers.and_then(|r| r.first().copied()),
+                resolver: seams.machine_resolvers.and_then(|r| r.first().copied()),
                 ports,
-                pin: request.dial.map(|a| a.ip()),
+                pin: seams.pin,
                 ..WebOptions::default()
             };
             Ok(findings::outcome(&host, &check_web(&host, &path, &opts).await))

@@ -17,6 +17,11 @@ pub enum Section {
     Blacklist,
 }
 
+enum Home {
+    Literal(&'static str),
+    Check(&'static Check),
+}
+
 impl Section {
     pub const ALL: [Section; 13] = [
         Section::Summary,
@@ -38,44 +43,38 @@ impl Section {
     pub const FIRST_ON_DEMAND: usize = 9;
 
     pub fn label(self) -> &'static str {
-        if let Some(check) = self.check() {
-            return check.label;
-        }
-        match self {
-            Section::Summary => "Summary",
-            Section::Dns => "DNS",
-            Section::Delegation
-            | Section::Dnssec
-            | Section::Email
-            | Section::Web
-            | Section::Tls
-            | Section::Registration
-            | Section::TlsPort
-            | Section::Rdns
-            | Section::Ports
-            | Section::Smtp
-            | Section::Blacklist => {
-                unreachable!("{self:?} reads its descriptor")
-            }
+        match self.home() {
+            Home::Literal(label) => label,
+            Home::Check(check) => check.label,
         }
     }
 
-    /// The Check behind this section when it is a migrated one: the section then holds no Check
-    /// knowledge of its own. `None` for the rest, until each moves behind a descriptor.
+    /// The Check behind this section, or `None` for the two sections that are not one Check:
+    /// the Summary and DNS propagation.
     pub(crate) fn check(self) -> Option<&'static Check> {
+        match self.home() {
+            Home::Literal(_) => None,
+            Home::Check(check) => Some(check),
+        }
+    }
+
+    /// Where a section gets its facts. Every variant is named here, with no wildcard, so a new
+    /// section does not compile until it says whether it has a Check.
+    fn home(self) -> Home {
         match self {
-            Section::Delegation => Some(&delegation::CHECK),
-            Section::Dnssec => Some(&dnssec::CHECK),
-            Section::Email => Some(&email_auth::CHECK),
-            Section::Web => Some(&web::CHECK),
-            Section::Tls => Some(&tls::CHECK),
-            Section::Registration => Some(&registration::CHECK),
-            Section::TlsPort => Some(&tls::ON_PORT),
-            Section::Rdns => Some(&rdns::CHECK),
-            Section::Ports => Some(&ports::CHECK),
-            Section::Smtp => Some(&smtp::CHECK),
-            Section::Blacklist => Some(&blacklist::CHECK),
-            _ => None,
+            Section::Summary => Home::Literal("Summary"),
+            Section::Dns => Home::Literal("DNS"),
+            Section::Delegation => Home::Check(&delegation::CHECK),
+            Section::Dnssec => Home::Check(&dnssec::CHECK),
+            Section::Email => Home::Check(&email_auth::CHECK),
+            Section::Web => Home::Check(&web::CHECK),
+            Section::Tls => Home::Check(&tls::CHECK),
+            Section::Registration => Home::Check(&registration::CHECK),
+            Section::TlsPort => Home::Check(&tls::ON_PORT),
+            Section::Rdns => Home::Check(&rdns::CHECK),
+            Section::Ports => Home::Check(&ports::CHECK),
+            Section::Smtp => Home::Check(&smtp::CHECK),
+            Section::Blacklist => Home::Check(&blacklist::CHECK),
         }
     }
 
@@ -139,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_checks_migrated_so_far_are_behind_a_descriptor() {
+    fn every_section_but_the_summary_and_dns_is_behind_a_descriptor() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
         assert_eq!(
             behind,

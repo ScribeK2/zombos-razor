@@ -6,7 +6,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use common::{FakeDns, dnssec_zone};
 use zombo_core::{
     Severity,
-    check::{Outcome, Request},
+    check::{Outcome, Request, Seams},
     dnssec::CHECK,
     propagation::Vantage,
 };
@@ -29,9 +29,12 @@ async fn run(parent: &str, zone: &str, at: u64) -> Result<Outcome, String> {
     let validating = [Vantage::resolver("Fake", "Test", resolver.addr)];
     CHECK
         .run(&Request {
-            ns_port: ns.addr.port(),
-            now: UNIX_EPOCH + Duration::from_secs(at),
-            validating: Some(&validating),
+            seams: Seams {
+                ns_port: ns.addr.port(),
+                now: UNIX_EPOCH + Duration::from_secs(at),
+                validating: Some(&validating),
+                ..Seams::default()
+            },
             ..Request::system(&format!("www.{APEX}"), T, &[rec.addr])
         })
         .await
@@ -87,8 +90,8 @@ async fn a_name_nobody_can_resolve_is_the_checks_own_error_text() {
 #[test]
 fn the_system_request_is_port_53_the_clock_now_and_the_checks_own_resolvers() {
     let r = Request::system("example.com", T, &[]);
-    assert_eq!(r.ns_port, 53);
-    assert!(r.validating.is_none());
-    let age = std::time::SystemTime::now().duration_since(r.now).unwrap_or_default();
+    assert_eq!(r.seams.ns_port, 53);
+    assert!(r.seams.validating.is_none());
+    let age = std::time::SystemTime::now().duration_since(r.seams.now).unwrap_or_default();
     assert!(age < Duration::from_secs(5), "{age:?}");
 }

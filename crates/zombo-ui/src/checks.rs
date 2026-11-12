@@ -17,16 +17,11 @@ use crate::{
 
 /// The Checks that run on their own when a target is submitted (DESIGN.md, "Checks per target kind").
 pub fn automatic(kind: Kind) -> Vec<Section> {
-    use Section::*;
-    let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email | Kind::Hostname => &[Dns],
-        Kind::Ip => &[],
-    };
     Section::ALL
         .into_iter()
         .filter(|s| match s.check() {
             Some(check) => check.automatic_for.contains(&kind),
-            None => listed.contains(s),
+            None => *s == Section::Dns && kind != Kind::Ip,
         })
         .collect()
 }
@@ -106,7 +101,7 @@ pub async fn run_section(
     name: String,
     kind: Kind,
     settings: Settings,
-    port: u16,
+    port: Option<u16>,
     tx: UnboundedSender<CheckEvent>,
 ) {
     let _ = tx.send(CheckEvent::Started);
@@ -122,9 +117,9 @@ pub async fn run_section(
     let _ = tx.send(event);
 }
 
-/// `port` is what the tab holds for this section's own picker. A Check that does not take the
-/// chosen port keeps the system port, so the automatic TLS row is the service on 443 whatever
-/// port the picker holds. The target kind, the rep's proxy and DKIM selectors go to every Check;
+/// `port` is what the tab holds for this section's own picker, `None` when it has none. A Check
+/// that does not take the chosen port keeps the system port, so the automatic TLS row is the
+/// service on 443 whatever port a picker holds. The target kind, the rep's proxy and DKIM selectors go to every Check;
 /// each takes them or ignores them.
 fn request_for<'a>(
     check: &Check,
@@ -132,7 +127,7 @@ fn request_for<'a>(
     kind: Kind,
     query: Duration,
     bootstrap: &'a [SocketAddr],
-    port: u16,
+    port: Option<u16>,
     settings: &'a Settings,
 ) -> Request<'a> {
     let request = Request {
@@ -141,10 +136,19 @@ fn request_for<'a>(
         selectors: &settings.selectors,
         ..Request::system(name, query, bootstrap)
     };
-    if check.takes_chosen_port { Request { port, ..request } } else { request }
+    match port {
+        Some(port) if check.takes_chosen_port => Request { port, ..request },
+        _ => request,
+    }
 }
 
-async fn produce(section: Section, name: &str, kind: Kind, settings: &Settings, port: u16) -> Result<Outcome, String> {
+async fn produce(
+    section: Section,
+    name: &str,
+    kind: Kind,
+    settings: &Settings,
+    port: Option<u16>,
+) -> Result<Outcome, String> {
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     match section.check() {
@@ -184,20 +188,20 @@ mod tests {
     #[tokio::test]
     async fn a_section_with_a_descriptor_runs_the_descriptor() {
         let name = format!("{}.example.com", "a".repeat(64));
-        let err = produce(Section::Dnssec, &name, Kind::Hostname, &Settings::default(), 443).await.unwrap_err();
+        let err = produce(Section::Dnssec, &name, Kind::Hostname, &Settings::default(), None).await.unwrap_err();
         assert_eq!(err, format!("no nameservers found for {name}"));
-        let err = produce(Section::Summary, &name, Kind::Hostname, &Settings::default(), 443).await.unwrap_err();
+        let err = produce(Section::Summary, &name, Kind::Hostname, &Settings::default(), None).await.unwrap_err();
         assert_eq!(err, "Summary has no Check behind it");
     }
 
-    fn request_with<'a>(check: &Check, port: u16, settings: &'a Settings) -> Request<'a> {
+    fn request_with<'a>(check: &Check, port: Option<u16>, settings: &'a Settings) -> Request<'a> {
         request_for(check, "example.com", Kind::Domain, Duration::from_secs(1), &[], port, settings)
     }
 
     #[test]
     fn only_the_checks_that_take_the_picked_port_get_it() {
         let settings = Settings::default();
-        let port = |c| request_with(c, 993, &settings).port;
+        let port = |c| request_with(c, Some(993), &settings).port;
         let (tls, on_port, dnssec, smtp) =
             (port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK), port(&smtp::CHECK));
         assert_eq!((tls, on_port, dnssec, smtp), (443, 993, 443, 993));
@@ -214,37 +218,63 @@ mod tests {
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
             for section in Section::ALL {
                 if let Some(check) = section.check() {
-                    let request = request_for(check, "example.com", kind, Duration::from_secs(1), &[], 25, &settings);
+                    let request =
+                        request_for(check, "example.com", kind, Duration::from_secs(1), &[], Some(25), &settings);
                     assert_eq!(request.kind, kind, "{section:?}");
                 }
             }
         }
     }
 
+    /// The UI never sets a seam: every Check is handed the production values, whatever the settings.
+    #[test]
+    fn no_check_is_handed_a_seam() {
+        let settings = Settings {
+            proxy: Some("http://proxy.example:3128".into()),
+            selectors: vec!["acme2024".into()],
+            ..Settings::default()
+        };
+        let mut checks: Vec<&Check> = Section::ALL.iter().filter_map(|s| s.check()).collect();
+        checks.push(&tls::ON_PORT);
+        for check in checks {
+            let s =
+                request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings).seams;
+            let age = std::time::SystemTime::now().duration_since(s.now).unwrap_or_default();
+            assert!(age < Duration::from_secs(5), "{}: {age:?}", check.label);
+            assert_eq!(s.ns_port, 53, "{}", check.label);
+            assert!(s.validating.is_none(), "{}", check.label);
+            assert!(s.machine_resolvers.is_none(), "{}", check.label);
+            assert!(s.endpoints.is_none(), "{}", check.label);
+            assert!(s.pin.is_none(), "{}", check.label);
+            assert!(s.http_port.is_none(), "{}", check.label);
+            assert!(s.https_port.is_none(), "{}", check.label);
+        }
+    }
+
     #[test]
     fn every_check_is_handed_the_rep_proxy() {
         let settings = Settings { proxy: Some("http://proxy.example:3128".into()), ..Settings::default() };
-        let proxy = |c| request_with(c, 443, &settings).proxy;
+        let proxy = |c| request_with(c, Some(443), &settings).proxy;
         for section in Section::ALL {
             if let Some(check) = section.check() {
                 assert_eq!(proxy(check), Some("http://proxy.example:3128"), "{section:?}");
             }
         }
         let none = Settings::default();
-        assert_eq!(request_with(&dnssec::CHECK, 443, &none).proxy, None);
+        assert_eq!(request_with(&dnssec::CHECK, Some(443), &none).proxy, None);
     }
 
     #[test]
     fn every_check_is_handed_the_rep_dkim_selectors() {
         let settings = Settings { selectors: vec!["acme2024".into(), "mail.k1".into()], ..Settings::default() };
-        let request = |c| request_with(c, 443, &settings);
+        let request = |c| request_with(c, Some(443), &settings);
         for section in Section::ALL {
             if let Some(check) = section.check() {
                 assert_eq!(request(check).selectors, ["acme2024", "mail.k1"], "{section:?}");
             }
         }
         let none = Settings::default();
-        assert!(request_with(&dnssec::CHECK, 443, &none).selectors.is_empty());
+        assert!(request_with(&dnssec::CHECK, Some(443), &none).selectors.is_empty());
     }
 
     #[test]
@@ -285,8 +315,8 @@ mod tests {
     fn nothing_on_demand_starts_with_a_target_whatever_its_kind() {
         for kind in [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip] {
             for s in crate::ondemand::on_demand(kind) {
-                assert!(s.is_on_demand() && wired(*s), "{s:?}");
-                assert!(!automatic(kind).contains(s), "{s:?} would start by itself for {kind:?}");
+                assert!(s.is_on_demand() && wired(s), "{s:?}");
+                assert!(!automatic(kind).contains(&s), "{s:?} would start by itself for {kind:?}");
             }
         }
     }

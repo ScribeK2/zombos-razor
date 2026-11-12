@@ -275,10 +275,10 @@ const fn secs(n: u64) -> Duration {
 /// The limits a Check has with no setting: `(whole, query)`. An on-demand Check has no
 /// query limit of its own here; its module keeps its own.
 fn default_budget(section: Section) -> Budget {
-    if let Some(check) = section.check() {
-        return Budget { whole: check.budget.0, query: check.budget.1 };
+    match section.check() {
+        Some(check) => Budget { whole: check.budget.0, query: check.budget.1 },
+        None => Budget { whole: secs(20), query: secs(4) },
     }
-    Budget { whole: secs(20), query: secs(4) }
 }
 
 /// The settings timeout, or the Check's default. The query limit scales with the whole limit.

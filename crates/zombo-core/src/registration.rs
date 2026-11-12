@@ -78,7 +78,7 @@ pub static CHECK: Check = Check {
     ],
     ..Check::base(|request| {
         Box::pin(async move {
-            let mut endpoints = request.endpoints.cloned().unwrap_or_default();
+            let mut endpoints = request.seams.endpoints.cloned().unwrap_or_default();
             if let Some(proxy) = request.proxy {
                 endpoints.proxy = Some(proxy.into());
             }

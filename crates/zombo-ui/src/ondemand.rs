@@ -10,13 +10,10 @@ pub struct Brief {
     pub note: Option<&'static str>,
 }
 
-/// The Checks a rep can ask for on this kind of target. They never start by themselves.
-pub fn on_demand(kind: Kind) -> &'static [Section] {
-    match kind {
-        Kind::Domain | Kind::Hostname | Kind::Email | Kind::Ip => {
-            &[Section::Ports, Section::Smtp, Section::TlsPort, Section::Blacklist]
-        }
-    }
+/// The Checks a rep can ask for on this kind of target, in rail order. They never start by
+/// themselves. Every kind can ask for all of them today.
+pub fn on_demand(_kind: Kind) -> Vec<Section> {
+    Section::ALL.into_iter().filter(|s| s.is_on_demand()).collect()
 }
 
 pub fn runnable(kind: Kind, section: Section) -> bool {
