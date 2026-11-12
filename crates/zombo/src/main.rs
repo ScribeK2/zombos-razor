@@ -36,7 +36,7 @@ use zombo_core::{
     tls_extras::{caa_findings, check_caa, ocsp_findings},
 };
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo checks [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]\n       zombo checks [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     zombo_core::resolver::parse_addr(v)
@@ -73,6 +73,7 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("ports") => ports(it).await,
         Some("smtp") => smtp(it).await,
         Some("caa") => caa(it).await,
+        Some("run") => run_check(it).await,
         Some("checks") => checks(it),
         _ => Err(USAGE.into()),
     }
@@ -1183,5 +1184,46 @@ fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
             c.budget.0.as_secs_f64()
         );
     }
+    Ok(())
+}
+
+const RUN_USAGE: &str = "usage: zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]";
+
+async fn run_check(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut positional, mut json, mut timeout, mut resolvers, mut port) = (vec![], false, None, vec![], None);
+    let mut selectors = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                let ms = value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?;
+                timeout = Some(Duration::from_millis(ms));
+            }
+            "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
+            "--port" => {
+                port = Some(value("--port")?.parse::<u16>().map_err(|_| "--port needs a number from 1 to 65535")?);
+            }
+            "--selector" => selectors.push(value("--selector")?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{RUN_USAGE}")),
+            _ => positional.push(a),
+        }
+    }
+    let [id, target] = &positional[..] else { return Err(RUN_USAGE.into()) };
+    let args = zombo_core::check::RunArgs {
+        timeout,
+        resolvers: &resolvers,
+        port,
+        selectors: &selectors,
+        ..zombo_core::check::RunArgs::new(target)
+    };
+    let report = zombo_core::check::run_by_id(id, &args).await.map_err(|e| e.to_string())?;
+    if json {
+        let mut v = serde_json::to_value(&report.outcome).map_err(|e| e.to_string())?;
+        v["check"] = report.id.into();
+        v["target"] = report.subject.clone().into();
+        return print_json(&v);
+    }
+    println!("{}", report.to_text());
     Ok(())
 }
