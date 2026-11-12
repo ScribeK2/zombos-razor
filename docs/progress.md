@@ -149,7 +149,7 @@ End state: `Section` stays a small enum used as an index. A new Check adds one v
 - [x] Rdns: the machine's resolvers are `Request::machine_resolvers`
 - [x] Blacklist: the brief states the number of lists as text; a test keeps it equal to `DNSBLS.len()`; `Request::machine` gives the machine's resolvers or the no-resolver error
 - [x] Delegation: `Request::ns_port` is the port of both the parent's servers and the zone's; the three `dns_` prefixes it owns beat `dns_` by the longest match
-- [ ] Registration
+- [x] Registration: `Request::proxy` is the rep's proxy, copied for every Check; `Request::endpoints` is where Registration asks, for a test to point at fakes
 - [ ] Ports
 - [ ] Email
 - [ ] Web
