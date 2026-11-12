@@ -57,11 +57,12 @@ fn section_md(tab: &Tab, section: Section, level: &str) -> String {
     let findings: Vec<_> = d
         .findings
         .iter()
-        .map(|f| zombo_core::Finding {
-            title: single_line(&f.title).into(),
-            message: single_line(&f.message),
-            recommendation: f.recommendation.as_deref().map(|r| single_line(r).into()),
-            ..f.clone()
+        .map(|f| {
+            let clean = zombo_core::Finding::new(f.code, f.severity, single_line(&f.title), single_line(&f.message));
+            match f.recommendation.as_deref() {
+                Some(r) => clean.recommend(single_line(r)),
+                None => clean,
+            }
         })
         .collect();
     finding_lines(&mut out, &findings);
