@@ -9,7 +9,7 @@ use zombo_core::{
         BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
     },
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
-    dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
+    dnssec::{self, check_dnssec, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
@@ -158,7 +158,7 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             .map_err(|e| e.to_string()),
         Section::Dnssec => check_dnssec(&bootstrap, &validating_resolvers(), name, 53, SystemTime::now(), query)
             .await
-            .map(|r| dnssec_outcome(&r))
+            .map(|r| dnssec::outcome(&r))
             .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
@@ -254,30 +254,6 @@ pub fn delegation_outcome(r: &DelegationResult) -> Outcome {
         facts.push(Fact::new(format!("Server {}", s.name), state));
     }
     Outcome { findings: delegation_findings(r), facts, ..Outcome::default() }
-}
-
-pub fn dnssec_outcome(r: &DnssecResult) -> Outcome {
-    let mut facts = vec![Fact::new("Zone", &r.apex)];
-    facts.extend(r.resolvers.iter().map(|v| Fact::new(format!("Resolver {}", v.resolver), v.status.label())));
-    for d in &r.ds {
-        let matched = if d.matched { "matches a served key" } else { "matches no served key" };
-        facts.push(Fact::new("DS record", format!("key tag {}, {}, {}", d.ds.key_tag.0, d.ds.algorithm, matched)));
-    }
-    let mut details = vec![];
-    for n in &r.nameservers {
-        match &n.error {
-            Some(e) => details.push(Fact::new(format!("Nameserver {}", n.name), format!("no usable answer: {e}"))),
-            None => {
-                for k in &n.dnskeys {
-                    details.push(Fact::new(
-                        format!("Key at {}", n.name),
-                        format!("key tag {}, {}, flags {}", k.key_tag.0, k.algorithm, k.flags),
-                    ));
-                }
-            }
-        }
-    }
-    Outcome { findings: dnssec_findings(r), facts, details_title: "Keys by nameserver", details }
 }
 
 pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
