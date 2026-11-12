@@ -3,7 +3,7 @@
 use std::{
     borrow::Cow,
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     time::{Duration, SystemTime},
 };
@@ -51,13 +51,8 @@ impl Outcome {
     }
 }
 
-/// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The other fields are what a test swaps for a fake, or the rep's settings and the tab fill in;
-/// production takes them from [`Request::system`]. Each is read by one Check family: `ns_port`,
-/// `now` and `validating` by DNSSEC (`ns_port` also by Delegation), `port` by the Checks that dial
-/// one port (TLS, SMTP, and the Web Check's HTTPS port when `dial` is set), `machine_resolvers` by
-/// the Checks that ask this machine's resolvers (the Web Check's hosting questions and SMTP too),
-/// `proxy` and `endpoints` by Registration, `selectors` by Email, `dial` by Web, `kind` by SMTP.
+/// What a Check is asked. The first seven fields are the inputs the UI sets for a run (the CLI
+/// sets the same ones); [`Seams`] is where a Check goes, and only tests set it.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -69,52 +64,78 @@ pub struct Request<'a> {
     /// parses as a host name. SMTP reads it: a domain or an email goes to its MX hosts, the rest is
     /// dialled as typed.
     pub kind: Kind,
+    /// How long one query may take. Every Check reads it.
     pub query: Duration,
+    /// The resolvers that find the zone of `name`.
     pub bootstrap: &'a [SocketAddr],
-    /// The port the zone's own nameservers, and its parent zone's, are asked on.
+    /// The port the Check dials. A Check whose descriptor has `takes_chosen_port` gets the rep's pick;
+    /// TLS and SMTP read it.
+    pub port: u16,
+    /// The `http://` or `https://` proxy the Checks that honour one go through. `None` leaves each
+    /// Check its own default. Registration reads it.
+    pub proxy: Option<&'a str>,
+    /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
+    /// Email reads it.
+    pub selectors: &'a [String],
+    /// Where a Check goes. Production leaves this at its default; only tests set it.
+    pub seams: Seams<'a>,
+}
+
+/// Where a Check goes, which production never sets and tests point at fakes. A new seam touches only
+/// this struct and its `Default`.
+#[derive(Debug, Clone, Copy)]
+pub struct Seams<'a> {
+    /// The port the zone's own nameservers, and its parent zone's, are asked on. DNSSEC and Delegation read it.
     pub ns_port: u16,
-    /// The moment signature validity is judged at.
+    /// The moment signature validity is judged at. DNSSEC reads it.
     pub now: SystemTime,
     /// The validating resolvers to ask. `None` means the Check's own list; `Some(&[])` means ask none.
+    /// DNSSEC reads it.
     pub validating: Option<&'a [Vantage]>,
-    /// The port the Check dials. A Check whose descriptor has `takes_chosen_port` gets the rep's pick.
-    /// The Web Check reads it as its HTTPS port only when `dial` is set; otherwise it uses 443.
-    pub port: u16,
     /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine
     /// has none. The Checks that need them fail without one (SMTP instead asks `bootstrap` for the MX
-    /// hosts and skips the reverse lookup of the host it reached).
+    /// hosts and skips the reverse lookup of the host it reached). Web, Reverse DNS, Blacklist and SMTP read it.
     pub machine_resolvers: Option<&'a [SocketAddr]>,
-    /// The `http://` or `https://` proxy the Checks that honour one go through. `None` leaves each
-    /// Check its own default.
-    pub proxy: Option<&'a str>,
-    /// Where Registration asks. `None` means the real registries; a test points it at fakes.
+    /// Where Registration asks. `None` means the real registries; a test points it at fakes. It stays
+    /// here, though it names a Registration type, because only a test sets it.
     pub endpoints: Option<&'a Endpoints>,
-    /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
-    pub selectors: &'a [String],
-    /// Where the Web Check connects instead of resolving its name: the address the name is pinned
-    /// to, and the port of plain HTTP (the HTTPS port is `port`). `None` means the name's own
-    /// addresses and port 80.
-    pub dial: Option<SocketAddr>,
+    /// The address the Web Check connects to instead of resolving its name. `None` means the name's own addresses.
+    pub pin: Option<IpAddr>,
+    /// The port of plain HTTP the Web Check uses. `None` means 80.
+    pub http_port: Option<u16>,
+    /// The port of HTTPS the Web Check uses. `None` means 443.
+    pub https_port: Option<u16>,
+}
+
+impl Default for Seams<'_> {
+    /// The production values: port 53, the clock now, and every other seam unset.
+    fn default() -> Self {
+        Seams {
+            ns_port: 53,
+            now: SystemTime::now(),
+            validating: None,
+            machine_resolvers: None,
+            endpoints: None,
+            pin: None,
+            http_port: None,
+            https_port: None,
+        }
+    }
 }
 
 impl<'a> Request<'a> {
-    /// The real network: port 53, the clock now, the Check's own resolvers, port 443, and the kind
-    /// parsing `name` gives (a host name when it does not parse).
+    /// The real network: the default seams, port 443, and the kind parsing `name` gives (a host name
+    /// when it does not parse).
     pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
         Request {
             name,
             kind: parse_target(name).map_or(Kind::Hostname, |t| t.kind),
             query,
             bootstrap,
-            ns_port: 53,
-            now: SystemTime::now(),
-            validating: None,
             port: 443,
-            machine_resolvers: None,
             proxy: None,
-            endpoints: None,
             selectors: &[],
-            dial: None,
+            seams: Seams::default(),
         }
     }
 }
@@ -122,7 +143,7 @@ impl<'a> Request<'a> {
 impl Request<'_> {
     /// The resolvers of this machine, possibly none.
     pub(crate) fn machine_or_none(&self) -> Cow<'_, [SocketAddr]> {
-        match self.machine_resolvers {
+        match self.seams.machine_resolvers {
             Some(r) => Cow::Borrowed(r),
             None => Cow::Owned(system_resolvers()),
         }

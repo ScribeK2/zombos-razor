@@ -8,7 +8,7 @@ use std::{net::SocketAddr, time::Duration};
 use common::FakeDns;
 use zombo_core::{
     Severity,
-    check::{Fact, Outcome, Request},
+    check::{Fact, Outcome, Request, Seams},
     delegation::CHECK,
     target::Kind,
 };
@@ -29,7 +29,9 @@ fn found(o: &Outcome) -> Vec<(&'static str, Severity)> {
 /// (a referral) and the zone's nameserver.
 async fn run_on(port: u16, name: &str) -> Result<Outcome, String> {
     let rec = FakeDns::start(BOOTSTRAP).await;
-    CHECK.run(&Request { ns_port: port, ..Request::system(name, T, &[rec.addr]) }).await
+    CHECK
+        .run(&Request { seams: Seams { ns_port: port, ..Seams::default() }, ..Request::system(name, T, &[rec.addr]) })
+        .await
 }
 
 #[tokio::test]
@@ -97,7 +99,7 @@ async fn the_request_s_query_timeout_limits_each_question() {
     let rec = FakeDns::start(BOOTSTRAP).await;
     let bootstrap = [rec.addr];
     let request = Request {
-        ns_port: silent.addr.port(),
+        seams: Seams { ns_port: silent.addr.port(), ..Seams::default() },
         ..Request::system("example.com", Duration::from_millis(100), &bootstrap)
     };
     assert!(CHECK.run(&request).await.is_err());

@@ -904,17 +904,24 @@ pub static CHECK: Check = Check {
     ..Check::base(|request| {
         Box::pin(async move {
             let own;
-            let validating = match request.validating {
+            let validating = match request.seams.validating {
                 Some(v) => v,
                 None => {
                     own = validating_resolvers();
                     &own
                 }
             };
-            check_dnssec(request.bootstrap, validating, request.name, request.ns_port, request.now, request.query)
-                .await
-                .map(|r| outcome(&r))
-                .map_err(|e| e.to_string())
+            check_dnssec(
+                request.bootstrap,
+                validating,
+                request.name,
+                request.seams.ns_port,
+                request.seams.now,
+                request.query,
+            )
+            .await
+            .map(|r| outcome(&r))
+            .map_err(|e| e.to_string())
         })
     })
 };

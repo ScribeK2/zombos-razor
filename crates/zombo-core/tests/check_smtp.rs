@@ -22,7 +22,7 @@ use fake::{FakeSmtp, Step, say};
 use hosts::MailHost;
 use zombo_core::{
     Severity,
-    check::{Fact, Outcome, Request},
+    check::{Fact, Outcome, Request, Seams},
     smtp::{CHECK, PORTS},
     target::{Kind, parse_target},
 };
@@ -39,7 +39,12 @@ fn found(o: &Outcome) -> Vec<(&'static str, Severity)> {
 }
 
 fn request<'a>(name: &'a str, kind: Kind, port: u16, machine: &'a [SocketAddr]) -> Request<'a> {
-    Request { port, kind, machine_resolvers: Some(machine), ..Request::system(name, T, &[]) }
+    Request {
+        port,
+        kind,
+        seams: Seams { machine_resolvers: Some(machine), ..Seams::default() },
+        ..Request::system(name, T, &[])
+    }
 }
 
 /// Four loopback hosts on one port: 127.0.0.1 answers, 127.0.0.2 to 127.0.0.4 refuse.
@@ -235,7 +240,7 @@ async fn an_mx_lookup_nobody_answers_gives_up_after_five_seconds_and_dials_the_n
     let r = Request {
         port: srv.addr.port(),
         kind: Kind::Domain,
-        machine_resolvers: Some(NO_RESOLVER),
+        seams: Seams { machine_resolvers: Some(NO_RESOLVER), ..Seams::default() },
         query: Duration::from_millis(50),
         ..Request::system("127.0.0.1", T, &bootstrap)
     };
@@ -257,7 +262,7 @@ async fn a_machine_with_no_resolver_asks_the_bootstrap_resolvers_for_the_mx_host
     let r = Request {
         port: srv.addr.port(),
         kind: Kind::Domain,
-        machine_resolvers: Some(NO_RESOLVER),
+        seams: Seams { machine_resolvers: Some(NO_RESOLVER), ..Seams::default() },
         ..Request::system("example.test", T, &bootstrap)
     };
     let o = CHECK.run(&r).await.unwrap();
@@ -270,7 +275,7 @@ async fn a_machine_with_no_resolver_asks_the_bootstrap_resolvers_for_the_mx_host
     let r = Request {
         port: srv.addr.port(),
         kind: Kind::Domain,
-        machine_resolvers: Some(&machine),
+        seams: Seams { machine_resolvers: Some(&machine), ..Seams::default() },
         ..Request::system("example.test", T, &bootstrap)
     };
     let o = CHECK.run(&r).await.unwrap();
@@ -302,7 +307,7 @@ async fn a_machine_with_no_resolver_skips_the_ptr_step_even_when_the_bootstrap_r
     let r = Request {
         port: srv.addr.port(),
         kind: Kind::Ip,
-        machine_resolvers: Some(NO_RESOLVER),
+        seams: Seams { machine_resolvers: Some(NO_RESOLVER), ..Seams::default() },
         ..Request::system("127.0.0.1", T, &bootstrap)
     };
     let o = CHECK.run(&r).await.unwrap();
@@ -344,8 +349,11 @@ async fn a_system_request_takes_its_kind_from_its_name() {
         assert_eq!(Request::system(name, T, &[]).kind, kind, "{name}");
     }
     let srv = mail().await;
-    let r =
-        Request { port: srv.addr.port(), machine_resolvers: Some(NO_RESOLVER), ..Request::system("127.0.0.1", T, &[]) };
+    let r = Request {
+        port: srv.addr.port(),
+        seams: Seams { machine_resolvers: Some(NO_RESOLVER), ..Seams::default() },
+        ..Request::system("127.0.0.1", T, &[])
+    };
     let o = CHECK.run(&r).await.unwrap();
     assert_eq!(rows(&o.facts)[0], format!("Server: 127.0.0.1:{} (127.0.0.1)", srv.addr.port()));
 }

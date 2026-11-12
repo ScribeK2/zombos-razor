@@ -9,7 +9,7 @@ use common::FakeDns;
 use zombo_core::{
     Severity,
     blacklist::{CHECK, DNSBLS},
-    check::{Fact, Outcome, Request},
+    check::{Fact, Outcome, Request, Seams},
 };
 
 const T: Duration = Duration::from_millis(500);
@@ -26,7 +26,12 @@ fn found(o: &Outcome) -> Vec<(&'static str, Severity)> {
 async fn run_with(zone: &str, name: &str, query: Duration) -> Result<Outcome, String> {
     let dns = FakeDns::start(zone).await;
     let machine = [dns.addr];
-    CHECK.run(&Request { machine_resolvers: Some(&machine), ..Request::system(name, query, &[]) }).await
+    CHECK
+        .run(&Request {
+            seams: Seams { machine_resolvers: Some(&machine), ..Seams::default() },
+            ..Request::system(name, query, &[])
+        })
+        .await
 }
 
 async fn run(zone: &str, name: &str) -> Result<Outcome, String> {
@@ -54,7 +59,12 @@ async fn a_listed_address_names_the_list_and_keeps_every_answer_in_the_details()
 
 #[tokio::test]
 async fn a_machine_with_no_resolver_gets_the_error_text() {
-    let err = CHECK.run(&Request { machine_resolvers: Some(&[]), ..Request::system("203.0.113.7", T, &[]) }).await;
+    let err = CHECK
+        .run(&Request {
+            seams: Seams { machine_resolvers: Some(&[]), ..Seams::default() },
+            ..Request::system("203.0.113.7", T, &[])
+        })
+        .await;
     assert_eq!(err.unwrap_err(), "this machine has no DNS resolver configured");
 }
 
@@ -65,7 +75,7 @@ async fn a_silent_resolver_is_waited_for_by_the_modules_own_limit_not_the_reques
     let machine = [dns.addr];
     let o = CHECK
         .run(&Request {
-            machine_resolvers: Some(&machine),
+            seams: Seams { machine_resolvers: Some(&machine), ..Seams::default() },
             ..Request::system("203.0.113.7", Duration::from_millis(50), &[])
         })
         .await

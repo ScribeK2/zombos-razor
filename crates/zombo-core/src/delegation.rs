@@ -440,7 +440,7 @@ pub static CHECK: Check = Check {
     ],
     ..Check::base(|request| {
         Box::pin(async move {
-            let ports = Ports { parent: request.ns_port, nameserver: request.ns_port };
+            let ports = Ports { parent: request.seams.ns_port, nameserver: request.seams.ns_port };
             check_delegation(request.bootstrap, request.name, ports, request.query)
                 .await
                 .map(|r| outcome(&r))

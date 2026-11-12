@@ -10,7 +10,7 @@ use registry::{FakeHttp, FakeWhois, Reply, rdap_domain, silent};
 use time::OffsetDateTime;
 use zombo_core::{
     Severity,
-    check::{Fact, Outcome, Request},
+    check::{Fact, Outcome, Request, Seams},
     registration::{CHECK, Endpoints, RegDate},
     target::Kind,
 };
@@ -46,7 +46,12 @@ fn whois_at(whois: &str) -> Endpoints {
 }
 
 async fn run(name: &str, endpoints: &Endpoints, query: Duration) -> Result<Outcome, String> {
-    CHECK.run(&Request { endpoints: Some(endpoints), ..Request::system(name, query, &[]) }).await
+    CHECK
+        .run(&Request {
+            seams: Seams { endpoints: Some(endpoints), ..Seams::default() },
+            ..Request::system(name, query, &[])
+        })
+        .await
 }
 
 #[tokio::test]
@@ -125,7 +130,11 @@ async fn the_requests_query_time_is_the_whole_lookups_limit() {
 async fn the_requests_proxy_carries_the_rdap_lookup() {
     let proxy = FakeHttp::start(|_| Reply::new(403, "")).await;
     let ep = rdap_at("http://127.0.0.1:1/");
-    let request = Request { proxy: Some(&proxy.base), endpoints: Some(&ep), ..Request::system("example.com", T, &[]) };
+    let request = Request {
+        proxy: Some(&proxy.base),
+        seams: Seams { endpoints: Some(&ep), ..Seams::default() },
+        ..Request::system("example.com", T, &[])
+    };
     let err = CHECK.run(&request).await.unwrap_err();
     assert_eq!(proxy.paths(), ["127.0.0.1:1"], "the proxy was asked to CONNECT to the RDAP server");
     assert!(err.contains("CONNECT proxy failed"), "{err}");

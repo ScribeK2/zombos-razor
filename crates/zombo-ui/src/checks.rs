@@ -226,6 +226,31 @@ mod tests {
         }
     }
 
+    /// The UI never sets a seam: every Check is handed the production values, whatever the settings.
+    #[test]
+    fn no_check_is_handed_a_seam() {
+        let settings = Settings {
+            proxy: Some("http://proxy.example:3128".into()),
+            selectors: vec!["acme2024".into()],
+            ..Settings::default()
+        };
+        let mut checks: Vec<&Check> = Section::ALL.iter().filter_map(|s| s.check()).collect();
+        checks.push(&tls::ON_PORT);
+        for check in checks {
+            let s =
+                request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings).seams;
+            let age = std::time::SystemTime::now().duration_since(s.now).unwrap_or_default();
+            assert!(age < Duration::from_secs(5), "{}: {age:?}", check.label);
+            assert_eq!(s.ns_port, 53, "{}", check.label);
+            assert!(s.validating.is_none(), "{}", check.label);
+            assert!(s.machine_resolvers.is_none(), "{}", check.label);
+            assert!(s.endpoints.is_none(), "{}", check.label);
+            assert!(s.pin.is_none(), "{}", check.label);
+            assert!(s.http_port.is_none(), "{}", check.label);
+            assert!(s.https_port.is_none(), "{}", check.label);
+        }
+    }
+
     #[test]
     fn every_check_is_handed_the_rep_proxy() {
         let settings = Settings { proxy: Some("http://proxy.example:3128".into()), ..Settings::default() };

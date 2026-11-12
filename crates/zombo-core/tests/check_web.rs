@@ -14,7 +14,7 @@ use common::{FakeDns, zone};
 use site::{FakeSite, Resp, closed_port};
 use zombo_core::{
     Severity,
-    check::{Fact, Outcome, Request},
+    check::{Fact, Outcome, Request, Seams},
     target::Kind,
     web::CHECK,
 };
@@ -44,9 +44,13 @@ impl Rig {
         let resolvers = [self.dns.addr];
         CHECK
             .run(&Request {
-                dial: Some(self.site.addr),
-                port: self.https,
-                machine_resolvers: Some(&resolvers),
+                seams: Seams {
+                    pin: Some(self.site.addr.ip()),
+                    http_port: Some(self.site.addr.port()),
+                    https_port: Some(self.https),
+                    machine_resolvers: Some(&resolvers),
+                    ..Seams::default()
+                },
                 ..Request::system(name, query, &[])
             })
             .await
@@ -155,9 +159,13 @@ async fn the_requests_proxy_is_not_used() {
     let proxy_url = format!("http://{}", proxy.addr);
     let request = Request {
         proxy: Some(&proxy_url),
-        dial: Some(rig.site.addr),
-        port: rig.https,
-        machine_resolvers: Some(&resolvers),
+        seams: Seams {
+            pin: Some(rig.site.addr.ip()),
+            http_port: Some(rig.site.addr.port()),
+            https_port: Some(rig.https),
+            machine_resolvers: Some(&resolvers),
+            ..Seams::default()
+        },
         ..Request::system("www.example.com", T, &[])
     };
     let o = CHECK.run(&request).await.unwrap();
