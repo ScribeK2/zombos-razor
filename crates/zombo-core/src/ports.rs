@@ -2,7 +2,6 @@
 //! connection. Ported from the Go `hosting_reachability` Check.
 
 use std::{
-    borrow::Cow,
     collections::HashSet,
     future::Future,
     io,
@@ -250,27 +249,19 @@ pub async fn probe(addresses: &[IpAddr], ports: &[ServicePort], t: Timing) -> Po
     probe_with(TcpStream::connect, addresses, ports, t).await
 }
 
-fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: &'static str,
-    message: String,
-    recommendation: Option<&'static str>,
-) -> Finding {
-    Finding { code, severity, title: Cow::Borrowed(title), message, recommendation: recommendation.map(Cow::Borrowed) }
-}
-
 /// The Go `hosting_reachability` findings.
 pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
     use PortState::*;
     if r.addresses.is_empty() {
-        return vec![finding(
-            "hosting_reachability_no_address",
-            Severity::Critical,
-            "No address to probe",
-            format!("{target} has no A or AAAA record, so there is no server to reach."),
-            Some("Add an A record pointing at the hosting server, or check the DNS Lookup for this name."),
-        )];
+        return vec![
+            Finding::new(
+                "hosting_reachability_no_address",
+                Severity::Critical,
+                "No address to probe",
+                format!("{target} has no A or AAAA record, so there is no server to reach."),
+            )
+            .recommend("Add an A record pointing at the hosting server, or check the DNS Lookup for this name."),
+        ];
     }
     let mut open_ports: HashSet<u16> = HashSet::new();
     let mut open_on: HashSet<(IpAddr, u16)> = HashSet::new();
@@ -305,15 +296,15 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
     // only those ports says nothing about the server.
     const OUTBOUND_MAIL: [u16; 4] = [25, 465, 587, 2525];
     if open_ports.is_empty() && filtered > 0 && closed == 0 && r.ports.iter().all(|p| OUTBOUND_MAIL.contains(&p.port)) {
-        return vec![finding(
+        return vec![Finding::new(
             "hosting_reachability_mail_filtered",
             Severity::Info,
             "No answer on the mail ports",
             format!(
                 "{addrs} did not answer on the mail ports probed. Many networks and hosting providers block outbound mail connections, so this may be the network doing the probing and not the server."
             ),
-            Some("Re-run from a network that allows outbound mail, or check the server's own mail logs."),
-        )];
+        )
+            .recommend("Re-run from a network that allows outbound mail, or check the server's own mail logs.")];
     }
     if open_ports.is_empty() {
         let mut msg = format!("None of the probed ports on {addrs} accepted a connection");
@@ -328,33 +319,34 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
             msg +=
                 &format!(" ({closed} refused, {filtered} got no answer, {no_route} had no route from this network).");
         }
-        return vec![finding(
-            "hosting_reachability_unreachable",
-            Severity::Critical,
-            "Host unreachable",
-            msg,
-            Some(rec),
-        )];
+        return vec![
+            Finding::new("hosting_reachability_unreachable", Severity::Critical, "Host unreachable", msg)
+                .recommend(rec),
+        ];
     }
 
     let mut out = vec![];
     let (no_web, no_tls) = (lacking(&[80, 443]), lacking(&[443]));
     if !no_web.is_empty() {
-        out.push(finding(
+        out.push(Finding::new(
             "hosting_reachability_web_closed",
             Severity::Warning,
             "Web ports closed",
             format!("Neither HTTP (80) nor HTTPS (443) is open on {no_web}, so a website there won't load."),
-            Some("If this server should host a site, check the web server is running and the firewall allows 80 and 443."),
-        ));
+        )
+            .recommend("If this server should host a site, check the web server is running and the firewall allows 80 and 443."));
     } else if !no_tls.is_empty() {
-        out.push(finding(
-            "hosting_reachability_no_https",
-            Severity::Warning,
-            "No HTTPS",
-            format!("HTTP (80) is open but HTTPS (443) is not on {no_tls}, so visitors can't load the site securely."),
-            Some("Enable HTTPS on the web server (e.g. a free Let's Encrypt certificate) and open port 443."),
-        ));
+        out.push(
+            Finding::new(
+                "hosting_reachability_no_https",
+                Severity::Warning,
+                "No HTTPS",
+                format!(
+                    "HTTP (80) is open but HTTPS (443) is not on {no_tls}, so visitors can't load the site securely."
+                ),
+            )
+            .recommend("Enable HTTPS on the web server (e.g. a free Let's Encrypt certificate) and open port 443."),
+        );
     }
     let no_smtp = lacking(&[25]);
     if !no_smtp.is_empty() {
@@ -364,12 +356,8 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
         if open_ports.contains(&587) || open_ports.contains(&465) {
             msg += " Mail submission is open, so the server does run mail.";
         }
-        out.push(finding(
-            "hosting_reachability_smtp_closed",
-            Severity::Info,
-            "SMTP port closed",
-            msg,
-            Some("If this server should receive mail, re-run from another network before changing anything on the server."),
+        out.push(Finding::new("hosting_reachability_smtp_closed", Severity::Info, "SMTP port closed", msg).recommend(
+            "If this server should receive mail, re-run from another network before changing anything on the server.",
         ));
     }
     let dbs: Vec<String> = DATABASE_PORTS
@@ -378,23 +366,24 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
         .filter_map(|p| r.ports.iter().find(|x| x.port == *p).map(|x| format!("{} ({p})", x.service)))
         .collect();
     if !dbs.is_empty() {
-        out.push(finding(
-            "hosting_reachability_database_exposed",
-            Severity::Warning,
-            "Database open to the internet",
-            format!(
-                "{} accepts connections from anywhere, which invites brute-force and exploit attempts.",
-                dbs.join(", ")
-            ),
-            Some("Firewall database ports to the hosts that need them, or bind the database to localhost."),
-        ));
+        out.push(
+            Finding::new(
+                "hosting_reachability_database_exposed",
+                Severity::Warning,
+                "Database open to the internet",
+                format!(
+                    "{} accepts connections from anywhere, which invites brute-force and exploit attempts.",
+                    dbs.join(", ")
+                ),
+            )
+            .recommend("Firewall database ports to the hosts that need them, or bind the database to localhost."),
+        );
     }
-    out.push(finding(
+    out.push(Finding::new(
         "hosting_reachability_reachable",
         Severity::Ok,
         "Reachable",
         format!("{addrs} answers on {}.", services.join(", ")),
-        None,
     ));
     out
 }

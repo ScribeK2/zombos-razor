@@ -175,16 +175,6 @@ fn embeds_address(name: &str, ip: Ipv4Addr) -> bool {
     })
 }
 
-fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: impl Into<std::borrow::Cow<'static, str>>,
-    message: String,
-    recommendation: Option<&'static str>,
-) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation: recommendation.map(Into::into) }
-}
-
 pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
     use Severity::*;
     let mut out = vec![];
@@ -192,76 +182,81 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
         RdnsResult::Host { host, addresses, errors } => {
             let host = printable(&clip(host));
             if addresses.is_empty() && !errors.is_empty() {
-                out.push(finding(
-                    "rdns_lookup_failed",
-                    Warning,
-                    "Address lookup failed",
-                    format!("The address lookup for {host} got no answer ({}).", errors.join("; ")),
-                    Some("Re-run; if it keeps failing, check the name's nameservers."),
-                ));
+                out.push(
+                    Finding::new(
+                        "rdns_lookup_failed",
+                        Warning,
+                        "Address lookup failed",
+                        format!("The address lookup for {host} got no answer ({}).", errors.join("; ")),
+                    )
+                    .recommend("Re-run; if it keeps failing, check the name's nameservers."),
+                );
             } else if addresses.is_empty() {
-                out.push(finding(
-                    "rdns_no_address",
-                    Warning,
-                    "No addresses",
-                    format!("{host} has no A or AAAA record, so there is no address to check reverse DNS for."),
-                    Some("Publish an A or AAAA record for the name."),
-                ));
+                out.push(
+                    Finding::new(
+                        "rdns_no_address",
+                        Warning,
+                        "No addresses",
+                        format!("{host} has no A or AAAA record, so there is no address to check reverse DNS for."),
+                    )
+                    .recommend("Publish an A or AAAA record for the name."),
+                );
             } else {
                 let list: Vec<String> = addresses.iter().map(ToString::to_string).collect();
-                out.push(finding(
+                out.push(Finding::new(
                     "rdns_addresses",
                     Info,
                     "Addresses",
                     format!("{host} resolves to {}.", list.join(", ")),
-                    None,
                 ));
             }
         }
         RdnsResult::Ip { ip, ptr_error, ptrs, .. } => {
             if let Some(e) = ptr_error {
-                out.push(finding(
-                    "rdns_lookup_failed",
-                    Warning,
-                    "Reverse DNS lookup failed",
-                    format!(
-                        "The PTR lookup for {ip} got no answer ({}), so its reverse DNS is unknown.",
-                        printable(&clip(e))
-                    ),
-                    Some("Re-run; if it keeps failing, check the network's DNS resolver."),
-                ));
+                out.push(
+                    Finding::new(
+                        "rdns_lookup_failed",
+                        Warning,
+                        "Reverse DNS lookup failed",
+                        format!(
+                            "The PTR lookup for {ip} got no answer ({}), so its reverse DNS is unknown.",
+                            printable(&clip(e))
+                        ),
+                    )
+                    .recommend("Re-run; if it keeps failing, check the network's DNS resolver."),
+                );
                 return out;
             }
             if ptrs.is_empty() {
-                out.push(finding(
+                out.push(Finding::new(
                     "rdns_no_ptr",
                     Warning,
                     "No reverse DNS",
                     format!("{ip} has no PTR record. Many mail servers reject or down-rank mail from an address without reverse DNS."),
-                    Some("Ask whoever owns the address block (the hosting provider or ISP) to set a PTR record naming the mail server's host name, and make that name resolve back to the address."),
-                ));
+                )
+                    .recommend("Ask whoever owns the address block (the hosting provider or ISP) to set a PTR record naming the mail server's host name, and make that name resolve back to the address."));
                 return out;
             }
             if ptrs.len() > 1 {
                 let names: Vec<&str> = ptrs.iter().map(|p| p.name.as_str()).collect();
-                out.push(finding(
+                out.push(Finding::new(
                     "rdns_multiple_ptr",
                     Info,
                     "Several PTR records",
                     format!("{ip} has {} PTR records ({}). Some receivers look at only one of them, and every name should resolve back to the address.", ptrs.len(), names.join(", ")),
-                    Some("Keep one PTR record, the mail server's host name."),
-                ));
+                )
+                    .recommend("Keep one PTR record, the mail server's host name."));
             }
             for p in ptrs {
                 let name = printable(&clip(&p.name));
                 if let Some(e) = &p.forward_error {
-                    out.push(finding(
+                    out.push(Finding::new(
                         "rdns_forward_unknown",
                         Info,
                         format!("{name} not confirmed"),
                         format!("The forward lookup of {name}, the PTR name of {ip}, got no answer ({e}), so forward confirmation is unknown."),
-                        Some("Re-run; if it keeps failing, check the name's nameservers."),
-                    ));
+                    )
+                        .recommend("Re-run; if it keeps failing, check the name's nameservers."));
                 } else if !p.confirmed {
                     let family = if ip.is_ipv4() { "A" } else { "AAAA" };
                     let got = if p.addresses.is_empty() {
@@ -272,29 +267,29 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                             p.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
                         )
                     };
-                    out.push(finding(
+                    out.push(Finding::new(
                         "rdns_not_confirmed",
                         Warning,
                         format!("{name} does not resolve back to {ip}"),
                         format!("{ip} points to {name}, which {got}. That fails forward-confirmed reverse DNS (FCrDNS), which mail servers penalise."),
-                        Some("Make the PTR name and its A or AAAA record agree: publish an address record for the name that points at this address, or change the PTR record."),
-                    ));
+                    )
+                        .recommend("Make the PTR name and its A or AAAA record agree: publish an address record for the name that points at this address, or change the PTR record."));
                 }
                 if let IpAddr::V4(v4) = ip
                     && embeds_address(&p.name, *v4)
                 {
-                    out.push(finding(
+                    out.push(Finding::new(
                         "rdns_generic_name",
                         Info,
                         format!("{name} looks generated"),
                         format!("The PTR name {name} contains the address {ip} itself, which providers generate for addresses nobody has named. Some mail servers distrust such names."),
-                        Some("Ask the provider to set a PTR name under the sending domain, such as mail.example.com."),
-                    ));
+                    )
+                        .recommend("Ask the provider to set a PTR name under the sending domain, such as mail.example.com."));
                 }
             }
             if ptrs.iter().all(|p| p.confirmed) {
                 let names: BTreeSet<&str> = ptrs.iter().map(|p| p.name.as_str()).collect();
-                out.push(finding(
+                out.push(Finding::new(
                     "rdns_confirmed",
                     Ok,
                     "Reverse DNS confirmed",
@@ -302,7 +297,6 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
                         "{ip} points to {}, which resolves back to {ip}.",
                         names.into_iter().collect::<Vec<_>>().join(", ")
                     ),
-                    None,
                 ));
             }
         }

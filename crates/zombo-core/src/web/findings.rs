@@ -10,16 +10,6 @@ use crate::{
 
 const SLOW_MS: u64 = 3000;
 
-fn finding(
-    code: &'static str,
-    severity: Severity,
-    title: impl Into<std::borrow::Cow<'static, str>>,
-    message: String,
-    rec: Option<&'static str>,
-) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation: rec.map(Into::into) }
-}
-
 pub fn web_findings(target: &str, r: &WebResult) -> Vec<Finding> {
     let mut out = inspection_findings(target, r);
     out.extend(downgrade_finding(r));
@@ -131,79 +121,86 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
     let final_url = r.final_url.as_deref().unwrap_or_default();
     let mut out = vec![];
     if r.redirect_loop {
-        out.push(finding(
+        out.push(Finding::new(
             "website_inspection_redirect_loop",
             Critical,
             "Redirect loop",
             format!("{} redirects back to a URL it already visited, so browsers give up with \"too many redirects\".", r.url),
-            Some("Check the redirect rules in the server config, .htaccess and CDN (a common cause is HTTPS forced both at the CDN and the origin, or a WordPress siteurl mismatch)."),
-        ));
+        )
+            .recommend("Check the redirect rules in the server config, .htaccess and CDN (a common cause is HTTPS forced both at the CDN and the origin, or a WordPress siteurl mismatch)."));
     } else if r.too_many_redirects {
-        out.push(finding(
-            "website_inspection_too_many_redirects",
-            Warning,
-            "Too many redirects",
-            format!("{} was still redirecting after {MAX_REDIRECTS} hops.", r.url),
-            Some("Shorten the redirect chain; each hop adds latency and some clients stop following."),
-        ));
+        out.push(
+            Finding::new(
+                "website_inspection_too_many_redirects",
+                Warning,
+                "Too many redirects",
+                format!("{} was still redirecting after {MAX_REDIRECTS} hops.", r.url),
+            )
+            .recommend("Shorten the redirect chain; each hop adds latency and some clients stop following."),
+        );
     } else if r.wordpress.critical_error {
-        out.push(finding(
+        out.push(Finding::new(
             "website_inspection_wp_critical_error",
             Critical,
             "WordPress critical error",
             format!("{final_url} shows WordPress's \"There has been a critical error\" page (HTTP {status})."),
-            Some("A plugin or theme is fatally erroring: check wp-content/debug.log or the PHP error log, and deactivate recently changed plugins."),
-        ));
+        )
+            .recommend("A plugin or theme is fatally erroring: check wp-content/debug.log or the PHP error log, and deactivate recently changed plugins."));
     } else if r.wordpress.maintenance {
-        out.push(finding(
+        out.push(Finding::new(
             "website_inspection_wp_maintenance",
             Warning,
             "WordPress maintenance mode",
             format!("{final_url} shows \"Briefly unavailable for scheduled maintenance\" (HTTP {status})."),
-            Some("If no update is running, an update was interrupted: delete the .maintenance file in the WordPress root."),
-        ));
+        )
+            .recommend("If no update is running, an update was interrupted: delete the .maintenance file in the WordPress root."));
     } else if status >= 500 {
-        out.push(finding(
-            "website_inspection_server_error",
-            Critical,
-            "Server error",
-            format!("{final_url} answered HTTP {status}."),
-            Some("Check the web server and application (PHP) error logs."),
-        ));
+        out.push(
+            Finding::new(
+                "website_inspection_server_error",
+                Critical,
+                "Server error",
+                format!("{final_url} answered HTTP {status}."),
+            )
+            .recommend("Check the web server and application (PHP) error logs."),
+        );
     } else if status >= 400 {
-        out.push(finding(
+        out.push(Finding::new(
             "website_inspection_client_error",
             Warning,
             format!("Homepage returns HTTP {status}"),
             format!("{final_url} answered HTTP {status}."),
-            Some("Check the document root, index file, and access or firewall rules (a 403 can be a WAF blocking automated requests)."),
-        ));
+        )
+            .recommend("Check the document root, index file, and access or firewall rules (a 403 can be a WAF blocking automated requests)."));
     } else if (200..300).contains(&status) {
-        out.push(finding(
+        out.push(Finding::new(
             "website_inspection_healthy",
             Severity::Ok,
             "Site is up",
             format!("{final_url} answered HTTP {status} in {} ms.", r.time_ms),
-            None,
         ));
     }
     if let Some(e) = &r.https_error {
-        out.push(finding(
-            "website_inspection_https_failed",
-            Warning,
-            "HTTPS failed; HTTP only",
-            format!("HTTPS did not work ({e}), so the site was inspected over plain HTTP."),
-            Some("Install a valid certificate and serve the site on port 443."),
-        ));
+        out.push(
+            Finding::new(
+                "website_inspection_https_failed",
+                Warning,
+                "HTTPS failed; HTTP only",
+                format!("HTTPS did not work ({e}), so the site was inspected over plain HTTP."),
+            )
+            .recommend("Install a valid certificate and serve the site on port 443."),
+        );
     }
     if r.http_to_https == Some(false) {
-        out.push(finding(
-            "website_inspection_https_not_enforced",
-            Warning,
-            "HTTPS not enforced",
-            format!("http://{target}/ does not redirect to HTTPS."),
-            Some("Redirect all plain HTTP requests to https:// with a 301."),
-        ));
+        out.push(
+            Finding::new(
+                "website_inspection_https_not_enforced",
+                Warning,
+                "HTTPS not enforced",
+                format!("http://{target}/ does not redirect to HTTPS."),
+            )
+            .recommend("Redirect all plain HTTP requests to https:// with a 301."),
+        );
     }
     if !r.redirect_loop && !r.too_many_redirects {
         let https = final_url.starts_with("https://");
@@ -216,14 +213,18 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
                 missing.push(name);
             } else if https {
                 // HSTS is ignored over plain HTTP.
-                out.push(finding(
-                    "website_inspection_missing_hsts",
-                    Warning,
-                    "No HSTS",
-                    "The site does not send Strict-Transport-Security, so browsers may still try plain HTTP first."
-                        .into(),
-                    Some("Add Strict-Transport-Security: max-age=31536000 once HTTPS works everywhere on the site."),
-                ));
+                out.push(
+                    Finding::new(
+                        "website_inspection_missing_hsts",
+                        Warning,
+                        "No HSTS",
+                        "The site does not send Strict-Transport-Security, so browsers may still try plain HTTP first."
+                            .into(),
+                    )
+                    .recommend(
+                        "Add Strict-Transport-Security: max-age=31536000 once HTTPS works everywhere on the site.",
+                    ),
+                );
             }
         }
         if !missing.is_empty() {
@@ -232,23 +233,27 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
             } else {
                 format!("Missing {} security headers", missing.len())
             };
-            out.push(finding(
-                "website_inspection_missing_headers",
-                Info,
-                title,
-                format!("Not set: {}.", missing.join(", ")),
-                Some("Add them in the web server or CDN config (or a security plugin on WordPress)."),
-            ));
+            out.push(
+                Finding::new(
+                    "website_inspection_missing_headers",
+                    Info,
+                    title,
+                    format!("Not set: {}.", missing.join(", ")),
+                )
+                .recommend("Add them in the web server or CDN config (or a security plugin on WordPress)."),
+            );
         }
     }
     if r.time_ms > SLOW_MS {
-        out.push(finding(
-            "website_inspection_slow",
-            Info,
-            "Slow response",
-            format!("The homepage took {} ms to respond, redirects included.", r.time_ms),
-            Some("Check server load, caching and slow plugins or database queries."),
-        ));
+        out.push(
+            Finding::new(
+                "website_inspection_slow",
+                Info,
+                "Slow response",
+                format!("The homepage took {} ms to respond, redirects included.", r.time_ms),
+            )
+            .recommend("Check server load, caching and slow plugins or database queries."),
+        );
     }
     out
 }
@@ -261,12 +266,11 @@ fn provider_findings(r: &WebResult) -> Vec<Finding> {
             ProviderKind::Cdn => ("website_cdn_detected", format!("Served through {}", d.provider)),
             ProviderKind::Host => ("website_host_detected", format!("Hosted on {}", d.provider)),
         };
-        out.push(finding(
+        out.push(Finding::new(
             code,
             Severity::Info,
             title,
             format!("{} points to {} ({}).", h.host, d.provider, d.evidence.join("; ")),
-            None,
         ));
     }
     if !h.asns.is_empty() {
@@ -284,21 +288,19 @@ fn provider_findings(r: &WebResult) -> Vec<Finding> {
                 format!("AS{asn}{} ({})", name.map_or(String::new(), |n| format!(" {n}")), ips.join(", "))
             })
             .collect();
-        out.push(finding(
+        out.push(Finding::new(
             "website_asn",
             Severity::Info,
             "Network that serves the site",
             format!("{} is announced by {}.", h.host, text.join("; ")),
-            None,
         ));
     }
     if let Some(e) = &h.dns_error {
-        out.push(finding(
+        out.push(Finding::new(
             "website_provider_dns_failed",
             Severity::Info,
             "Could not look up the CDN or host",
             format!("The DNS questions about {} failed ({e}), so only the response headers were used to look for a CDN or host.", h.host),
-            None,
         ));
     }
     out
