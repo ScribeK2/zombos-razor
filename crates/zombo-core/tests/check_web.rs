@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! The Web Check as the UI runs it. HTTPS is never served here (no certificate to trust offline), so
-//! each run takes the fallback to plain HTTP: `dial` points the name at a fake site, `tls_port` at a
+//! each run takes the fallback to plain HTTP: `dial` points the name at a fake site, `port` at a
 //! closed port, and `machine_resolvers` at a fake resolver for the hosting questions.
 //! `tests/web_tls.rs` covers a served HTTPS site at the `check_web` level.
 
@@ -45,7 +45,7 @@ impl Rig {
         CHECK
             .run(&Request {
                 dial: Some(self.site.addr),
-                tls_port: self.https,
+                port: self.https,
                 machine_resolvers: Some(&resolvers),
                 ..Request::system(name, query, &[])
             })
@@ -130,7 +130,7 @@ async fn the_requests_tls_port_is_where_https_is_tried_first() {
     let rig = Rig { https, ..Rig::new("", |_| Resp::ok("ok")).await };
     let o = rig.run("www.example.com", T).await.unwrap();
     listener.abort();
-    assert!(tried.load(std::sync::atomic::Ordering::SeqCst) >= 1, "nothing dialled the request's tls_port");
+    assert!(tried.load(std::sync::atomic::Ordering::SeqCst) >= 1, "nothing dialled the request's port");
     assert!(o.facts.iter().any(|f| f.key == "HTTPS error"), "{:?}", rows(&o.facts));
     assert_eq!(rows(&o.facts)[0], format!("URL: {}", rig.url("/")), "the plain HTTP fallback answered");
 }
@@ -156,7 +156,7 @@ async fn the_requests_proxy_is_not_used() {
     let request = Request {
         proxy: Some(&proxy_url),
         dial: Some(rig.site.addr),
-        tls_port: rig.https,
+        port: rig.https,
         machine_resolvers: Some(&resolvers),
         ..Request::system("www.example.com", T, &[])
     };

@@ -50,9 +50,10 @@ impl Outcome {
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
 /// zone. The last nine fields are what a test swaps for a fake, or the rep's settings fill in;
 /// production takes them from [`Request::system`]. Each is read by one Check family: the first three
-/// by DNSSEC (`ns_port` also by Delegation), the fourth by TLS (and, when `dial` is set, the Web Check's HTTPS port), the
-/// fifth by the Checks that ask this machine's resolvers (the Web Check's hosting questions too),
-/// `proxy` and `endpoints` by Registration, `selectors` by Email, `dial` by Web.
+/// by DNSSEC (`ns_port` also by Delegation), `port` by the Checks that dial one port (TLS, SMTP, and
+/// the Web Check's HTTPS port when `dial` is set), the fifth by the Checks that ask this machine's
+/// resolvers (the Web Check's hosting questions and SMTP too), `proxy` and `endpoints` by
+/// Registration, `selectors` by Email, `dial` by Web.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -67,8 +68,9 @@ pub struct Request<'a> {
     pub now: SystemTime,
     /// The validating resolvers to ask. `None` means the Check's own list; `Some(&[])` means ask none.
     pub validating: Option<&'a [Vantage]>,
-    /// The port the TLS Checks connect to.
-    pub tls_port: u16,
+    /// The port the Check dials. A Check whose descriptor has `takes_chosen_port` gets the rep's pick.
+    /// The Web Check reads it as its HTTPS port only when `dial` is set; otherwise it uses 443.
+    pub port: u16,
     /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine has none.
     pub machine_resolvers: Option<&'a [SocketAddr]>,
     /// The `http://` or `https://` proxy the Checks that honour one go through. `None` leaves each
@@ -79,7 +81,7 @@ pub struct Request<'a> {
     /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
     pub selectors: &'a [String],
     /// Where the Web Check connects instead of resolving its name: the address the name is pinned
-    /// to, and the port of plain HTTP (the HTTPS port is `tls_port`). `None` means the name's own
+    /// to, and the port of plain HTTP (the HTTPS port is `port`). `None` means the name's own
     /// addresses and port 80.
     pub dial: Option<SocketAddr>,
 }
@@ -94,7 +96,7 @@ impl<'a> Request<'a> {
             ns_port: 53,
             now: SystemTime::now(),
             validating: None,
-            tls_port: 443,
+            port: 443,
             machine_resolvers: None,
             proxy: None,
             endpoints: None,
@@ -145,7 +147,7 @@ pub struct Check {
     pub owns: &'static [&'static str],
     pub blind_spots: &'static [&'static str],
     /// True when this Check dials the port the rep picked, not the default. The caller then copies
-    /// that port into [`Request::tls_port`].
+    /// that port into [`Request::port`].
     pub takes_chosen_port: bool,
     pub(crate) run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }

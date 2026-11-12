@@ -44,7 +44,7 @@ fn closed_port() -> u16 {
 }
 
 fn request<'a>(name: &'a str, port: u16, bootstrap: &'a [SocketAddr]) -> Request<'a> {
-    Request { tls_port: port, ..Request::system(name, T, bootstrap) }
+    Request { port, ..Request::system(name, T, bootstrap) }
 }
 
 #[tokio::test]
@@ -104,7 +104,7 @@ async fn a_failed_handshake_is_the_checks_own_error_and_drops_the_caa_answer() {
 
 #[test]
 fn the_system_request_asks_port_443() {
-    assert_eq!(Request::system("example.com", T, &[]).tls_port, 443);
+    assert_eq!(Request::system("example.com", T, &[]).port, 443);
 }
 
 #[test]

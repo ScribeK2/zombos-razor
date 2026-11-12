@@ -685,7 +685,7 @@ struct Observed {
 
 const LIMITS: (Duration, Duration) = (Duration::from_secs(10), Duration::from_secs(8));
 
-/// The automatic TLS row: the handshake and the CAA records, on `Request::tls_port`.
+/// The automatic TLS row: the handshake and the CAA records, on `Request::port`.
 pub static CHECK: Check = Check {
     label: "TLS",
     automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
@@ -723,7 +723,7 @@ pub static ON_PORT: Check = Check {
 };
 
 async fn observe(request: &Request<'_>, with_caa: bool) -> Result<Outcome, String> {
-    let (name, port, query) = (request.name, request.tls_port, request.query);
+    let (name, port, query) = (request.name, request.port, request.query);
     let (handshake, caa) = if with_caa {
         let (h, c) = tokio::join!(check_tls(name, port, query), check_caa(request.bootstrap, name, query));
         (h, Some(c))

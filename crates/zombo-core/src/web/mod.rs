@@ -48,7 +48,7 @@ pub static CHECK: Check = Check {
         Box::pin(async move {
             let (host, path) = parse_web_target(request.name).map_err(|e| e.to_string())?;
             let ports = match request.dial {
-                Some(a) => Ports { http: a.port(), https: request.tls_port },
+                Some(a) => Ports { http: a.port(), https: request.port },
                 None => Ports::default(),
             };
             let opts = WebOptions {

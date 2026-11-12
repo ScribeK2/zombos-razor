@@ -153,7 +153,7 @@ fn request_for<'a>(
         selectors: &settings.selectors,
         ..Request::system(name, query, bootstrap)
     };
-    if check.takes_chosen_port { Request { tls_port: options.tls_port, ..request } } else { request }
+    if check.takes_chosen_port { Request { port: options.tls_port, ..request } } else { request }
 }
 
 async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
@@ -302,7 +302,7 @@ mod tests {
     fn only_the_on_demand_tls_row_takes_the_picked_port() {
         let options = Options { tls_port: 993, ..Options::default() };
         let settings = Settings::default();
-        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options, &settings).tls_port;
+        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options, &settings).port;
         assert_eq!((port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK)), (443, 993, 443));
     }
 
