@@ -1,4 +1,4 @@
-use zombo_core::{blacklist, check::Check, delegation, dnssec, rdns, tls};
+use zombo_core::{blacklist, check::Check, delegation, dnssec, rdns, registration, tls};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -46,12 +46,12 @@ impl Section {
             Section::Dns => "DNS",
             Section::Email => "Email",
             Section::Web => "Web",
-            Section::Registration => "Registration",
             Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
             Section::Delegation
             | Section::Dnssec
             | Section::Tls
+            | Section::Registration
             | Section::TlsPort
             | Section::Rdns
             | Section::Blacklist => {
@@ -67,6 +67,7 @@ impl Section {
             Section::Delegation => Some(&delegation::CHECK),
             Section::Dnssec => Some(&dnssec::CHECK),
             Section::Tls => Some(&tls::CHECK),
+            Section::Registration => Some(&registration::CHECK),
             Section::TlsPort => Some(&tls::ON_PORT),
             Section::Rdns => Some(&rdns::CHECK),
             Section::Blacklist => Some(&blacklist::CHECK),
@@ -137,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn only_delegation_dnssec_the_tls_rows_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
+    fn only_delegation_dnssec_the_tls_rows_registration_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
         assert_eq!(
             behind,
@@ -145,6 +146,7 @@ mod tests {
                 &Section::Delegation,
                 &Section::Dnssec,
                 &Section::Tls,
+                &Section::Registration,
                 &Section::Rdns,
                 &Section::TlsPort,
                 &Section::Blacklist

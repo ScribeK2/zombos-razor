@@ -29,11 +29,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "How the site answers other regions or networks than this one.",
         ],
         Section::Tls => zombo_core::tls::CHECK.blind_spots,
-        Section::Registration => &[
-            "The registrar account: ownership contact, locks, billing and auto-renew.",
-            "Contact details hidden by a privacy service.",
-            "Changes the registry has not yet published to RDAP or WHOIS.",
-        ],
+        Section::Registration => zombo_core::registration::CHECK.blind_spots,
         Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
         Section::Ports => &[
             "UDP services: only TCP ports are tried.",
