@@ -118,6 +118,21 @@ fn the_two_descriptors_carry_the_limits_prefixes_and_blind_spots_the_ui_used_to_
     }
     assert_eq!(CHECK.owns, ["ssl_", "tls_", "caa_"]);
     assert_eq!(ON_PORT.owns, ["ssl_", "tls_"]);
-    assert_eq!(CHECK.blind_spots.len(), 4);
-    assert_eq!(ON_PORT.blind_spots.len(), 3);
+    assert_eq!(
+        CHECK.blind_spots,
+        [
+            "Other ports: the TLS on a port Check asks for those.",
+            "Protocol versions below TLS 1.2: this tool speaks only 1.2 and 1.3.",
+            "Cipher suites the server accepts but did not choose.",
+            "Revocation at the CA: only an OCSP response stapled by the server is seen.",
+        ]
+    );
+    assert_eq!(
+        ON_PORT.blind_spots,
+        [
+            "Services that start TLS after a plain greeting (STARTTLS): the SMTP banner check covers those.",
+            "A server that requires a client certificate.",
+            "Protocol versions below TLS 1.2, and revocation at the CA.",
+        ]
+    );
 }

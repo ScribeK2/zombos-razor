@@ -129,6 +129,8 @@ mod tests {
     fn only_dnssec_and_the_two_tls_rows_are_behind_a_descriptor_so_far() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
         assert_eq!(behind, [&Section::Dnssec, &Section::Tls, &Section::TlsPort]);
+        assert!(std::ptr::eq(Section::Tls.check().unwrap(), &tls::CHECK));
+        assert!(std::ptr::eq(Section::TlsPort.check().unwrap(), &tls::ON_PORT));
     }
 
     #[test]
