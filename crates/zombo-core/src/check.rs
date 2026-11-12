@@ -9,12 +9,17 @@ use std::{
 };
 
 use crate::{
+    blacklist, delegation, dnssec, email_auth,
     finding::Finding,
+    ports,
     propagation::Vantage,
-    registration::Endpoints,
+    rdns,
+    registration::{self, Endpoints},
     resolver::system_resolvers,
+    smtp,
     target::{Kind, parse_target},
     text::single_line,
+    tls, web,
 };
 
 /// One line of a Check's data: a label and a value.
@@ -174,6 +179,10 @@ pub struct OnDemand {
 /// Write a descriptor as `Check { label: "X", ..Check::base(run) }`, so that a new field only
 /// touches `base` and breaks no descriptor.
 pub struct Check {
+    /// The name the CLI knows this Check by: kebab-case, unique among [`ALL`].
+    pub id: &'static str,
+    /// The target kinds this Check can run on, by itself or when the rep asks.
+    pub accepts: &'static [Kind],
     /// The name of the Check's section on the rail.
     pub label: &'static str,
     /// The target kinds this Check runs on by itself. Empty means it runs only when the rep asks.
@@ -195,6 +204,8 @@ impl Check {
     /// A Check that runs by itself on no kind of target, with the default limits and nothing else set.
     pub(crate) const fn base(run: for<'a> fn(&'a Request<'a>) -> Running<'a>) -> Check {
         Check {
+            id: "",
+            accepts: &[],
             label: "",
             automatic_for: &[],
             on_demand: None,
@@ -213,4 +224,23 @@ impl Check {
     pub async fn run(&self, request: &Request<'_>) -> Result<Outcome, String> {
         (self.run)(request).await
     }
+}
+
+/// Every Check, in the order of the rail.
+pub static ALL: &[&Check] = &[
+    &delegation::CHECK,
+    &dnssec::CHECK,
+    &email_auth::CHECK,
+    &web::CHECK,
+    &tls::CHECK,
+    &registration::CHECK,
+    &rdns::CHECK,
+    &ports::CHECK,
+    &smtp::CHECK,
+    &tls::ON_PORT,
+    &blacklist::CHECK,
+];
+
+pub fn find(id: &str) -> Option<&'static Check> {
+    ALL.iter().copied().find(|c| c.id == id)
 }

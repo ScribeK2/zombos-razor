@@ -688,6 +688,8 @@ const LIMITS: (Duration, Duration) = (Duration::from_secs(10), Duration::from_se
 /// The automatic TLS row: the handshake and the CAA records, on `Request::port`.
 pub static CHECK: Check = Check {
     label: "TLS",
+    id: "tls",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
     budget: LIMITS,
     owns: &["ssl_", "tls_", "caa_"],
@@ -704,6 +706,8 @@ pub static CHECK: Check = Check {
 /// `tls_` findings too, but [`CHECK`] owns those prefixes.
 pub static ON_PORT: Check = Check {
     label: "TLS on a port",
+    id: "tls-port",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip],
     on_demand: Some(OnDemand {
         run_label: "Run TLS check",
         what: "Opens a TLS connection to one port of the target and reads the certificate and protocol it presents. It sends no mail and no web request.",

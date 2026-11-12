@@ -893,6 +893,8 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
 /// The DNSSEC Check as the UI runs it. With `Request::system` that is the real validating resolvers, port 53 and the clock now.
 pub static CHECK: Check = Check {
     label: "DNSSEC",
+    id: "dnssec",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Email],
     budget: (Duration::from_secs(20), Duration::from_secs(4)),
     owns: &["dnssec_"],

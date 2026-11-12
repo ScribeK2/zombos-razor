@@ -35,6 +35,8 @@ pub use providers::{
 /// `machine_resolvers`, or to this machine's resolver when it has none.
 pub static CHECK: Check = Check {
     label: "Web",
+    id: "web",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
     budget: (Duration::from_secs(12), Duration::from_secs(10)),
     owns: &["website_", "web_"],

@@ -431,6 +431,8 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
 /// nameservers.
 pub static CHECK: Check = Check {
     label: "Delegation",
+    id: "delegation",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Email],
     owns: &["dns_delegation_", "dns_glue_", "dns_ns_"],
     blind_spots: &[

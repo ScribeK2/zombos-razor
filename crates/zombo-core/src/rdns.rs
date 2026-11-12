@@ -315,6 +315,8 @@ pub fn rdns_findings(r: &RdnsResult) -> Vec<Finding> {
 /// opens it there.
 pub static CHECK: Check = Check {
     label: "Reverse DNS",
+    id: "rdns",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip],
     automatic_for: &[Kind::Ip],
     owns: &["rdns_"],
     blind_spots: &[
