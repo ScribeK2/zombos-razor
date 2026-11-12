@@ -14,9 +14,11 @@ use hickory_proto::{
 use serde::Serialize;
 
 use crate::{
+    check::{Check, Fact, Outcome},
     dns::exchange,
     finding::{Finding, Severity},
     propagation::{DiscoverError, Soa, ask_any, find_apex, ipv6_available},
+    target::Kind,
 };
 
 /// Ports to ask on. 53 outside tests.
@@ -421,4 +423,76 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
         });
     }
     out
+}
+
+/// The Delegation row: the parent zone's NS set and glue against what each delegated nameserver
+/// serves. Its codes start with `dns_`, so it lists three longer prefixes to keep them off the DNS
+/// row. `ns_port` is both ports of [`Ports`]: the parent's servers and the zone's own are all
+/// nameservers.
+pub static CHECK: Check = Check {
+    label: "Delegation",
+    automatic_for: &[Kind::Domain, Kind::Email],
+    owns: &["dns_delegation_", "dns_glue_", "dns_ns_"],
+    blind_spots: &[
+        "The registrar account where the nameservers are set.",
+        "Nameservers that answer only some networks: a server that is silent here may answer elsewhere.",
+        "Why a nameserver is lame: its configuration and logs are on its own host.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let ports = Ports { parent: request.ns_port, nameserver: request.ns_port };
+            check_delegation(request.bootstrap, request.name, ports, request.query)
+                .await
+                .map(|r| outcome(&r))
+                .map_err(|e| e.to_string())
+        })
+    })
+};
+
+fn outcome(r: &DelegationResult) -> Outcome {
+    let mut facts = vec![Fact::new("Zone", &r.apex), Fact::new("Parent zone", &r.parent)];
+    facts.extend(r.parent_ns.iter().map(|n| Fact::new("Delegated nameserver", n)));
+    for (name, set) in &r.glue {
+        facts.push(Fact::new(format!("Glue {name}"), addresses(set)));
+    }
+    for s in &r.servers {
+        let state = match &s.state {
+            ServerState::Ok { serial } => format!("answers, SOA serial {serial}"),
+            ServerState::Unreachable => "unreachable".to_string(),
+            ServerState::Lame { why, .. } => format!("lame: {why}"),
+        };
+        facts.push(Fact::new(format!("Server {}", s.name), state));
+    }
+    Outcome { findings: delegation_findings(r), facts, ..Outcome::default() }
+}
+
+fn addresses(set: &BTreeSet<IpAddr>) -> String {
+    set.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_delegation_lists_each_server_with_its_state() {
+        let r = DelegationResult {
+            apex: "example.com".into(),
+            parent: "com".into(),
+            parent_ns: BTreeSet::from(["ns1.example.com".to_string()]),
+            glue: BTreeMap::new(),
+            servers: vec![DelegatedServer {
+                name: "ns1.example.com".into(),
+                address: None,
+                state: ServerState::Unreachable,
+                child_ns: None,
+            }],
+            glue_served: BTreeMap::new(),
+            unresolvable: vec![],
+            cnames: vec![],
+        };
+        let lines = outcome(&r).records();
+        assert!(lines.contains(&"Server ns1.example.com: unreachable".to_string()));
+        assert!(lines.contains(&"Delegated nameserver: ns1.example.com".to_string()));
+    }
 }

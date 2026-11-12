@@ -46,8 +46,8 @@ impl Outcome {
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
 /// zone. The last five fields are what a test swaps for a fake; production takes them from
-/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the fourth
-/// by TLS, the last by the Checks that ask this machine's resolvers.
+/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC (`ns_port` also by
+/// Delegation), the fourth by TLS, the last by the Checks that ask this machine's resolvers.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -56,7 +56,7 @@ pub struct Request<'a> {
     pub name: &'a str,
     pub query: Duration,
     pub bootstrap: &'a [SocketAddr],
-    /// The port the zone's own nameservers are asked on.
+    /// The port the zone's own nameservers, and its parent zone's, are asked on.
     pub ns_port: u16,
     /// The moment signature validity is judged at.
     pub now: SystemTime,
