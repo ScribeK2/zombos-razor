@@ -1,4 +1,4 @@
-use zombo_core::{check::Check, dnssec};
+use zombo_core::{check::Check, dnssec, tls};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -60,6 +60,8 @@ impl Section {
     pub(crate) fn check(self) -> Option<&'static Check> {
         match self {
             Section::Dnssec => Some(&dnssec::CHECK),
+            Section::Tls => Some(&tls::CHECK),
+            Section::TlsPort => Some(&tls::ON_PORT),
             _ => None,
         }
     }
@@ -124,9 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn only_dnssec_is_behind_a_descriptor_so_far() {
+    fn only_dnssec_and_the_two_tls_rows_are_behind_a_descriptor_so_far() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
-        assert_eq!(behind, [&Section::Dnssec]);
+        assert_eq!(behind, [&Section::Dnssec, &Section::Tls, &Section::TlsPort]);
+        assert!(std::ptr::eq(Section::Tls.check().unwrap(), &tls::CHECK));
+        assert!(std::ptr::eq(Section::TlsPort.check().unwrap(), &tls::ON_PORT));
     }
 
     #[test]

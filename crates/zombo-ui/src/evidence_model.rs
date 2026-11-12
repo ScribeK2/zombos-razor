@@ -764,11 +764,7 @@ mod tests {
         let r = analyse(Kind::Headers, fixture!("spoofed.txt")).unwrap();
         assert_eq!(view(&r, Section::Authentication).word, "Failed");
         let f = view(&r, Section::Findings).findings;
-        assert!(
-            f.windows(2)
-                .all(|w| crate::diagnosis::severity_rank(w[0].severity)
-                    <= crate::diagnosis::severity_rank(w[1].severity))
-        );
+        assert!(f.windows(2).all(|w| w[0].severity.rank() <= w[1].severity.rank()));
     }
 
     #[test]

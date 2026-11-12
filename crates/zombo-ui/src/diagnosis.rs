@@ -14,15 +14,6 @@ use crate::{
     status::{CheckState, Glyph},
 };
 
-pub fn severity_rank(s: Severity) -> u8 {
-    match s {
-        Severity::Critical => 0,
-        Severity::Warning => 1,
-        Severity::Info => 2,
-        Severity::Ok => 3,
-    }
-}
-
 pub fn severity_word(s: Severity) -> &'static str {
     match s {
         Severity::Critical => "Critical",
@@ -43,7 +34,7 @@ pub fn severity_glyph(s: Severity) -> Glyph {
 
 pub fn ordered(findings: &[Finding]) -> Vec<Finding> {
     let mut out = findings.to_vec();
-    out.sort_by_key(|f| severity_rank(f.severity));
+    out.sort_by_key(|f| f.severity.rank());
     out
 }
 

@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{cmp::Reverse, sync::LazyLock};
 
 use crate::section::Section;
 
@@ -19,9 +19,6 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_", Some(Section::Email)),
     ("website_", Some(Section::Web)),
     ("web_", Some(Section::Web)),
-    ("ssl_", Some(Section::Tls)),
-    ("tls_", Some(Section::Tls)),
-    ("caa_", Some(Section::Tls)),
     ("registration_", Some(Section::Registration)),
     ("rdns_", Some(Section::Rdns)),
     ("hosting_reachability_", Some(Section::Ports)),
@@ -38,9 +35,11 @@ static TABLE: LazyLock<Vec<Row>> = LazyLock::new(|| {
     OWNERS.iter().copied().chain(owned).collect()
 });
 
-/// The longest prefix that `code` starts with wins, wherever its row sits.
+/// The longest prefix that `code` starts with wins, wherever its row sits. Two rows with the same
+/// prefix tie and the earlier row wins, so the lookup stays deterministic; no registered prefix
+/// relies on that, as `no_two_registered_rows_declare_the_same_prefix` checks.
 fn longest<'a>(table: &'a [Row], code: &str) -> Option<&'a Row> {
-    table.iter().filter(|(prefix, _)| code.starts_with(prefix)).max_by_key(|(prefix, _)| prefix.len())
+    table.iter().filter(|(prefix, _)| code.starts_with(prefix)).min_by_key(|(prefix, _)| Reverse(prefix.len()))
 }
 
 pub fn row(code: &str) -> Option<&'static Row> {
@@ -158,6 +157,29 @@ mod tests {
         assert_eq!(longest(&general_first, "dns_glue_x").unwrap().1, Some(Section::Delegation));
         assert_eq!(longest(&general_first, "dns_other").unwrap().1, Some(Section::Dns));
         assert_eq!(longest(&general_first, "web_x"), None);
+    }
+
+    #[test]
+    fn two_rows_with_the_same_prefix_tie_and_the_earlier_row_wins() {
+        let table = [("tls_", Some(Section::Tls)), ("tls_", Some(Section::TlsPort))];
+        assert_eq!(longest(&table, "tls_x").unwrap().1, Some(Section::Tls));
+        let table = [("tls_", Some(Section::TlsPort)), ("tls_", Some(Section::Tls))];
+        assert_eq!(longest(&table, "tls_x").unwrap().1, Some(Section::TlsPort));
+    }
+
+    #[test]
+    fn no_two_registered_rows_declare_the_same_prefix() {
+        let mut prefixes: Vec<_> = TABLE.iter().map(|(p, _)| *p).collect();
+        prefixes.sort_unstable();
+        let dupes: Vec<_> = prefixes.windows(2).filter(|w| w[0] == w[1]).map(|w| w[0]).collect();
+        assert!(dupes.is_empty(), "declared twice: {dupes:?}");
+    }
+
+    #[test]
+    fn the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one() {
+        for code in ["ssl_inspection_expired", "tls_no_ocsp_staple", "caa_none"] {
+            assert_eq!(owner(code), Some(Section::Tls), "{code}");
+        }
     }
 
     #[test]

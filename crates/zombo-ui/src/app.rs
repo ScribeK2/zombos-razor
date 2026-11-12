@@ -1047,7 +1047,7 @@ impl Shell {
                             .when(show_chips, |s| {
                                 s.child(div().flex().flex_none().gap(px(8.)).children(counts.map(|(sev, n)| {
                                     div()
-                                        .id(("chip", dg::severity_rank(sev) as usize))
+                                        .id(("chip", sev.rank() as usize))
                                         .flex()
                                         .items_center()
                                         .gap(px(6.))

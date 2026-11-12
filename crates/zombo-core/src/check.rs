@@ -44,8 +44,11 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last three fields are what a test swaps for a fake; production takes them from
-/// [`Request::system`]. Only the DNSSEC Check reads them so far.
+/// zone. The last four fields are what a test swaps for a fake; production takes them from
+/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the last by TLS.
+///
+/// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
+/// touches `system` and breaks no caller.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub name: &'a str,
@@ -57,12 +60,14 @@ pub struct Request<'a> {
     pub now: SystemTime,
     /// The validating resolvers to ask. `None` means the Check's own list; `Some(&[])` means ask none.
     pub validating: Option<&'a [Vantage]>,
+    /// The port the TLS Checks connect to.
+    pub tls_port: u16,
 }
 
 impl<'a> Request<'a> {
     /// The real network: port 53, the clock now, the Check's own resolvers.
     pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
-        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None }
+        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None, tls_port: 443 }
     }
 }
 
@@ -76,6 +81,9 @@ pub struct Check {
     /// Finding-code prefixes this Check emits.
     pub owns: &'static [&'static str],
     pub blind_spots: &'static [&'static str],
+    /// True when this Check dials the port the rep picked, not the default. The caller then copies
+    /// that port into [`Request::tls_port`].
+    pub takes_chosen_port: bool,
     run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
 
@@ -84,9 +92,10 @@ impl Check {
         budget: (Duration, Duration),
         owns: &'static [&'static str],
         blind_spots: &'static [&'static str],
+        takes_chosen_port: bool,
         run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
     ) -> Check {
-        Check { budget, owns, blind_spots, run }
+        Check { budget, owns, blind_spots, takes_chosen_port, run }
     }
 
     pub async fn run(&self, request: &Request<'_>) -> Result<Outcome, String> {
