@@ -777,13 +777,8 @@ fn with_caa(mut o: Outcome, caa: &CaaResult, tls: Option<&TlsResult>) -> Outcome
         }
     }
     o.findings.extend(caa_findings(caa, tls));
-    // Worst first. `Severity` has no order of its own, and this stays stable so equal ones keep their order.
-    o.findings.sort_by_key(|f| match f.severity {
-        Severity::Critical => 0,
-        Severity::Warning => 1,
-        Severity::Info => 2,
-        Severity::Ok => 3,
-    });
+    // Worst first; the sort is stable, so equal ones keep their order.
+    o.findings.sort_by_key(|f| f.severity.rank());
     o
 }
 
