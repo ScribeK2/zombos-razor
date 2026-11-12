@@ -1,13 +1,14 @@
 //! What every Check hands back, in one shape. The UI shows an `Outcome` without knowing which Check made it.
 
 use std::{
+    borrow::Cow,
     future::Future,
     net::SocketAddr,
     pin::Pin,
     time::{Duration, SystemTime},
 };
 
-use crate::{finding::Finding, propagation::Vantage, target::Kind, text::single_line};
+use crate::{finding::Finding, propagation::Vantage, resolver::system_resolvers, target::Kind, text::single_line};
 
 /// One line of a Check's data: a label and a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,8 +45,9 @@ impl Outcome {
 }
 
 /// What a Check is asked: the name, how long one query may take, and the resolvers that find its
-/// zone. The last four fields are what a test swaps for a fake; production takes them from
-/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the last by TLS.
+/// zone. The last five fields are what a test swaps for a fake; production takes them from
+/// [`Request::system`]. Each is read by one Check family: the first three by DNSSEC, the fourth
+/// by TLS, the last by the Checks that ask this machine's resolvers.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -62,12 +64,34 @@ pub struct Request<'a> {
     pub validating: Option<&'a [Vantage]>,
     /// The port the TLS Checks connect to.
     pub tls_port: u16,
+    /// This machine's resolvers. `None` means the Check reads them itself; `Some(&[])` means the machine has none.
+    pub machine_resolvers: Option<&'a [SocketAddr]>,
 }
 
 impl<'a> Request<'a> {
     /// The real network: port 53, the clock now, the Check's own resolvers.
     pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
-        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None, tls_port: 443 }
+        Request {
+            name,
+            query,
+            bootstrap,
+            ns_port: 53,
+            now: SystemTime::now(),
+            validating: None,
+            tls_port: 443,
+            machine_resolvers: None,
+        }
+    }
+}
+
+impl Request<'_> {
+    /// The resolvers of this machine, or the error every Check that needs them gives when it has none.
+    pub(crate) fn machine(&self) -> Result<Cow<'_, [SocketAddr]>, String> {
+        let resolvers = match self.machine_resolvers {
+            Some(r) => Cow::Borrowed(r),
+            None => Cow::Owned(system_resolvers()),
+        };
+        if resolvers.is_empty() { Err("this machine has no DNS resolver configured".into()) } else { Ok(resolvers) }
     }
 }
 

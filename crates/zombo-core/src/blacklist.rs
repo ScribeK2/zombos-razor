@@ -14,7 +14,13 @@ use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 use tokio::{sync::Semaphore, task::JoinSet, time::Instant};
 
-use crate::{Finding, Severity, email_auth::clip, resolver::Resolver, text::printable};
+use crate::{
+    Finding, Severity,
+    check::{Check, Fact, OnDemand, Outcome},
+    email_auth::clip,
+    resolver::Resolver,
+    text::printable,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -512,4 +518,117 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
         });
     }
     out
+}
+
+/// The Blacklist row: it runs only when the rep asks. It asks this machine's resolver, and uses
+/// this module's own limits, not the request's query timeout.
+pub static CHECK: Check = Check {
+    label: "Blacklist",
+    on_demand: Some(OnDemand {
+        run_label: "Run blacklist check",
+        what: "Asks public blocklists whether the target's address, or a domain and its mail hosts, are listed for spam.",
+        // The number of lists is DNSBLS.len(); a test in tests/check_blacklist.rs keeps them equal.
+        contacts: "This machine's resolver, which sends 10 questions per address to the blocklist operators' DNS servers (Spamhaus, SpamCop, Barracuda and others). They see the address or domain asked about. Nothing connects to the target.",
+        note: None,
+    }),
+    budget: (Duration::from_secs(25), Duration::from_secs(25)),
+    owns: &["blacklist_"],
+    blind_spots: &[
+        "Lists that are not in the table this Check asks.",
+        "Private block lists inside the receiving company.",
+        "Whether a listing changes delivery: the receiving server decides.",
+        "The sending reputation of the domain's mail history.",
+    ],
+    ..Check::base(|request| {
+        Box::pin(async move {
+            let resolvers = request.machine()?;
+            Ok(outcome(request.name, &check_blacklist(&resolvers, request.name, Options::default()).await))
+        })
+    })
+};
+
+fn outcome(target: &str, r: &BlacklistResult) -> Outcome {
+    let mut facts = vec![];
+    let mut details = vec![];
+    for (subject, s) in &r.subjects {
+        let kind = if s.kind == SubjectKind::Ip { "address" } else { "domain" };
+        let listed: Vec<_> = s.lists.iter().filter(|(_, v)| v.state == State::Listed).collect();
+        let unsure = s.lists.values().filter(|v| matches!(v.state, State::Refused | State::Unknown)).count();
+        let mut line = if listed.is_empty() {
+            format!("not listed on any of {} lists", s.lists.len() - unsure)
+        } else {
+            format!("listed on {} of {} lists", listed.len(), s.lists.len())
+        };
+        if unsure > 0 {
+            line += &format!(", {unsure} gave no verdict");
+        }
+        facts.push(Fact::new(format!("{subject} ({kind}, {})", s.source), line));
+        for (name, v) in &listed {
+            let why =
+                if v.reason.is_empty() { v.codes.join(", ") } else { format!("{} ({})", v.reason, v.codes.join(", ")) };
+            facts.push(Fact::new(format!("Listed on {name}"), why));
+        }
+        for (name, v) in &s.lists {
+            let state = match v.state {
+                State::Listed => format!("listed {}", v.codes.join(", ")),
+                State::Clean => "not listed".to_string(),
+                State::Refused => "refused the query".to_string(),
+                State::Unknown => format!("no verdict ({})", v.error),
+            };
+            details.push(Fact::new(format!("{name} for {subject}"), state));
+        }
+    }
+    if let Some(why) = &r.resolve {
+        facts.push(Fact::new("Mail host addresses", why));
+    }
+    if r.ipv6 {
+        facts.push(Fact::new("IPv6", "not checked: the blocklists here list IPv4 addresses"));
+    }
+    Outcome { findings: blacklist_findings(target, r), facts, details_title: "Every list's answer", details }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_listed_address_is_called_out_and_every_list_is_kept_in_the_details() {
+        let verdict = |state| Verdict {
+            zone: "zen.example",
+            delist: "",
+            state,
+            codes: vec!["127.0.0.2".into()],
+            reason: String::new(),
+            error: String::new(),
+        };
+        let mut r = BlacklistResult::default();
+        r.subjects.insert(
+            "127.0.0.2".into(),
+            Subject {
+                kind: SubjectKind::Ip,
+                source: "target".into(),
+                lists: [
+                    ("Spamhaus ZEN".to_string(), verdict(State::Listed)),
+                    ("SpamCop".to_string(), verdict(State::Clean)),
+                ]
+                .into(),
+            },
+        );
+        let o = outcome("127.0.0.2", &r);
+        let lines = o.records();
+        assert!(lines.contains(&"127.0.0.2 (address, target): listed on 1 of 2 lists".to_string()));
+        assert!(lines.contains(&"Listed on Spamhaus ZEN: 127.0.0.2".to_string()));
+        assert_eq!(o.details.len(), 2);
+        assert!(!o.findings.is_empty());
+    }
+
+    #[test]
+    fn a_domain_with_no_address_says_why_nothing_was_checked() {
+        let r = BlacklistResult { resolve: Some("no mail host has an address".into()), ..BlacklistResult::default() };
+        assert!(
+            outcome("example.com", &r)
+                .records()
+                .contains(&"Mail host addresses: no mail host has an address".to_string())
+        );
+    }
 }

@@ -1,4 +1,4 @@
-use zombo_core::{check::Check, dnssec, tls};
+use zombo_core::{blacklist, check::Check, dnssec, rdns, tls};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -48,11 +48,11 @@ impl Section {
             Section::Email => "Email",
             Section::Web => "Web",
             Section::Registration => "Registration",
-            Section::Rdns => "Reverse DNS",
             Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
-            Section::Blacklist => "Blacklist",
-            Section::Dnssec | Section::Tls | Section::TlsPort => unreachable!("{self:?} reads its descriptor"),
+            Section::Dnssec | Section::Tls | Section::TlsPort | Section::Rdns | Section::Blacklist => {
+                unreachable!("{self:?} reads its descriptor")
+            }
         }
     }
 
@@ -63,6 +63,8 @@ impl Section {
             Section::Dnssec => Some(&dnssec::CHECK),
             Section::Tls => Some(&tls::CHECK),
             Section::TlsPort => Some(&tls::ON_PORT),
+            Section::Rdns => Some(&rdns::CHECK),
+            Section::Blacklist => Some(&blacklist::CHECK),
             _ => None,
         }
     }
@@ -70,7 +72,7 @@ impl Section {
     pub fn is_on_demand(self) -> bool {
         match self.check() {
             Some(check) => check.is_on_demand(),
-            None => matches!(self, Section::Ports | Section::Smtp | Section::Blacklist),
+            None => matches!(self, Section::Ports | Section::Smtp),
         }
     }
 
@@ -130,9 +132,9 @@ mod tests {
     }
 
     #[test]
-    fn only_dnssec_and_the_two_tls_rows_are_behind_a_descriptor_so_far() {
+    fn only_dnssec_the_tls_rows_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
-        assert_eq!(behind, [&Section::Dnssec, &Section::Tls, &Section::TlsPort]);
+        assert_eq!(behind, [&Section::Dnssec, &Section::Tls, &Section::Rdns, &Section::TlsPort, &Section::Blacklist]);
         assert!(std::ptr::eq(Section::Tls.check().unwrap(), &tls::CHECK));
         assert!(std::ptr::eq(Section::TlsPort.check().unwrap(), &tls::ON_PORT));
     }

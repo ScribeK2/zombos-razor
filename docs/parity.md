@@ -172,12 +172,12 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 
 | Go code | Sev Go | Sev Rust | Title | Message | Rec | Tests naming the code |
 |---|---|---|---|---|---|---|
-| `blacklist_clean` | ok | ok | same | same | same | `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link`, `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` (+4) |
+| `blacklist_clean` | ok | ok | same | same | same | `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link`, `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` (+5) |
 | `blacklist_ipv6` | info | info | same | same | same | `zombo-core/tests/blacklist.rs::skips_ipv6_without_calling_it_clean` |
-| `blacklist_listed` | dynamic | dynamic | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link` (+10) |
+| `blacklist_listed` | dynamic | dynamic | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link` (+11) |
 | `blacklist_no_addresses` | warning | warning | same | same | same | `zombo-core/tests/blacklist.rs::warns_when_a_domain_has_no_addresses`, `zombo-core/tests/blacklist.rs::does_not_check_the_website_of_a_domain_that_takes_no_mail` |
 | `blacklist_refused` | info | info | same | same | same | `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` |
-| `blacklist_unknown` | dynamic | info/warning | same | same | same | `zombo-core/tests/blacklist.rs::timeouts_are_unknown_not_clean`, `zombo-core/tests/blacklist.rs::one_silent_blocklist_does_not_delay_the_others` |
+| `blacklist_unknown` | dynamic | info/warning | same | same | same | `zombo-core/tests/blacklist.rs::timeouts_are_unknown_not_clean`, `zombo-core/tests/blacklist.rs::one_silent_blocklist_does_not_delay_the_others` (+1) |
 | `check_failed` | warning | absent | - | - | - | - |
 | `dkim_found` | ok | ok | same | same | same | `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings`, `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` (+1) |
 | `dkim_invalid_key` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` |
@@ -332,15 +332,15 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:410 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
 | `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:307 | info | `zombo-ui/src/checks.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
 | `mail_log_truncated` | crates/zombo-core/src/evidence/maillog.rs:709 | info | `zombo-core/tests/evidence_maillog.rs::a_megabyte_single_line_is_bounded` |
-| `rdns_addresses` | crates/zombo-core/src/rdns.rs:206 | info | `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
-| `rdns_confirmed` | crates/zombo-core/src/rdns.rs:291 | ok | `zombo-core/tests/rdns.rs::a_ptr_that_resolves_back_is_confirmed`, `zombo-core/tests/rdns.rs::several_ptrs_are_reported_and_each_is_confirmed` (+3) |
-| `rdns_forward_unknown` | crates/zombo-core/src/rdns.rs:252 | info | `zombo-core/tests/rdns.rs::a_silent_forward_lookup_is_unknown_not_a_failure` |
-| `rdns_generic_name` | crates/zombo-core/src/rdns.rs:280 | info | `zombo-core/tests/rdns.rs::a_name_that_embeds_the_address_looks_generated` |
-| `rdns_lookup_failed` | crates/zombo-core/src/rdns.rs:189 | warning | `zombo-core/tests/rdns.rs::a_silent_resolver_is_a_failed_lookup_not_a_missing_ptr`, `zombo-core/tests/rdns.rs::a_host_on_a_silent_resolver_is_a_failed_lookup` |
-| `rdns_multiple_ptr` | crates/zombo-core/src/rdns.rs:241 | info | `zombo-core/tests/rdns.rs::several_ptrs_are_reported_and_each_is_confirmed`, `zombo-core/tests/rdns.rs::one_bad_name_among_several_denies_confirmation` |
-| `rdns_no_address` | crates/zombo-core/src/rdns.rs:197 | warning | `zombo-core/tests/rdns.rs::a_host_with_no_address_is_reported` |
-| `rdns_no_ptr` | crates/zombo-core/src/rdns.rs:230 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+2) |
-| `rdns_not_confirmed` | crates/zombo-core/src/rdns.rs:269 | warning | `zombo-core/tests/rdns.rs::a_ptr_resolving_to_another_address_fails_forward_confirmation`, `zombo-core/tests/rdns.rs::a_ptr_name_with_no_address_fails_forward_confirmation` (+2) |
+| `rdns_addresses` | crates/zombo-core/src/rdns.rs:213 | info | `zombo-core/tests/check_rdns.rs::a_host_name_target_lists_its_addresses`, `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
+| `rdns_confirmed` | crates/zombo-core/src/rdns.rs:298 | ok | `zombo-core/tests/check_rdns.rs::an_address_with_a_confirmed_ptr_gives_the_address_ptr_and_forward_rows`, `zombo-core/tests/rdns.rs::a_ptr_that_resolves_back_is_confirmed` (+4) |
+| `rdns_forward_unknown` | crates/zombo-core/src/rdns.rs:259 | info | `zombo-core/tests/rdns.rs::a_silent_forward_lookup_is_unknown_not_a_failure` |
+| `rdns_generic_name` | crates/zombo-core/src/rdns.rs:287 | info | `zombo-core/tests/rdns.rs::a_name_that_embeds_the_address_looks_generated` |
+| `rdns_lookup_failed` | crates/zombo-core/src/rdns.rs:196 | warning | `zombo-core/tests/check_rdns.rs::a_resolver_that_never_answers_is_a_finding_not_an_error_after_one_query_timeout`, `zombo-core/tests/rdns.rs::a_silent_resolver_is_a_failed_lookup_not_a_missing_ptr` (+1) |
+| `rdns_multiple_ptr` | crates/zombo-core/src/rdns.rs:248 | info | `zombo-core/tests/rdns.rs::several_ptrs_are_reported_and_each_is_confirmed`, `zombo-core/tests/rdns.rs::one_bad_name_among_several_denies_confirmation` |
+| `rdns_no_address` | crates/zombo-core/src/rdns.rs:204 | warning | `zombo-core/tests/rdns.rs::a_host_with_no_address_is_reported` |
+| `rdns_no_ptr` | crates/zombo-core/src/rdns.rs:237 | warning | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-ui/src/finding_owner.rs::a_finding_has_no_button_in_the_section_that_owns_it` (+3) |
+| `rdns_not_confirmed` | crates/zombo-core/src/rdns.rs:276 | warning | `zombo-core/tests/rdns.rs::a_ptr_resolving_to_another_address_fails_forward_confirmation`, `zombo-core/tests/rdns.rs::a_ptr_name_with_no_address_fails_forward_confirmation` (+2) |
 | `smtp_auth_before_tls` | crates/zombo-core/src/smtp/findings.rs:161 | warning | `zombo-core/tests/smtp.rs::auth_offered_before_tls_is_a_warning` |
 | `smtp_banner_name_mismatch` | crates/zombo-core/src/smtp/findings.rs:123 | info | `zombo-core/tests/smtp.rs::the_greeting_name_is_compared_with_the_expected_names` |
 | `smtp_banner_rejected` | crates/zombo-core/src/smtp/findings.rs:111 | warning | `zombo-core/tests/smtp.rs::a_greeting_that_is_not_220_stops_the_dialogue` |

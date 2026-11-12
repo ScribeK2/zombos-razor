@@ -20,10 +20,8 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("website_", Some(Section::Web)),
     ("web_", Some(Section::Web)),
     ("registration_", Some(Section::Registration)),
-    ("rdns_", Some(Section::Rdns)),
     ("hosting_reachability_", Some(Section::Ports)),
     ("smtp_", Some(Section::Smtp)),
-    ("blacklist_", Some(Section::Blacklist)),
 ];
 
 type Row = (&'static str, Option<Section>);

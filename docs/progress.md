@@ -146,8 +146,8 @@ End state: `Section` stays a small enum used as an index. A new Check adds one v
 `crates/zombo-ui/tests/section_facts.rs` pins every fact of the 13 sections as literals. It must pass unchanged after every step.
 
 - [x] Step 1: characterization test; DNSSEC, TLS and TLS on a port read their label, automatic kinds, brief and run label from their descriptors
-- [ ] Rdns
-- [ ] Blacklist
+- [x] Rdns: the machine's resolvers are `Request::machine_resolvers`
+- [x] Blacklist: the brief states the number of lists as text; a test keeps it equal to `DNSBLS.len()`; `Request::machine` gives the machine's resolvers or the no-resolver error
 - [ ] Delegation
 - [ ] Registration
 - [ ] Ports

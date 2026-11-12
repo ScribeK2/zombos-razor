@@ -2,15 +2,12 @@ use std::{net::SocketAddr, time::Duration};
 
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
-    blacklist::{
-        BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
-    },
     check::{Check, Request},
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
-    rdns::{RdnsResult, check_rdns, rdns_findings},
+    rdns::{RdnsResult, check_rdns},
     registration::{Endpoints, Registration, check_registration, registration_findings},
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
@@ -32,7 +29,7 @@ pub fn automatic(kind: Kind) -> Vec<Section> {
     let listed: &[Section] = match kind {
         Kind::Domain | Kind::Email => &[Dns, Delegation, Email, Web, Registration],
         Kind::Hostname => &[Dns, Web, Registration],
-        Kind::Ip => &[Rdns],
+        Kind::Ip => &[],
     };
     Section::ALL
         .into_iter()
@@ -65,11 +62,8 @@ pub fn check_name(target: &Target) -> Option<String> {
 /// The name an on-demand Check connects to or asks about. An IP address is a valid subject
 /// here, unlike for the automatic Checks.
 pub fn name_for(section: Section, target: &Target) -> Option<String> {
-    if (section.is_on_demand() || section == Section::Rdns) && target.kind == Kind::Ip {
-        Some(target.value.clone())
-    } else {
-        check_name(target)
-    }
+    let takes_ip = section.is_on_demand() || section.check().is_some_and(|c| c.automatic_for.contains(&Kind::Ip));
+    if takes_ip && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
 }
 
 /// The ten public resolvers, then the rep's own that are not already among them.
@@ -222,20 +216,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             facts.append(&mut outcome.facts);
             outcome.facts = facts;
             Ok(outcome)
-        }
-        Section::Rdns => {
-            let resolvers = system_resolvers();
-            if resolvers.is_empty() {
-                return Err("this machine has no DNS resolver configured".into());
-            }
-            Ok(rdns_outcome(&check_rdns(&resolvers, name, query).await))
-        }
-        Section::Blacklist => {
-            let resolvers = system_resolvers();
-            if resolvers.is_empty() {
-                return Err("this machine has no DNS resolver configured".into());
-            }
-            Ok(blacklist_outcome(name, &check_blacklist(&resolvers, name, BlacklistOptions::default()).await))
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
@@ -415,78 +395,6 @@ pub fn smtp_outcome(r: &SmtpResult, expect_names: &[String]) -> Outcome {
     Outcome { findings: smtp_findings(r, expect_names), facts, details_title: "After STARTTLS", details }
 }
 
-/// The PTR names of an address and whether each resolves back to it, or a host's addresses.
-pub fn rdns_outcome(r: &RdnsResult) -> Outcome {
-    let mut facts = vec![];
-    match r {
-        RdnsResult::Ip { ip, ptr_query, ptrs, ptr_error } => {
-            facts.push(Fact::new("Address", ip.to_string()));
-            facts.push(Fact::new("PTR question", ptr_query));
-            if ptrs.is_empty() && ptr_error.is_none() {
-                facts.push(Fact::new("PTR", "none"));
-            }
-            for p in ptrs {
-                facts.push(Fact::new("PTR", &p.name));
-                let forward = match (&p.forward_error, p.confirmed) {
-                    (Some(e), _) => format!("no answer: {e}"),
-                    (None, true) => format!("{}, which confirms {ip}", addresses_text(&p.addresses)),
-                    (None, false) => format!("{}, which does not confirm {ip}", addresses_text(&p.addresses)),
-                };
-                facts.push(Fact::new(format!("Forward lookup of {}", p.name), forward));
-            }
-        }
-        RdnsResult::Host { host, addresses, .. } => {
-            facts.push(Fact::new("Host", host));
-            facts.extend(addresses.iter().map(|a| Fact::new("Address", a.to_string())));
-        }
-    }
-    Outcome { findings: rdns_findings(r), facts, ..Outcome::default() }
-}
-
-fn addresses_text(a: &[std::net::IpAddr]) -> String {
-    if a.is_empty() { "no address".into() } else { a.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ") }
-}
-
-pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
-    let mut facts = vec![];
-    let mut details = vec![];
-    for (subject, s) in &r.subjects {
-        let kind = if s.kind == SubjectKind::Ip { "address" } else { "domain" };
-        let listed: Vec<_> = s.lists.iter().filter(|(_, v)| v.state == State::Listed).collect();
-        let unsure = s.lists.values().filter(|v| matches!(v.state, State::Refused | State::Unknown)).count();
-        let mut line = if listed.is_empty() {
-            format!("not listed on any of {} lists", s.lists.len() - unsure)
-        } else {
-            format!("listed on {} of {} lists", listed.len(), s.lists.len())
-        };
-        if unsure > 0 {
-            line += &format!(", {unsure} gave no verdict");
-        }
-        facts.push(Fact::new(format!("{subject} ({kind}, {})", s.source), line));
-        for (name, v) in &listed {
-            let why =
-                if v.reason.is_empty() { v.codes.join(", ") } else { format!("{} ({})", v.reason, v.codes.join(", ")) };
-            facts.push(Fact::new(format!("Listed on {name}"), why));
-        }
-        for (name, v) in &s.lists {
-            let state = match v.state {
-                State::Listed => format!("listed {}", v.codes.join(", ")),
-                State::Clean => "not listed".to_string(),
-                State::Refused => "refused the query".to_string(),
-                State::Unknown => format!("no verdict ({})", v.error),
-            };
-            details.push(Fact::new(format!("{name} for {subject}"), state));
-        }
-    }
-    if let Some(why) = &r.resolve {
-        facts.push(Fact::new("Mail host addresses", why));
-    }
-    if r.ipv6 {
-        facts.push(Fact::new("IPv6", "not checked: the blocklists here list IPv4 addresses"));
-    }
-    Outcome { findings: blacklist_findings(target, r), facts, details_title: "Every list's answer", details }
-}
-
 #[cfg(test)]
 mod tests {
     use zombo_core::{dnssec, tls};
@@ -540,43 +448,6 @@ mod tests {
         let ip = t("192.0.2.1", Kind::Ip);
         assert_eq!(name_for(Section::Rdns, &ip).as_deref(), Some("192.0.2.1"));
         assert_eq!(name_for(Section::Dns, &ip), None, "the DNS Check still needs a name");
-    }
-
-    #[test]
-    fn a_reverse_lookup_lists_each_ptr_with_its_forward_confirmation() {
-        use zombo_core::rdns::Ptr;
-        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
-        let r = RdnsResult::Ip {
-            ip,
-            ptr_query: "1.2.0.192.in-addr.arpa.".into(),
-            ptr_error: None,
-            ptrs: vec![
-                Ptr { name: "mail.example.com".into(), addresses: vec![ip], forward_error: None, confirmed: true },
-                Ptr { name: "old.example.com".into(), addresses: vec![], forward_error: None, confirmed: false },
-            ],
-        };
-        let o = rdns_outcome(&r);
-        let rows: Vec<String> = o.facts.iter().map(Fact::record).collect();
-        assert!(
-            rows.contains(&"Forward lookup of mail.example.com: 192.0.2.1, which confirms 192.0.2.1".to_string()),
-            "{rows:?}"
-        );
-        assert!(
-            rows.contains(
-                &"Forward lookup of old.example.com: no address, which does not confirm 192.0.2.1".to_string()
-            ),
-            "{rows:?}"
-        );
-        assert!(!o.findings.is_empty());
-    }
-
-    #[test]
-    fn an_address_with_no_ptr_says_none_and_a_failed_lookup_does_not() {
-        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
-        let none = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: None, ptrs: vec![] };
-        assert!(rdns_outcome(&none).facts.iter().any(|f| f.record() == "PTR: none"));
-        let failed = RdnsResult::Ip { ip, ptr_query: "q".into(), ptr_error: Some("timed out".into()), ptrs: vec![] };
-        assert!(!rdns_outcome(&failed).facts.iter().any(|f| f.key == "PTR"));
     }
 
     #[test]
@@ -706,49 +577,6 @@ mod tests {
         assert!(lines.contains(&"Reached: no answer".to_string()));
         assert!(lines.contains(&"STARTTLS: not tried".to_string()));
         assert!(!o.findings.is_empty());
-    }
-
-    #[test]
-    fn a_listed_address_is_called_out_and_every_list_is_kept_in_the_details() {
-        use zombo_core::blacklist::{BlacklistResult, Subject, Verdict};
-        let verdict = |state| Verdict {
-            zone: "zen.example",
-            delist: "",
-            state,
-            codes: vec!["127.0.0.2".into()],
-            reason: String::new(),
-            error: String::new(),
-        };
-        let mut r = BlacklistResult::default();
-        r.subjects.insert(
-            "127.0.0.2".into(),
-            Subject {
-                kind: SubjectKind::Ip,
-                source: "target".into(),
-                lists: [
-                    ("Spamhaus ZEN".to_string(), verdict(State::Listed)),
-                    ("SpamCop".to_string(), verdict(State::Clean)),
-                ]
-                .into(),
-            },
-        );
-        let o = blacklist_outcome("127.0.0.2", &r);
-        let lines = o.records();
-        assert!(lines.contains(&"127.0.0.2 (address, target): listed on 1 of 2 lists".to_string()));
-        assert!(lines.contains(&"Listed on Spamhaus ZEN: 127.0.0.2".to_string()));
-        assert_eq!(o.details.len(), 2);
-        assert!(!o.findings.is_empty());
-    }
-
-    #[test]
-    fn a_domain_with_no_address_says_why_nothing_was_checked() {
-        use zombo_core::blacklist::BlacklistResult;
-        let r = BlacklistResult { resolve: Some("no mail host has an address".into()), ..BlacklistResult::default() };
-        assert!(
-            blacklist_outcome("example.com", &r)
-                .records()
-                .contains(&"Mail host addresses: no mail host has an address".to_string())
-        );
     }
 
     #[test]
