@@ -1,19 +1,17 @@
-//! Two things worth knowing next to a certificate: which CAs the domain's CAA
-//! records allow to issue (RFC 8659), and whether the server staples an OCSP
-//! response. The CAA lookup climbs the name tree; the stapling flag comes from
-//! the handshake in `tls`, and no OCSP client is involved.
+//! The CAA half of the TLS Check: which CAs the domain's CAA records allow to
+//! issue (RFC 8659). The lookup climbs the name tree.
 
 use std::{borrow::Cow, net::SocketAddr, time::Duration};
 
 use hickory_proto::rr::{RData, RecordType};
 use serde::Serialize;
 
+use super::TlsResult;
 use crate::{
     email_auth::clip,
     finding::{Finding, Severity},
     resolver::Resolver,
     text::printable,
-    tls::TlsResult,
 };
 
 const MAX_RECORDS: usize = 32;
@@ -156,7 +154,7 @@ pub fn ca_identifiers(issuer: &str) -> Option<&'static [&'static str]> {
         .map(|c| c.domains)
 }
 
-fn finding(
+pub(super) fn finding(
     code: &'static str,
     severity: Severity,
     title: impl Into<Cow<'static, str>>,
@@ -252,32 +250,6 @@ pub fn caa_findings(r: &CaaResult, tls: Option<&TlsResult>) -> Vec<Finding> {
         out.push(finding("caa_issuewild", Severity::Info, "CAA has a wildcard rule", msg, None));
     }
     out
-}
-
-/// Whether the server stapled an OCSP response. Informational only: the
-/// response is not fetched or checked here.
-pub fn ocsp_findings(host: &str, port: u16, r: &TlsResult) -> Vec<Finding> {
-    if r.ocsp_stapled {
-        vec![finding(
-            "tls_ocsp_stapled",
-            Severity::Ok,
-            "OCSP response stapled",
-            format!(
-                "{host}:{port} sent an OCSP response with its certificate, so clients need not ask the CA about revocation."
-            ),
-            None,
-        )]
-    } else {
-        vec![finding(
-            "tls_no_ocsp_staple",
-            Severity::Info,
-            "No OCSP stapling",
-            format!(
-                "{host}:{port} did not staple an OCSP response. Stapling is optional, and a server whose CA no longer runs OCSP has nothing to staple."
-            ),
-            None,
-        )]
-    }
 }
 
 #[cfg(test)]

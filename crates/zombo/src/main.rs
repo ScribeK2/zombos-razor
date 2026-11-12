@@ -9,6 +9,7 @@ use std::{
 use zombo_core::check::RunFlag;
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 use zombo_core::evidence::{headers, maillog};
+use zombo_core::smtp::{Mode, Reach, SmtpOptions, Starttls, check_smtp, smtp_findings, valid_ehlo_name};
 use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
 use zombo_core::{
     Finding, Severity,
@@ -30,11 +31,7 @@ use zombo_core::{
     ports::{
         FULL, PortState, QUICK, ServicePort, Timing, has_ipv6, ports_findings, probe, resolve_target, service_for,
     },
-    tls::{Trust, check_tls, tls_findings},
-};
-use zombo_core::{
-    smtp::{Mode, Reach, SmtpOptions, Starttls, check_smtp, smtp_findings, valid_ehlo_name},
-    tls_extras::{caa_findings, check_caa, ocsp_findings},
+    tls::{Trust, caa_findings, check_caa, check_tls, ocsp_findings, tls_findings},
 };
 
 const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]\n       zombo checks [--json]";

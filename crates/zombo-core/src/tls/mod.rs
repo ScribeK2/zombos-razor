@@ -42,8 +42,13 @@ use crate::{
     check::{Check, Fact, OnDemand, Outcome, Request, RunFlag},
     finding::{Finding, Severity},
     target::Kind,
-    tls_extras::{CaaResult, caa_findings, check_caa, ocsp_findings},
 };
+
+mod caa;
+mod ocsp;
+
+pub use caa::{CaaRecord, CaaResult, ca_identifiers, caa_findings, check_caa};
+pub use ocsp::ocsp_findings;
 
 /// A server that sends more certificates than this is not building a chain.
 pub const MAX_CHAIN: usize = 10;
@@ -857,11 +862,7 @@ mod tests {
             found_at: found_at.map(Into::into),
             records: records
                 .iter()
-                .map(|(c, t, v)| crate::tls_extras::CaaRecord {
-                    critical: *c,
-                    tag: t.to_string(),
-                    value: v.to_string(),
-                })
+                .map(|(c, t, v)| CaaRecord { critical: *c, tag: t.to_string(), value: v.to_string() })
                 .collect(),
             error: error.map(Into::into),
         }

@@ -30,10 +30,10 @@ Fixed by the Check registry refactor (PRs 48 to 55):
 
 - The UI no longer joins CAA onto TLS: `with_caa()` is gone, and the TLS Check hands back one outcome.
 - The UI no longer converts each Check's result into an `Outcome` by hand. Every Check returns an `Outcome`, and the UI reads label, automatic kinds, budget, blind spots and owner prefixes from the descriptor.
+- `tls_extras.rs` is folded into the TLS module: `tls/mod.rs`, `tls/caa.rs` and `tls/ocsp.rs`. `tls` re-exports the CAA and OCSP items, so callers use `zombo_core::tls::`.
 
 Still open:
 
-- `tls_extras.rs` is still a sibling file of `tls.rs`. Folding it into `tls/` changes paths that the CLI, the tests and `docs/parity.md` use.
 - The CLI (`crates/zombo/src/main.rs`) still has one hand-written subcommand per Check. A generic dispatch changes the `--json` shape and the default timeouts, so it needs a decision first.
 - A new Check still adds a `Section` variant, its `ALL` entry and its `home()` arm in the UI.
 
