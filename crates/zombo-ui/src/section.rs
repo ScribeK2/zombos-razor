@@ -1,4 +1,4 @@
-use zombo_core::{blacklist, check::Check, dnssec, rdns, tls};
+use zombo_core::{blacklist, check::Check, delegation, dnssec, rdns, registration, tls};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
@@ -44,13 +44,17 @@ impl Section {
         match self {
             Section::Summary => "Summary",
             Section::Dns => "DNS",
-            Section::Delegation => "Delegation",
             Section::Email => "Email",
             Section::Web => "Web",
-            Section::Registration => "Registration",
             Section::Ports => "Port scan",
             Section::Smtp => "SMTP banner",
-            Section::Dnssec | Section::Tls | Section::TlsPort | Section::Rdns | Section::Blacklist => {
+            Section::Delegation
+            | Section::Dnssec
+            | Section::Tls
+            | Section::Registration
+            | Section::TlsPort
+            | Section::Rdns
+            | Section::Blacklist => {
                 unreachable!("{self:?} reads its descriptor")
             }
         }
@@ -60,8 +64,10 @@ impl Section {
     /// knowledge of its own. `None` for the rest, until each moves behind a descriptor.
     pub(crate) fn check(self) -> Option<&'static Check> {
         match self {
+            Section::Delegation => Some(&delegation::CHECK),
             Section::Dnssec => Some(&dnssec::CHECK),
             Section::Tls => Some(&tls::CHECK),
+            Section::Registration => Some(&registration::CHECK),
             Section::TlsPort => Some(&tls::ON_PORT),
             Section::Rdns => Some(&rdns::CHECK),
             Section::Blacklist => Some(&blacklist::CHECK),
@@ -132,9 +138,20 @@ mod tests {
     }
 
     #[test]
-    fn only_dnssec_the_tls_rows_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
+    fn only_delegation_dnssec_the_tls_rows_registration_reverse_dns_and_blacklist_are_behind_a_descriptor_so_far() {
         let behind: Vec<_> = Section::ALL.iter().filter(|s| s.check().is_some()).collect();
-        assert_eq!(behind, [&Section::Dnssec, &Section::Tls, &Section::Rdns, &Section::TlsPort, &Section::Blacklist]);
+        assert_eq!(
+            behind,
+            [
+                &Section::Delegation,
+                &Section::Dnssec,
+                &Section::Tls,
+                &Section::Registration,
+                &Section::Rdns,
+                &Section::TlsPort,
+                &Section::Blacklist
+            ]
+        );
         assert!(std::ptr::eq(Section::Tls.check().unwrap(), &tls::CHECK));
         assert!(std::ptr::eq(Section::TlsPort.check().unwrap(), &tls::ON_PORT));
     }

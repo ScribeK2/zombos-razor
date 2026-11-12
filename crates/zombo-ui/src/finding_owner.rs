@@ -9,9 +9,6 @@ use crate::section::Section;
 const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_headers_", None),
     ("mail_log_", None),
-    ("dns_delegation_", Some(Section::Delegation)),
-    ("dns_glue_", Some(Section::Delegation)),
-    ("dns_ns_", Some(Section::Delegation)),
     ("dns_", Some(Section::Dns)),
     ("spf_", Some(Section::Email)),
     ("dkim_", Some(Section::Email)),
@@ -19,7 +16,6 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_", Some(Section::Email)),
     ("website_", Some(Section::Web)),
     ("web_", Some(Section::Web)),
-    ("registration_", Some(Section::Registration)),
     ("hosting_reachability_", Some(Section::Ports)),
     ("smtp_", Some(Section::Smtp)),
 ];

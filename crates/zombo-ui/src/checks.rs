@@ -3,12 +3,10 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
-    delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
-    registration::{Endpoints, Registration, check_registration, registration_findings},
     resolver::{Resolver, system_resolvers},
     smtp::{Extensions, Reach, SmtpOptions, SmtpResult, Starttls, check_smtp, smtp_findings},
     target::{Kind, Target},
@@ -27,8 +25,8 @@ use crate::{
 pub fn automatic(kind: Kind) -> Vec<Section> {
     use Section::*;
     let listed: &[Section] = match kind {
-        Kind::Domain | Kind::Email => &[Dns, Delegation, Email, Web, Registration],
-        Kind::Hostname => &[Dns, Web, Registration],
+        Kind::Domain | Kind::Email => &[Dns, Email, Web],
+        Kind::Hostname => &[Dns, Web],
         Kind::Ip => &[],
     };
     Section::ALL
@@ -144,15 +142,17 @@ pub async fn run_section(
 }
 
 /// A Check that does not take the chosen port keeps the system port, so the automatic TLS row is
-/// the service on 443 whatever port the picker holds.
+/// the service on 443 whatever port the picker holds. The rep's proxy goes to every Check; each
+/// takes it or ignores it.
 fn request_for<'a>(
     check: &Check,
     name: &'a str,
     query: Duration,
     bootstrap: &'a [SocketAddr],
     options: Options,
+    settings: &'a Settings,
 ) -> Request<'a> {
-    let request = Request::system(name, query, bootstrap);
+    let request = Request { proxy: settings.proxy.as_deref(), ..Request::system(name, query, bootstrap) };
     if check.takes_chosen_port { Request { tls_port: options.tls_port, ..request } } else { request }
 }
 
@@ -161,13 +161,9 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     if let Some(check) = section.check() {
-        return check.run(&request_for(check, name, query, &bootstrap, options)).await;
+        return check.run(&request_for(check, name, query, &bootstrap, options, settings)).await;
     }
     match section {
-        Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
-            .await
-            .map(|r| delegation_outcome(&r))
-            .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
             let r = email_auth(resolver, name, &settings.selectors, query).await;
@@ -181,12 +177,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             let (host, path) = parse_web_target(name).map_err(|e| e.to_string())?;
             let opts = WebOptions { timeout: query, ..WebOptions::default() };
             Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
-        }
-        Section::Registration => {
-            check_registration(name, &Endpoints { proxy: settings.proxy.clone(), ..Endpoints::default() }, query)
-                .await
-                .map(|r| registration_outcome(name, &r))
-                .map_err(|e| e.to_string())
         }
         Section::Ports => {
             let addresses = resolve_target(name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
@@ -219,27 +209,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
         }
         other => Err(format!("{} has no Check behind it", other.label())),
     }
-}
-
-fn addresses(set: &std::collections::BTreeSet<std::net::IpAddr>) -> String {
-    set.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
-}
-
-pub fn delegation_outcome(r: &DelegationResult) -> Outcome {
-    let mut facts = vec![Fact::new("Zone", &r.apex), Fact::new("Parent zone", &r.parent)];
-    facts.extend(r.parent_ns.iter().map(|n| Fact::new("Delegated nameserver", n)));
-    for (name, set) in &r.glue {
-        facts.push(Fact::new(format!("Glue {name}"), addresses(set)));
-    }
-    for s in &r.servers {
-        let state = match &s.state {
-            ServerState::Ok { serial } => format!("answers, SOA serial {serial}"),
-            ServerState::Unreachable => "unreachable".to_string(),
-            ServerState::Lame { why, .. } => format!("lame: {why}"),
-        };
-        facts.push(Fact::new(format!("Server {}", s.name), state));
-    }
-    Outcome { findings: delegation_findings(r), facts, ..Outcome::default() }
 }
 
 pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
@@ -290,25 +259,6 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
         })
         .collect();
     Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
-}
-
-pub fn registration_outcome(target: &str, r: &Registration) -> Outcome {
-    let mut facts =
-        vec![Fact::new("Domain", &r.domain), Fact::new("Registered", if r.registered { "yes" } else { "no" })];
-    if let Some(v) = &r.registrar {
-        facts.push(Fact::new("Registrar", v));
-    }
-    for (k, d) in [("Created", &r.created), ("Updated", &r.updated), ("Expires", &r.expires)] {
-        if let Some(d) = d {
-            facts.push(Fact::new(k, d.to_string()));
-        }
-    }
-    facts.extend(r.statuses.iter().map(|s| Fact::new("Status", s)));
-    facts.extend(r.nameservers.iter().map(|n| Fact::new("Nameserver", n)));
-    if let Some(d) = r.dnssec {
-        facts.push(Fact::new("DNSSEC", if d { "signed" } else { "not signed" }));
-    }
-    Outcome { findings: registration_findings(target, r), facts, ..Outcome::default() }
 }
 
 pub fn ports_outcome(target: &str, r: &PortsResult) -> Outcome {
@@ -435,8 +385,24 @@ mod tests {
     #[test]
     fn only_the_on_demand_tls_row_takes_the_picked_port() {
         let options = Options { tls_port: 993, ..Options::default() };
-        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options).tls_port;
+        let settings = Settings::default();
+        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options, &settings).tls_port;
         assert_eq!((port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK)), (443, 993, 443));
+    }
+
+    #[test]
+    fn every_check_is_handed_the_rep_proxy() {
+        let settings = Settings { proxy: Some("http://proxy.example:3128".into()), ..Settings::default() };
+        let proxy = |c| request_for(c, "example.com", Duration::from_secs(1), &[], Options::default(), &settings).proxy;
+        for section in Section::ALL {
+            if let Some(check) = section.check() {
+                assert_eq!(proxy(check), Some("http://proxy.example:3128"), "{section:?}");
+            }
+        }
+        let none = Settings::default();
+        let request =
+            request_for(&dnssec::CHECK, "example.com", Duration::from_secs(1), &[], Options::default(), &none);
+        assert_eq!(request.proxy, None);
     }
 
     #[test]
@@ -464,41 +430,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_registration_becomes_findings_plus_a_short_table() {
-        let mut r = Registration::empty("example.com", zombo_core::registration::Source::Rdap, "https://rdap.example");
-        r.registered = true;
-        r.registrar = Some("Registrar Inc".into());
-        r.nameservers = vec!["ns1.example.com".into()];
-        let o = registration_outcome("example.com", &r);
-        let lines = o.records();
-        assert!(lines.contains(&"Registrar: Registrar Inc".to_string()));
-        assert!(lines.contains(&"Nameserver: ns1.example.com".to_string()));
-        assert!(o.details.is_empty());
-    }
-
-    #[test]
-    fn a_delegation_lists_each_server_with_its_state() {
-        use std::collections::{BTreeMap, BTreeSet};
-        let r = DelegationResult {
-            apex: "example.com".into(),
-            parent: "com".into(),
-            parent_ns: BTreeSet::from(["ns1.example.com".to_string()]),
-            glue: BTreeMap::new(),
-            servers: vec![zombo_core::delegation::DelegatedServer {
-                name: "ns1.example.com".into(),
-                address: None,
-                state: ServerState::Unreachable,
-                child_ns: None,
-            }],
-            glue_served: BTreeMap::new(),
-            unresolvable: vec![],
-            cnames: vec![],
-        };
-        let lines = delegation_outcome(&r).records();
-        assert!(lines.contains(&"Server ns1.example.com: unreachable".to_string()));
-        assert!(lines.contains(&"Delegated nameserver: ns1.example.com".to_string()));
-    }
     #[test]
     fn an_on_demand_check_can_be_asked_about_an_ip_but_an_automatic_one_cannot() {
         let ip = t("192.0.2.1", Kind::Ip);
