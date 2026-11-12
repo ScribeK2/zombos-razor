@@ -90,6 +90,9 @@ fn severity_color(s: Severity) -> u32 {
     glyph_color(dg::severity_glyph(s))
 }
 
+const WORDMARK_H: f32 = 18.;
+const WORDMARK_W: f32 = WORDMARK_H * 1095. / 180.;
+
 fn icon(path: &'static str, size: f32, c: u32) -> Svg {
     svg().path(path).size(px(size)).flex_none().text_color(color(c))
 }
@@ -636,12 +639,29 @@ impl Shell {
             .bg(color(t::BG_200))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .child(
+                // Both SVGs share one viewBox, so the slash lands on the text without measuring.
                 div()
+                    .id("wordmark")
                     .w(px(220.))
-                    .text_size(px(t::TEXT_LABEL))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(color(t::GRAY_900))
-                    .child("Zombo's Razor"),
+                    .flex()
+                    .items_center()
+                    .role(Role::Heading)
+                    .aria_label("Zombo's Razor")
+                    .child(
+                        div()
+                            .relative()
+                            .w(px(WORDMARK_W))
+                            .h(px(WORDMARK_H))
+                            .child(icon("wordmark.svg", WORDMARK_H, t::GRAY_900).w(px(WORDMARK_W)).h(px(WORDMARK_H)))
+                            .child(
+                                icon("wordmark-slash.svg", WORDMARK_H, t::ACCENT)
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .w(px(WORDMARK_W))
+                                    .h(px(WORDMARK_H)),
+                            ),
+                    ),
             )
             .child(
                 div().flex_1().flex().justify_center().child(

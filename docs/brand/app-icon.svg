@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Zombo’s Razor app icon</title>
+  <rect width="256" height="256" rx="54" fill="#0B0B0F"/>
+  <path d="M62 77 H194 L82 179 H194" fill="none" stroke="#F8FAFC" stroke-width="22" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M68 204 L192 48" fill="none" stroke="#5B8DEF" stroke-width="13" stroke-linecap="square"/>
+</svg>
