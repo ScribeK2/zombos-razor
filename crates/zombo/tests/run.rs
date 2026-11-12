@@ -165,3 +165,63 @@ fn every_flag_of_run_is_accepted_and_an_unknown_one_is_refused() {
         assert!(!zombo(&all).status.success(), "{all:?}");
     }
 }
+
+/// A UDP socket that records what a run sends to it as its resolver, and never answers.
+fn silent_resolver() -> (std::net::SocketAddr, std::sync::mpsc::Receiver<Vec<u8>>) {
+    let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = sock.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 512];
+        while let Ok((n, _)) = sock.recv_from(&mut buf) {
+            if tx.send(buf[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    (addr, rx)
+}
+
+fn has(packet: &[u8], needle: &str) -> bool {
+    packet.windows(needle.len()).any(|w| w == needle.as_bytes())
+}
+
+#[test]
+fn selectors_and_resolvers_reach_the_check() {
+    let (a, rx_a) = silent_resolver();
+    let (b, rx_b) = silent_resolver();
+    let (a, b) = (a.to_string(), b.to_string());
+    let o = zombo(&[
+        "run",
+        "email",
+        "example.com",
+        "--selector",
+        "zzfirst",
+        "--selector",
+        "zzsecond",
+        "--resolver",
+        &a,
+        "--resolver",
+        &b,
+        "--timeout-ms",
+        "300",
+    ]);
+    drop(o);
+    let sent: Vec<_> = rx_a.try_iter().chain(rx_b.try_iter()).collect();
+    assert!(sent.iter().any(|p| has(p, "zzfirst")), "no query for the first selector");
+    assert!(sent.iter().any(|p| has(p, "zzsecond")), "no query for the second selector");
+    assert!(sent.iter().all(|p| has(p, "example")), "a query for another name");
+}
+
+#[test]
+fn the_port_and_the_timeout_reach_the_check() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let t = std::time::Instant::now();
+    // The listener accepts and never speaks, so the run ends on its limit: the default 8 s one would take far longer than 200 ms.
+    let o = zombo(&["run", "tls-port", "127.0.0.1", "--port", &port, "--timeout-ms", "200"]);
+    assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    assert_eq!(err(&o), "zombo: timed out\n");
+    listener.set_nonblocking(true).unwrap();
+    assert!(listener.accept().is_ok(), "the run did not dial the chosen port");
+}
