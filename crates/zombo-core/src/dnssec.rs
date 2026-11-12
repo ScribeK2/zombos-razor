@@ -28,6 +28,7 @@ use crate::{
     dns::{QueryFlags, exchange_with},
     finding::{Finding, Severity},
     propagation::{DiscoverError, Vantage, ipv6_available},
+    target::Kind,
 };
 
 /// RFC 4034 Appendix B key tag: a checksum that names a DNSKEY, so a DS or an
@@ -890,16 +891,17 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
 }
 
 /// The DNSSEC Check as the UI runs it. With `Request::system` that is the real validating resolvers, port 53 and the clock now.
-pub static CHECK: Check = Check::new(
-    (Duration::from_secs(20), Duration::from_secs(4)),
-    &["dnssec_"],
-    &[
+pub static CHECK: Check = Check {
+    label: "DNSSEC",
+    automatic_for: &[Kind::Domain, Kind::Email],
+    budget: (Duration::from_secs(20), Duration::from_secs(4)),
+    owns: &["dnssec_"],
+    blind_spots: &[
         "The signing keys and how the DNS provider stores and rolls them.",
         "The DS record upload at the registrar: only what the parent zone serves now is read.",
         "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
     ],
-    false,
-    |request| {
+    ..Check::base(|request| {
         Box::pin(async move {
             let own;
             let validating = match request.validating {
@@ -914,8 +916,8 @@ pub static CHECK: Check = Check::new(
                 .map(|r| outcome(&r))
                 .map_err(|e| e.to_string())
         })
-    },
-);
+    })
+};
 
 fn outcome(r: &DnssecResult) -> Outcome {
     let mut facts = vec![Fact::new("Zone", &r.apex)];
@@ -1010,5 +1012,12 @@ mod tests {
         assert_eq!(CHECK.budget, (Duration::from_secs(20), Duration::from_secs(4)));
         assert_eq!(CHECK.owns, ["dnssec_"]);
         assert_eq!(CHECK.blind_spots.len(), 3);
+    }
+
+    #[test]
+    fn the_descriptor_names_the_row_and_the_kinds_it_runs_on_by_itself() {
+        assert_eq!(CHECK.label, "DNSSEC");
+        assert_eq!(CHECK.automatic_for, [Kind::Domain, Kind::Email]);
+        assert!(!CHECK.is_on_demand() && CHECK.on_demand.is_none());
     }
 }
