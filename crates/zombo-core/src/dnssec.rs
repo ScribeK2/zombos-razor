@@ -908,7 +908,7 @@ pub static CHECK: Check = Check::new(
     },
 );
 
-pub fn outcome(r: &DnssecResult) -> Outcome {
+fn outcome(r: &DnssecResult) -> Outcome {
     let mut facts = vec![Fact::new("Zone", &r.apex)];
     facts.extend(r.resolvers.iter().map(|v| Fact::new(format!("Resolver {}", v.resolver), v.status.label())));
     for d in &r.ds {

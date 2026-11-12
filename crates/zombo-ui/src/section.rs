@@ -57,7 +57,7 @@ impl Section {
 
     /// The Check behind this section when it is a migrated one: the section then holds no Check
     /// knowledge of its own. `None` for the rest, until each moves behind a descriptor.
-    pub fn check(self) -> Option<&'static Check> {
+    pub(crate) fn check(self) -> Option<&'static Check> {
         match self {
             Section::Dnssec => Some(&dnssec::CHECK),
             _ => None,
