@@ -556,6 +556,16 @@ mod tests {
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
     }
 
+    /// A label over 63 bytes is not a DNS name, so the Check fails before it sends a query.
+    #[tokio::test]
+    async fn a_section_with_a_descriptor_runs_the_descriptor() {
+        let name = format!("{}.example.com", "a".repeat(64));
+        let err = produce(Section::Dnssec, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        assert_eq!(err, format!("no nameservers found for {name}"));
+        let err = produce(Section::Summary, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        assert_eq!(err, "Summary has no Check behind it");
+    }
+
     fn tls_result() -> TlsResult {
         use zombo_core::tls::{KeyInfo, TlsCert, Trust};
         let now = time::OffsetDateTime::now_utc();
