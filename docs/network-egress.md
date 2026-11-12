@@ -42,4 +42,4 @@ No telemetry, crash reports, usage statistics, fonts or assets from a CDN, adver
 
 ## HTTP clients
 
-The HTTP clients (registration, web) use `ureq` with rustls and send the User-Agent `zombo/<release version>`: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client uses the proxy from settings first, then `HTTP_PROXY` and `HTTPS_PROXY`; the web Check ignores them on purpose (see `docs/progress.md`, decisions waiting).
+The HTTP clients (registration, web) use `ureq` with rustls and send the User-Agent `zombo/<release version>`: no OpenSSL, bounded responses (1 MiB for registration, 64 KiB of body for the web Check), a redirect limit and one overall deadline. The registration client uses the proxy from settings first, then `HTTP_PROXY` and `HTTPS_PROXY`, for its RDAP requests; the WHOIS fallback connects directly on port 43 and never uses a proxy. The web Check ignores every proxy on purpose (see `docs/progress.md`, decisions waiting). The updater builds its own client, which reads `HTTP_PROXY` and `HTTPS_PROXY` from the environment and never the setting.
