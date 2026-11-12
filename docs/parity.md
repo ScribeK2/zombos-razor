@@ -354,9 +354,9 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `smtp_starttls_failed` | crates/zombo-core/src/smtp/findings.rs:143 | warning | `zombo-core/tests/check_smtp.rs::a_refused_starttls_and_a_refused_connection_say_so`, `zombo-core/tests/smtp.rs::a_refused_starttls_is_reported_with_its_code` (+1) |
 | `smtp_tls_failed` | crates/zombo-core/src/smtp/findings.rs:93 | critical | NONE |
 | `smtp_tls_ok` | crates/zombo-core/src/smtp/findings.rs:178 | ok | `zombo-core/tests/check_smtp.rs::a_server_that_upgrades_gives_the_tls_rows_and_the_after_starttls_details`, `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail` (+1) |
-| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/mod.rs:567 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
-| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/mod.rs:638 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
-| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/mod.rs:647 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_not_yet_valid` | crates/zombo-core/src/tls/handshake.rs:556 | critical | `zombo-core/tests/tls.rs::a_certificate_not_yet_valid_gets_its_own_finding` |
+| `ssl_inspection_weak_key` | crates/zombo-core/src/tls/handshake.rs:627 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
+| `ssl_inspection_weak_signature` | crates/zombo-core/src/tls/handshake.rs:636 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
 | `tls_no_ocsp_staple` | crates/zombo-core/src/tls/ocsp.rs:22 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `tls_ocsp_stapled` | crates/zombo-core/src/tls/ocsp.rs:12 | ok | `zombo-core/tests/tls_caa_ocsp.rs::a_server_that_staples_is_detected` |
 | `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:97 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
