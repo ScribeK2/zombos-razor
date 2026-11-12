@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256, Sha384};
 use tokio::task::JoinSet;
 
 use crate::{
+    check::{Check, Fact, Outcome},
     dns::{QueryFlags, exchange_with},
     finding::{Finding, Severity},
     propagation::{DiscoverError, Vantage, ipv6_available},
@@ -886,4 +887,127 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
         }
     }
     out
+}
+
+/// The DNSSEC Check as the UI runs it. With `Request::system` that is the real validating resolvers, port 53 and the clock now.
+pub static CHECK: Check = Check::new(
+    (Duration::from_secs(20), Duration::from_secs(4)),
+    &["dnssec_"],
+    &[
+        "The signing keys and how the DNS provider stores and rolls them.",
+        "The DS record upload at the registrar: only what the parent zone serves now is read.",
+        "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
+    ],
+    |request| {
+        Box::pin(async move {
+            let own;
+            let validating = match request.validating {
+                Some(v) => v,
+                None => {
+                    own = validating_resolvers();
+                    &own
+                }
+            };
+            check_dnssec(request.bootstrap, validating, request.name, request.ns_port, request.now, request.query)
+                .await
+                .map(|r| outcome(&r))
+                .map_err(|e| e.to_string())
+        })
+    },
+);
+
+fn outcome(r: &DnssecResult) -> Outcome {
+    let mut facts = vec![Fact::new("Zone", &r.apex)];
+    facts.extend(r.resolvers.iter().map(|v| Fact::new(format!("Resolver {}", v.resolver), v.status.label())));
+    for d in &r.ds {
+        let matched = if d.matched { "matches a served key" } else { "matches no served key" };
+        facts.push(Fact::new("DS record", format!("key tag {}, {}, {}", d.ds.key_tag.0, d.ds.algorithm, matched)));
+    }
+    let mut details = vec![];
+    for n in &r.nameservers {
+        match &n.error {
+            Some(e) => details.push(Fact::new(format!("Nameserver {}", n.name), format!("no usable answer: {e}"))),
+            None => {
+                for k in &n.dnskeys {
+                    details.push(Fact::new(
+                        format!("Key at {}", n.name),
+                        format!("key tag {}, {}, flags {}", k.key_tag.0, k.algorithm, k.flags),
+                    ));
+                }
+            }
+        }
+    }
+    Outcome { findings: dnssec_findings(r), facts, details_title: "Keys by nameserver", details }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dnssec_result_becomes_zone_resolver_ds_and_key_rows() {
+        let key = Dnskey::new(257, 3, Algorithm::EcdsaP256Sha256, vec![1, 2, 3, 4]);
+        let ds = |matched| DsStatus {
+            ds: Ds {
+                key_tag: key.key_tag,
+                algorithm: Algorithm::EcdsaP256Sha256,
+                digest_type: DigestType::Sha256,
+                digest: vec![0; 32],
+            },
+            matched,
+        };
+        let ns = |name: &str, error: Option<&str>, dnskeys| NameserverView {
+            name: name.into(),
+            error: error.map(Into::into),
+            authoritative: true,
+            recursion_available: false,
+            dnskeys,
+            soa_rrsig: None,
+        };
+        let r = DnssecResult {
+            apex: "example.com".into(),
+            checked_at: 1_700_000_000,
+            resolvers: vec![
+                ResolverVerdict { resolver: "Google".into(), status: ResolverStatus::Secure },
+                ResolverVerdict { resolver: "Quad9".into(), status: ResolverStatus::Bogus },
+            ],
+            ds: vec![ds(true), ds(false)],
+            nameservers: vec![
+                ns("ns1.example.com", None, vec![key.clone()]),
+                ns("ns2.example.com", Some("timeout"), vec![]),
+            ],
+        };
+        let o = outcome(&r);
+        let rows = |f: &[Fact]| f.iter().map(Fact::record).collect::<Vec<_>>();
+        let tag = key.key_tag.0;
+        assert_eq!(
+            rows(&o.facts),
+            [
+                "Zone: example.com".to_string(),
+                "Resolver Google: SECURE".into(),
+                "Resolver Quad9: BOGUS (rejected for DNSSEC)".into(),
+                format!("DS record: key tag {tag}, ECDSAP256SHA256 (13), matches a served key"),
+                format!("DS record: key tag {tag}, ECDSAP256SHA256 (13), matches no served key"),
+            ]
+        );
+        assert_eq!(o.details_title, "Keys by nameserver");
+        assert_eq!(
+            rows(&o.details),
+            [
+                format!("Key at ns1.example.com: key tag {tag}, ECDSAP256SHA256 (13), flags 257"),
+                "Nameserver ns2.example.com: no usable answer: timeout".to_string(),
+            ]
+        );
+        let codes: Vec<_> = o.findings.iter().map(|f| f.code).collect();
+        let want: Vec<_> = dnssec_findings(&r).iter().map(|f| f.code).collect();
+        assert_eq!(codes, want);
+        assert!(!codes.is_empty());
+    }
+
+    #[test]
+    fn the_descriptor_carries_the_limits_prefix_and_blind_spots_the_ui_used_to_hold() {
+        assert_eq!(CHECK.budget, (Duration::from_secs(20), Duration::from_secs(4)));
+        assert_eq!(CHECK.owns, ["dnssec_"]);
+        assert_eq!(CHECK.blind_spots.len(), 3);
+    }
 }

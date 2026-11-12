@@ -1,7 +1,10 @@
+use std::sync::LazyLock;
+
 use crate::section::Section;
 
-/// Which rail section owns a finding, by the prefix of its code. The first matching row wins,
-/// so a specific prefix goes above a general one. `None` is a deliberate "no section owns this":
+/// Which rail section owns a finding, by the prefix of its code. The longest matching prefix
+/// wins, so row order does not matter. A migrated Check lists its own prefixes in its descriptor
+/// and is not repeated here. `None` is a deliberate "no section owns this":
 /// Evidence findings live in their own tab.
 const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_headers_", None),
@@ -10,7 +13,6 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("dns_glue_", Some(Section::Delegation)),
     ("dns_ns_", Some(Section::Delegation)),
     ("dns_", Some(Section::Dns)),
-    ("dnssec_", Some(Section::Dnssec)),
     ("spf_", Some(Section::Email)),
     ("dkim_", Some(Section::Email)),
     ("dmarc_", Some(Section::Email)),
@@ -27,8 +29,22 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("blacklist_", Some(Section::Blacklist)),
 ];
 
-pub fn row(code: &str) -> Option<&'static (&'static str, Option<Section>)> {
-    OWNERS.iter().find(|(prefix, _)| code.starts_with(prefix))
+type Row = (&'static str, Option<Section>);
+
+/// The table above plus every prefix a migrated Check's descriptor lists.
+static TABLE: LazyLock<Vec<Row>> = LazyLock::new(|| {
+    let migrated = Section::ALL.into_iter().filter_map(|s| Some((s, s.check()?)));
+    let owned = migrated.flat_map(|(s, c)| c.owns.iter().map(move |&p| (p, Some(s))));
+    OWNERS.iter().copied().chain(owned).collect()
+});
+
+/// The longest prefix that `code` starts with wins, wherever its row sits.
+fn longest<'a>(table: &'a [Row], code: &str) -> Option<&'a Row> {
+    table.iter().filter(|(prefix, _)| code.starts_with(prefix)).max_by_key(|(prefix, _)| prefix.len())
+}
+
+pub fn row(code: &str) -> Option<&'static Row> {
+    longest(&TABLE, code)
 }
 
 /// The section a finding belongs to, or `None` when no section owns it.
@@ -98,6 +114,50 @@ mod tests {
         assert!(codes.len() > 150, "found only {} codes; the scan is broken", codes.len());
         let missing: Vec<_> = codes.iter().filter(|c| row(c).is_none()).collect();
         assert!(missing.is_empty(), "no owner row for: {missing:?}");
+    }
+
+    /// The table as it stood before any Check had a descriptor: the first matching row wins, so a
+    /// specific prefix sits above a general one.
+    const OLD_FIRST_MATCH: &[(&str, Option<Section>)] = &[
+        ("email_headers_", None),
+        ("mail_log_", None),
+        ("dns_delegation_", Some(Section::Delegation)),
+        ("dns_glue_", Some(Section::Delegation)),
+        ("dns_ns_", Some(Section::Delegation)),
+        ("dns_", Some(Section::Dns)),
+        ("dnssec_", Some(Section::Dnssec)),
+        ("spf_", Some(Section::Email)),
+        ("dkim_", Some(Section::Email)),
+        ("dmarc_", Some(Section::Email)),
+        ("email_", Some(Section::Email)),
+        ("website_", Some(Section::Web)),
+        ("web_", Some(Section::Web)),
+        ("ssl_", Some(Section::Tls)),
+        ("tls_", Some(Section::Tls)),
+        ("caa_", Some(Section::Tls)),
+        ("registration_", Some(Section::Registration)),
+        ("rdns_", Some(Section::Rdns)),
+        ("hosting_reachability_", Some(Section::Ports)),
+        ("smtp_", Some(Section::Smtp)),
+        ("blacklist_", Some(Section::Blacklist)),
+    ];
+
+    #[test]
+    fn the_longest_prefix_owner_equals_the_old_first_match_owner_for_every_code_zombo_core_emits() {
+        let codes = core_codes();
+        assert!(codes.len() > 150, "found only {} codes; the scan is broken", codes.len());
+        for code in &codes {
+            let old = OLD_FIRST_MATCH.iter().find(|(p, _)| code.starts_with(p)).and_then(|(_, s)| *s);
+            assert_eq!(owner(code), old, "{code}");
+        }
+    }
+
+    #[test]
+    fn a_specific_prefix_wins_over_a_general_one_whichever_row_comes_first() {
+        let general_first = [("dns_", Some(Section::Dns)), ("dns_glue_", Some(Section::Delegation))];
+        assert_eq!(longest(&general_first, "dns_glue_x").unwrap().1, Some(Section::Delegation));
+        assert_eq!(longest(&general_first, "dns_other").unwrap().1, Some(Section::Dns));
+        assert_eq!(longest(&general_first, "web_x"), None);
     }
 
     #[test]

@@ -19,11 +19,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Nameservers that answer only some networks: a server that is silent here may answer elsewhere.",
             "Why a nameserver is lame: its configuration and logs are on its own host.",
         ],
-        Section::Dnssec => &[
-            "The signing keys and how the DNS provider stores and rolls them.",
-            "The DS record upload at the registrar: only what the parent zone serves now is read.",
-            "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
-        ],
+        Section::Dnssec => zombo_core::dnssec::CHECK.blind_spots,
         Section::Email => &[
             "Recipient-side filtering: spam filters, quarantine and allow lists decide delivery after DNS passes.",
             "Mail that was really sent: DMARC reports and mail logs hold that, DNS does not.",

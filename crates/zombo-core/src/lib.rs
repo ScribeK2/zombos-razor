@@ -1,6 +1,7 @@
 //! Zombo's Razor core: every Check, with no UI.
 
 pub mod blacklist;
+pub mod check;
 pub mod delegation;
 pub mod dns;
 pub mod dnssec;

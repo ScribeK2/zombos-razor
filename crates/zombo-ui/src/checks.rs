@@ -1,15 +1,12 @@
-use std::{
-    net::SocketAddr,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, time::Duration};
 
 use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     blacklist::{
         BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
     },
+    check::Request,
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
-    dnssec::{DnssecResult, check_dnssec, dnssec_findings, validating_resolvers},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
@@ -151,14 +148,13 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
     let smtp = options.smtp;
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
+    if let Some(check) = section.check() {
+        return check.run(&Request::system(name, query, &bootstrap)).await;
+    }
     match section {
         Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
             .await
             .map(|r| delegation_outcome(&r))
-            .map_err(|e| e.to_string()),
-        Section::Dnssec => check_dnssec(&bootstrap, &validating_resolvers(), name, 53, SystemTime::now(), query)
-            .await
-            .map(|r| dnssec_outcome(&r))
             .map_err(|e| e.to_string()),
         Section::Email => {
             let resolver = bootstrap.first().copied().ok_or("no resolver is configured")?;
@@ -254,30 +250,6 @@ pub fn delegation_outcome(r: &DelegationResult) -> Outcome {
         facts.push(Fact::new(format!("Server {}", s.name), state));
     }
     Outcome { findings: delegation_findings(r), facts, ..Outcome::default() }
-}
-
-pub fn dnssec_outcome(r: &DnssecResult) -> Outcome {
-    let mut facts = vec![Fact::new("Zone", &r.apex)];
-    facts.extend(r.resolvers.iter().map(|v| Fact::new(format!("Resolver {}", v.resolver), v.status.label())));
-    for d in &r.ds {
-        let matched = if d.matched { "matches a served key" } else { "matches no served key" };
-        facts.push(Fact::new("DS record", format!("key tag {}, {}, {}", d.ds.key_tag.0, d.ds.algorithm, matched)));
-    }
-    let mut details = vec![];
-    for n in &r.nameservers {
-        match &n.error {
-            Some(e) => details.push(Fact::new(format!("Nameserver {}", n.name), format!("no usable answer: {e}"))),
-            None => {
-                for k in &n.dnskeys {
-                    details.push(Fact::new(
-                        format!("Key at {}", n.name),
-                        format!("key tag {}, {}, flags {}", k.key_tag.0, k.algorithm, k.flags),
-                    ));
-                }
-            }
-        }
-    }
-    Outcome { findings: dnssec_findings(r), facts, details_title: "Keys by nameserver", details }
 }
 
 pub fn email_outcome(domain: &str, r: &EmailAuthResult) -> Outcome {
@@ -582,6 +554,16 @@ mod tests {
         assert_eq!(automatic(Kind::Hostname), [Section::Dns, Section::Web, Section::Tls, Section::Registration]);
         assert_eq!(automatic(Kind::Ip), [Section::Rdns]);
         assert!(automatic(Kind::Domain).iter().all(|s| wired(*s) && !s.is_on_demand()));
+    }
+
+    /// A label over 63 bytes is not a DNS name, so the Check fails before it sends a query.
+    #[tokio::test]
+    async fn a_section_with_a_descriptor_runs_the_descriptor() {
+        let name = format!("{}.example.com", "a".repeat(64));
+        let err = produce(Section::Dnssec, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        assert_eq!(err, format!("no nameservers found for {name}"));
+        let err = produce(Section::Summary, &name, &Settings::default(), Options::default()).await.unwrap_err();
+        assert_eq!(err, "Summary has no Check behind it");
     }
 
     fn tls_result() -> TlsResult {
