@@ -88,9 +88,10 @@ async fn a_name_that_cannot_resolve_gives_the_resolve_error_text() {
 }
 
 #[tokio::test]
-async fn the_four_second_resolve_limit_and_the_probe_timing_do_not_come_from_the_requests_query() {
+async fn a_zero_query_timeout_neither_cuts_the_lookup_short_nor_makes_a_dial_answer_no_answer() {
     let _lock = LOOPBACK.lock().await;
-    // A query of zero would time out a lookup that has to wait for the system resolver.
+    // Only a stalled lookup would show the 4 s limit, and no local test can stall one: this proves just
+    // that a zero query does not turn a local failure into "timed out".
     let name = format!("{}.example", "a".repeat(64));
     let err = CHECK.run(&Request::system(&name, Duration::ZERO, &[])).await.unwrap_err();
     assert!(!err.ends_with("timed out"), "the request's query timeout limited the lookup: {err}");
