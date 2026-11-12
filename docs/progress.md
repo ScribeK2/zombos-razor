@@ -159,7 +159,7 @@ End state: `Section` stays a small enum used as an index. A new Check adds one v
 
 Left after the registry work:
 
-- [ ] Run the ignored live tests (`cargo test -p zombo-core --test 'check_*' -- --ignored`) on the clean-network VPS; this network intercepts DNS on port 53, so none ran here
+- [x] Live run from the clean-network VPS (2026-11-12, `crates/zombo-core/tests/check_live.rs`, 11 tests through each descriptor, all pass in 6 s): DNSSEC secure for cloudflare.com on all four validating resolvers and bogus with `dnssec_ds_mismatch` for dnssec-failed.org (the `validating: None` path), TLS with the CAA join over real DNS, Delegation, Registration over RDAP, Email, Web, Reverse DNS (confirmed PTR for 1.1.1.1), Blacklist (127.0.0.2 listed on 6 of 8 lists, one refused, one unknown), Port scan of the VPS's own address. SMTP to a Google MX on port 25 reported `smtp_no_answer` (outbound 25 is blocked there), so the SMTP success path is still not seen live. The older `live_*` tests in the `check_*.rs` files are weak (they accept a documented error) and are superseded by `check_live.rs`; the Ports one scans example.com, so run it only on purpose
 - [ ] Look at the UI by eye (rail labels, on-demand briefs, port pickers, blind-spot blocks); only unit tests and the characterization test ran
 - [ ] A new section still needs by hand: a key binding if it has one, its widgets (a port picker), its position in `ALL` and `FIRST_ON_DEMAND`, and the tests that pin the 13-section rail
 
