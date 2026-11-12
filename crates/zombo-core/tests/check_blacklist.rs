@@ -59,12 +59,20 @@ async fn a_machine_with_no_resolver_gets_the_error_text() {
 }
 
 #[tokio::test]
-async fn the_requests_query_timeout_does_not_change_the_outcome() {
-    let patient = run_with(PSBL, "203.0.113.7", Duration::from_secs(5)).await.unwrap();
-    let impatient = run_with(PSBL, "203.0.113.7", Duration::ZERO).await.unwrap();
-    assert_eq!(rows(&impatient), rows(&patient));
-    assert_eq!(found(&impatient), found(&patient));
-    assert_eq!(impatient.records(), patient.records());
+async fn a_silent_resolver_is_waited_for_by_the_modules_own_limit_not_the_requests_query_timeout() {
+    let started = std::time::Instant::now();
+    let dns = FakeDns::silent().await;
+    let machine = [dns.addr];
+    let o = CHECK
+        .run(&Request {
+            machine_resolvers: Some(&machine),
+            ..Request::system("203.0.113.7", Duration::from_millis(50), &[])
+        })
+        .await
+        .unwrap();
+    assert_eq!(o.findings.len(), 1);
+    assert_eq!(o.findings[0].code, "blacklist_unknown");
+    assert!(started.elapsed() >= Duration::from_secs(2), "the request's query timeout cut the wait short");
 }
 
 #[test]
