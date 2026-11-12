@@ -629,11 +629,11 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
                 let Some(r) = bad.first() else { continue };
                 // Some recipients got it.
                 let severity = if bad.len() == m.recipients.len() { Severity::Critical } else { Severity::Warning };
-                add(Finding {
-                    code: "mail_log_bounced",
+                add(Finding::new(
+                    "mail_log_bounced",
                     severity,
-                    title: format!("Bounced: {}", r.to).into(),
-                    message: format!(
+                    format!("Bounced: {}", r.to),
+                    format!(
                         "Message {} from {} was refused by {}: {}. Their reply: {}",
                         m.queue_id,
                         from,
@@ -641,78 +641,65 @@ pub fn maillog_findings(a: &MailLogAnalysis) -> Vec<Finding> {
                         reason_text(r.reason),
                         r.reply
                     ),
-                    recommendation: Some("Tell the sender the reason; fix the address or the cause, then send again.".into()),
-                });
+                )
+                    .recommend("Tell the sender the reason; fix the address or the cause, then send again."));
             }
             Verdict::Deferred => {
                 let Some(r) = m.recipients.iter().find(|r| r.status == Some(Status::Deferred)).or(m.recipients.first()) else { continue };
-                add(Finding {
-                    code: "mail_log_deferred",
-                    severity: Severity::Info,
-                    title: format!("Deferred: {}", r.to).into(),
-                    message: format!("Message {} from {} is waiting to be retried: {}. Their reply: {}", m.queue_id, from, reason_text(r.reason), r.reply),
-                    recommendation: None,
-                });
+                add(Finding::new(
+                    "mail_log_deferred",
+                    Severity::Info,
+                    format!("Deferred: {}", r.to),
+                    format!("Message {} from {} is waiting to be retried: {}. Their reply: {}", m.queue_id, from, reason_text(r.reason), r.reply),
+                ));
             }
-            Verdict::Incomplete => add(Finding {
-                code: "mail_log_incomplete",
-                severity: Severity::Info,
-                title: format!("No final status for {}", m.queue_id).into(),
-                message: "The pasted lines stop before this message was delivered, deferred or bounced. Paste more of the log to see how it ended.".into(),
-                recommendation: None,
-            }),
+            Verdict::Incomplete => add(Finding::new(
+                "mail_log_incomplete",
+                Severity::Info,
+                format!("No final status for {}", m.queue_id),
+                "The pasted lines stop before this message was delivered, deferred or bounced. Paste more of the log to see how it ended.".into(),
+            )),
         }
     }
     for r in &a.rejections {
         let who = if r.client_host.is_empty() { ip_text(r.client_ip) } else { r.client_host.clone() };
-        add(Finding {
-            code: "mail_log_rejected",
-            severity: Severity::Warning,
-            title: format!("Refused at our server: {who}").into(),
-            message: format!(
+        add(Finding::new(
+            "mail_log_rejected",
+            Severity::Warning,
+            format!("Refused at our server: {who}"),
+            format!(
                 "Mail from {} to {} was refused before it was queued: {}. Our reply: {}",
                 or_default(&r.from, "an unknown sender"),
                 or_default(&r.to, "an unknown recipient"),
                 reason_text(r.reason),
                 r.reply
             ),
-            recommendation: Some(
-                "If this sender is legitimate, check the listing or policy named in the reply.".into(),
-            ),
-        });
+        )
+        .recommend("If this sender is legitimate, check the listing or policy named in the reply."));
     }
     if hidden > 0 {
-        out.push(Finding {
-            code: "mail_log_more",
-            severity: Severity::Info,
-            title: "More in the log".into(),
-            message: format!(
-                "{hidden} more problems aren't listed here; every message is in the pasted log's analysis."
-            ),
-            recommendation: None,
-        });
+        out.push(Finding::new(
+            "mail_log_more",
+            Severity::Info,
+            "More in the log",
+            format!("{hidden} more problems aren't listed here; every message is in the pasted log's analysis."),
+        ));
     }
     if delivered > 0 {
-        out.push(Finding {
-            code: "mail_log_delivered",
-            severity: Severity::Ok,
-            title: "Delivered".into(),
-            message: format!(
-                "{delivered} of {} messages in the log were delivered to every recipient.",
-                a.messages.len()
-            ),
-            recommendation: None,
-        });
+        out.push(Finding::new(
+            "mail_log_delivered",
+            Severity::Ok,
+            "Delivered",
+            format!("{delivered} of {} messages in the log were delivered to every recipient.", a.messages.len()),
+        ));
     }
     if a.truncated {
-        out.push(Finding {
-            code: "mail_log_truncated",
-            severity: Severity::Info,
-            title: "Part of the paste was skipped".into(),
-            message: "A line, a message or a recipient list went over the analysis limits; the rest was left out."
-                .into(),
-            recommendation: None,
-        });
+        out.push(Finding::new(
+            "mail_log_truncated",
+            Severity::Info,
+            "Part of the paste was skipped",
+            "A line, a message or a recipient list went over the analysis limits; the rest was left out.".into(),
+        ));
     }
     out
 }

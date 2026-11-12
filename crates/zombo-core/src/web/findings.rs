@@ -57,16 +57,16 @@ pub(super) fn outcome(host: &str, r: &WebResult) -> Outcome {
 
 fn downgrade_finding(r: &WebResult) -> Option<Finding> {
     let d = r.downgrade.as_ref()?;
-    Some(Finding {
-        code: "web_redirect_downgrade",
-        severity: Severity::Warning,
-        title: format!("Redirect from HTTPS to HTTP: {} to {}", d.from, d.to).into(),
-        message: format!(
+    Some(Finding::new(
+        "web_redirect_downgrade",
+        Severity::Warning,
+        format!("Redirect from HTTPS to HTTP: {} to {}", d.from, d.to),
+        format!(
             "{} redirects to {}, which drops the connection from HTTPS to plain HTTP. Anything sent after that hop is readable and changeable on the network.",
             d.from, d.to
         ),
-        recommendation: Some("Redirect to https:// URLs only.".into()),
-    })
+    )
+        .recommend("Redirect to https:// URLs only."))
 }
 
 fn unverified_origin_finding(o: &OriginAnswer) -> Option<Finding> {
@@ -83,16 +83,12 @@ fn unverified_origin_finding(o: &OriginAnswer) -> Option<Finding> {
         ),
         None => "The certificate could not be read.".to_string(),
     };
-    Some(Finding {
-        code: "web_origin_cert_not_verified",
-        severity: Severity::Info,
-        title: "Origin certificate was not verified".into(),
-        message: format!(
-            "The origin {} was asked with --insecure-origin, so its certificate was not verified. {seen}",
-            o.ip
-        ),
-        recommendation: None,
-    })
+    Some(Finding::new(
+        "web_origin_cert_not_verified",
+        Severity::Info,
+        "Origin certificate was not verified",
+        format!("The origin {} was asked with --insecure-origin, so its certificate was not verified. {seen}", o.ip),
+    ))
 }
 
 fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
@@ -109,13 +105,11 @@ fn inspection_findings(target: &str, r: &WebResult) -> Vec<Finding> {
         } else if let Some(h) = &r.https_error {
             msg = format!("Neither HTTPS nor HTTP answered. HTTPS: {h}; HTTP: {e}.");
         }
-        return vec![Finding {
-            code: "website_inspection_unreachable",
-            severity: Critical,
-            title: "Site unreachable".into(),
-            message: msg,
-            recommendation: Some(format!("Confirm the web server is running and listening on ports 443/80, and that DNS points {target} at it.").into()),
-        }];
+        return vec![Finding::new("website_inspection_unreachable", Critical, "Site unreachable", msg).recommend(
+            format!(
+                "Confirm the web server is running and listening on ports 443/80, and that DNS points {target} at it."
+            ),
+        )];
     }
     let status = r.status.unwrap_or_default();
     let final_url = r.final_url.as_deref().unwrap_or_default();

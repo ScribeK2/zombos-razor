@@ -568,12 +568,10 @@ pub fn header_findings(a: &HeaderAnalysis) -> Vec<Finding> {
     let mut out = vec![];
     let mut add =
         |code: &'static str, severity, title: String, message: String, recommendation: Option<&'static str>| {
-            out.push(Finding {
-                code,
-                severity,
-                title: title.into(),
-                message,
-                recommendation: recommendation.map(Into::into),
+            let f = Finding::new(code, severity, title, message);
+            out.push(match recommendation {
+                Some(r) => f.recommend(r),
+                None => f,
             });
         };
     let au = &a.auth;

@@ -502,13 +502,12 @@ pub fn blacklist_findings(target: &str, r: &BlacklistResult) -> Vec<Finding> {
         if addresses < r.subjects.len() {
             what += " and the domain";
         }
-        out.push(Finding {
-            code: "blacklist_clean",
-            severity: Ok,
-            title: "Not listed".into(),
-            message: format!("Checked {what} against {}; none lists them.", plural(clean.len(), "list", "lists")),
-            recommendation: None,
-        });
+        out.push(Finding::new(
+            "blacklist_clean",
+            Ok,
+            "Not listed",
+            format!("Checked {what} against {}; none lists them.", plural(clean.len(), "list", "lists")),
+        ));
     }
     out
 }

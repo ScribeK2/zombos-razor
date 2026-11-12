@@ -84,7 +84,11 @@ fn find(
     message: String,
     rec: Option<&'static str>,
 ) -> Finding {
-    Finding { code, severity, title: title.into(), message, recommendation: rec.map(Into::into) }
+    let f = Finding::new(code, severity, title, message);
+    match rec {
+        Some(r) => f.recommend(r),
+        None => f,
+    }
 }
 
 /// Compare the public (CDN-facing) answer with the origin's. Differences are the
