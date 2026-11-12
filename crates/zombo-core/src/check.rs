@@ -81,6 +81,9 @@ pub struct Check {
     /// Finding-code prefixes this Check emits.
     pub owns: &'static [&'static str],
     pub blind_spots: &'static [&'static str],
+    /// True when this Check dials the port the rep picked, not the default. The caller then copies
+    /// that port into [`Request::tls_port`].
+    pub takes_chosen_port: bool,
     run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
 }
 
@@ -89,9 +92,10 @@ impl Check {
         budget: (Duration, Duration),
         owns: &'static [&'static str],
         blind_spots: &'static [&'static str],
+        takes_chosen_port: bool,
         run: for<'a> fn(&'a Request<'a>) -> Running<'a>,
     ) -> Check {
-        Check { budget, owns, blind_spots, run }
+        Check { budget, owns, blind_spots, takes_chosen_port, run }
     }
 
     pub async fn run(&self, request: &Request<'_>) -> Result<Outcome, String> {

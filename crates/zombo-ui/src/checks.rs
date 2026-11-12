@@ -5,7 +5,7 @@ use zombo_core::{
     blacklist::{
         BlacklistResult, Options as BlacklistOptions, State, SubjectKind, blacklist_findings, check_blacklist,
     },
-    check::Request,
+    check::{Check, Request},
     delegation::{DelegationResult, Ports, ServerState, check_delegation, delegation_findings},
     email_auth::{EmailAuthResult, email_auth, email_findings},
     ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
@@ -142,19 +142,17 @@ pub async fn run_section(
     let _ = tx.send(event);
 }
 
-/// The automatic TLS row is the service on 443 whatever port the picker holds.
+/// A Check that does not take the chosen port keeps the system port, so the automatic TLS row is
+/// the service on 443 whatever port the picker holds.
 fn request_for<'a>(
-    section: Section,
+    check: &Check,
     name: &'a str,
     query: Duration,
     bootstrap: &'a [SocketAddr],
     options: Options,
 ) -> Request<'a> {
-    let mut request = Request::system(name, query, bootstrap);
-    if section == Section::TlsPort {
-        request.tls_port = options.tls_port;
-    }
-    request
+    let request = Request::system(name, query, bootstrap);
+    if check.takes_chosen_port { Request { tls_port: options.tls_port, ..request } } else { request }
 }
 
 async fn produce(section: Section, name: &str, settings: &Settings, options: Options) -> Result<Outcome, String> {
@@ -162,7 +160,7 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     if let Some(check) = section.check() {
-        return check.run(&request_for(section, name, query, &bootstrap, options)).await;
+        return check.run(&request_for(check, name, query, &bootstrap, options)).await;
     }
     match section {
         Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)
@@ -484,6 +482,8 @@ pub fn blacklist_outcome(target: &str, r: &BlacklistResult) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    use zombo_core::{dnssec, tls};
+
     use super::*;
 
     fn t(value: &str, kind: Kind) -> Target {
@@ -520,8 +520,8 @@ mod tests {
     #[test]
     fn only_the_on_demand_tls_row_takes_the_picked_port() {
         let options = Options { tls_port: 993, ..Options::default() };
-        let port = |s| request_for(s, "example.com", Duration::from_secs(1), &[], options).tls_port;
-        assert_eq!((port(Section::Tls), port(Section::TlsPort)), (443, 993));
+        let port = |c| request_for(c, "example.com", Duration::from_secs(1), &[], options).tls_port;
+        assert_eq!((port(&tls::CHECK), port(&tls::ON_PORT), port(&dnssec::CHECK)), (443, 993, 443));
     }
 
     #[test]

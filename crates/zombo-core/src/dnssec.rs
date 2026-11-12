@@ -898,6 +898,7 @@ pub static CHECK: Check = Check::new(
         "The DS record upload at the registrar: only what the parent zone serves now is read.",
         "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
     ],
+    false,
     |request| {
         Box::pin(async move {
             let own;

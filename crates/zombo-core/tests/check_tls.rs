@@ -108,6 +108,13 @@ fn the_system_request_asks_port_443() {
 }
 
 #[test]
+fn only_the_on_demand_descriptor_dials_the_port_the_rep_chose() {
+    assert!(!CHECK.takes_chosen_port);
+    assert!(ON_PORT.takes_chosen_port);
+    assert!(!zombo_core::dnssec::CHECK.takes_chosen_port);
+}
+
+#[test]
 fn the_two_descriptors_carry_the_limits_prefixes_and_blind_spots_the_ui_used_to_hold() {
     for c in [&CHECK, &ON_PORT] {
         assert_eq!(c.budget, (Duration::from_secs(10), Duration::from_secs(8)));

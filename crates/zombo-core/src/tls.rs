@@ -694,10 +694,11 @@ pub static CHECK: Check = Check::new(
         "Cipher suites the server accepts but did not choose.",
         "Revocation at the CA: only an OCSP response stapled by the server is seen.",
     ],
+    false,
     |request| Box::pin(observe(request, true)),
 );
 
-/// The on-demand TLS row: the handshake alone, on `Request::tls_port`. It emits `ssl_` and `tls_`
+/// The on-demand TLS row: the handshake alone, on the port the rep picked. It emits `ssl_` and `tls_`
 /// findings too; the rail resolves that shared ownership to [`CHECK`]'s section.
 pub static ON_PORT: Check = Check::new(
     LIMITS,
@@ -707,6 +708,7 @@ pub static ON_PORT: Check = Check::new(
         "A server that requires a client certificate.",
         "Protocol versions below TLS 1.2, and revocation at the CA.",
     ],
+    true,
     |request| Box::pin(observe(request, false)),
 );
 
