@@ -1,7 +1,7 @@
 //! The OCSP half of the TLS Check: whether the server stapled an OCSP
 //! response. The flag comes from the handshake; no OCSP client is involved.
 
-use super::{TlsResult, caa::finding};
+use super::{TlsResult, finding};
 use crate::finding::{Finding, Severity};
 
 /// Whether the server stapled an OCSP response. Informational only: the
