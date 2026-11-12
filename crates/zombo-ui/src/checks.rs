@@ -149,7 +149,7 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
     let query = budget(section, settings.timeout).query;
     let bootstrap: Vec<SocketAddr> = default_resolvers().iter().map(|r| r.address).collect();
     if let Some(check) = section.check() {
-        return check.run(&Request { name, query, bootstrap: &bootstrap }).await;
+        return check.run(&Request::system(name, query, &bootstrap)).await;
     }
     match section {
         Section::Delegation => check_delegation(&bootstrap, name, Ports::default(), query)

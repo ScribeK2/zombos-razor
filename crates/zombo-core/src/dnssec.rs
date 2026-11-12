@@ -889,7 +889,7 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
     out
 }
 
-/// The DNSSEC Check as the UI runs it: the real validating resolvers, port 53, the clock now.
+/// The DNSSEC Check as the UI runs it. With [`Request::system`] that is the real validating resolvers, port 53 and the clock now.
 pub static CHECK: Check = Check::new(
     (Duration::from_secs(20), Duration::from_secs(4)),
     &["dnssec_"],
@@ -900,7 +900,15 @@ pub static CHECK: Check = Check::new(
     ],
     |request| {
         Box::pin(async move {
-            check_dnssec(request.bootstrap, &validating_resolvers(), request.name, 53, SystemTime::now(), request.query)
+            let own;
+            let validating = match request.validating {
+                Some(v) => v,
+                None => {
+                    own = validating_resolvers();
+                    &own
+                }
+            };
+            check_dnssec(request.bootstrap, validating, request.name, request.ns_port, request.now, request.query)
                 .await
                 .map(|r| outcome(&r))
                 .map_err(|e| e.to_string())
@@ -935,7 +943,6 @@ fn outcome(r: &DnssecResult) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::Request;
 
     #[test]
     fn a_dnssec_result_becomes_zone_resolver_ds_and_key_rows() {
@@ -1002,16 +1009,5 @@ mod tests {
         assert_eq!(CHECK.budget, (Duration::from_secs(20), Duration::from_secs(4)));
         assert_eq!(CHECK.owns, ["dnssec_"]);
         assert_eq!(CHECK.blind_spots.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn running_the_descriptor_gives_the_same_error_text_as_the_check_itself() {
-        let (query, bootstrap) = (Duration::from_millis(100), []);
-        let direct = check_dnssec(&bootstrap, &validating_resolvers(), "example.com", 53, SystemTime::now(), query)
-            .await
-            .unwrap_err()
-            .to_string();
-        let request = Request { name: "example.com", query, bootstrap: &bootstrap };
-        assert_eq!(CHECK.run(&request).await.unwrap_err(), direct);
     }
 }

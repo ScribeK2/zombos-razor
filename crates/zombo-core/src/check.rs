@@ -1,8 +1,13 @@
 //! What every Check hands back, in one shape. The UI shows an `Outcome` without knowing which Check made it.
 
-use std::{future::Future, net::SocketAddr, pin::Pin, time::Duration};
+use std::{
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    time::{Duration, SystemTime},
+};
 
-use crate::{finding::Finding, text::single_line};
+use crate::{finding::Finding, propagation::Vantage, text::single_line};
 
 /// One line of a Check's data: a label and a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,12 +43,27 @@ impl Outcome {
     }
 }
 
-/// What a Check is asked: the name, how long one query may take, and the resolvers that find its zone.
+/// What a Check is asked: the name, how long one query may take, and the resolvers that find its
+/// zone. The last three fields are what a test swaps for a fake; production takes them from
+/// [`Request::system`]. Only the DNSSEC Check reads them so far.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub name: &'a str,
     pub query: Duration,
     pub bootstrap: &'a [SocketAddr],
+    /// The port the zone's own nameservers are asked on.
+    pub ns_port: u16,
+    /// The moment signature validity is judged at.
+    pub now: SystemTime,
+    /// The validating resolvers to ask. `None` means the Check's own list; `Some(&[])` means ask none.
+    pub validating: Option<&'a [Vantage]>,
+}
+
+impl<'a> Request<'a> {
+    /// The real network: port 53, the clock now, the Check's own resolvers.
+    pub fn system(name: &'a str, query: Duration, bootstrap: &'a [SocketAddr]) -> Request<'a> {
+        Request { name, query, bootstrap, ns_port: 53, now: SystemTime::now(), validating: None }
+    }
 }
 
 type Running<'a> = Pin<Box<dyn Future<Output = Result<Outcome, String>> + Send + 'a>>;
