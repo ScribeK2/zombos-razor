@@ -172,12 +172,12 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 
 | Go code | Sev Go | Sev Rust | Title | Message | Rec | Tests naming the code |
 |---|---|---|---|---|---|---|
-| `blacklist_clean` | ok | ok | same | same | same | `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link`, `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` (+4) |
+| `blacklist_clean` | ok | ok | same | same | same | `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link`, `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` (+5) |
 | `blacklist_ipv6` | info | info | same | same | same | `zombo-core/tests/blacklist.rs::skips_ipv6_without_calling_it_clean` |
-| `blacklist_listed` | dynamic | dynamic | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link` (+10) |
+| `blacklist_listed` | dynamic | dynamic | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/blacklist.rs::reports_a_listing_with_its_reason_and_delist_link` (+11) |
 | `blacklist_no_addresses` | warning | warning | same | same | same | `zombo-core/tests/blacklist.rs::warns_when_a_domain_has_no_addresses`, `zombo-core/tests/blacklist.rs::does_not_check_the_website_of_a_domain_that_takes_no_mail` |
 | `blacklist_refused` | info | info | same | same | same | `zombo-core/tests/blacklist.rs::a_refused_query_is_neither_listed_nor_clean` |
-| `blacklist_unknown` | dynamic | info/warning | same | same | same | `zombo-core/tests/blacklist.rs::timeouts_are_unknown_not_clean`, `zombo-core/tests/blacklist.rs::one_silent_blocklist_does_not_delay_the_others` |
+| `blacklist_unknown` | dynamic | info/warning | same | same | same | `zombo-core/tests/blacklist.rs::timeouts_are_unknown_not_clean`, `zombo-core/tests/blacklist.rs::one_silent_blocklist_does_not_delay_the_others` (+1) |
 | `check_failed` | warning | absent | - | - | - | - |
 | `dkim_found` | ok | ok | same | same | same | `zombo-core/tests/email_findings.rs::a_healthy_domain_has_only_ok_findings`, `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` (+1) |
 | `dkim_invalid_key` | warning | warning | same | same | same | `zombo-core/tests/email_findings.rs::dkim_key_strength_findings_are_one_per_code` |
