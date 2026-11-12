@@ -21,9 +21,10 @@ use tokio::{
 };
 
 use crate::{
-    check::{Check, OnDemand, Outcome, Request},
+    check::{Check, OnDemand, Outcome, Request, RunFlag},
     rdns::{RdnsResult, check_rdns},
     resolver::Resolver,
+    target::Kind,
     tls::{TlsResult, inspect_stream_keep, public_roots},
 };
 pub use findings::{smtp_findings, smtp_findings_at};
@@ -39,6 +40,8 @@ pub use reply::{Extensions, MAX_LINE, MAX_REPLY_LINES, Reply, ReplyError, banner
 /// request's `query` is not used: each step has its own limit.
 pub static CHECK: Check = Check {
     label: "SMTP banner",
+    id: "smtp",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip],
     on_demand: Some(OnDemand {
         run_label: "Run SMTP banner check",
         what: "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
@@ -56,6 +59,8 @@ pub static CHECK: Check = Check {
         "Whether this network blocks the port, when there is no answer.",
     ],
     takes_chosen_port: true,
+    default_port: 25,
+    honours: &[RunFlag::Resolver],
     ..Check::base(|request| Box::pin(async move { Ok(run(request).await) }))
 };
 

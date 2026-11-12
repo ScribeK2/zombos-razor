@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use zombo_core::check::RunFlag;
 use zombo_core::email_auth::{Alignment, EffectiveAll, KeyType, email_auth, email_findings, parse_selectors};
 use zombo_core::evidence::{headers, maillog};
 use zombo_core::web::{CertCheck, WebOptions, check_web, parse_web_target, web_findings};
@@ -36,7 +37,7 @@ use zombo_core::{
     tls_extras::{caa_findings, check_caa, ocsp_findings},
 };
 
-const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]";
+const USAGE: &str = "usage: zombo delegation <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo registration <domain|host> [--timeout-ms N] [--json]\n       zombo dnssec <domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo email <domain|host> [--selector NAME]... [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo web <url|host> [--origin IP [--insecure-origin]] [--resolver ip[:port]] [--timeout-ms N] [--json]\n       zombo blacklist <ip|domain|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo rdns <ip|host> [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo evidence headers|maillog [FILE|-] [--json]\n       zombo tls <host[:port]> [--timeout-ms N] [--json]\n       zombo smtp <host[:port]> [--implicit-tls | --starttls] [--ehlo NAME] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo caa <domain|host> [--port N] [--no-cert] [--resolver ip[:port]]... [--timeout-ms N] [--json]\n       zombo ports <host|ip> [--port N]... [--full] [--timeout-ms N] [--json]\n       zombo propagation <domain|host> [--scope all|mail|web] [--resolver ip[:port]]... [--nameserver ip[:port]]... [--no-authoritative] [--timeout-ms N] [--json]\n       zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]\n       zombo checks [--json]";
 
 fn addr(v: &str) -> Result<SocketAddr, String> {
     zombo_core::resolver::parse_addr(v)
@@ -73,6 +74,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         Some("ports") => ports(it).await,
         Some("smtp") => smtp(it).await,
         Some("caa") => caa(it).await,
+        Some("run") => run_check(it).await,
+        Some("checks") => checks(it),
         _ => Err(USAGE.into()),
     }
 }
@@ -1136,5 +1139,107 @@ async fn caa(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
     }
     println!();
     print_findings(&findings);
+    Ok(())
+}
+
+const CHECKS_USAGE: &str = "usage: zombo checks [--json]";
+
+fn kind_name(k: Kind) -> String {
+    format!("{k:?}").to_lowercase()
+}
+
+/// The flags `zombo run` takes for this Check, as `zombo checks` names them (no dashes).
+fn flags_of(c: &zombo_core::check::Check) -> Vec<&'static str> {
+    let port = c.takes_chosen_port.then_some("port");
+    c.honours.iter().map(|f| f.name()).chain(port).collect()
+}
+
+fn checks(it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let mut json = false;
+    for a in it {
+        match a.as_str() {
+            "--json" => json = true,
+            _ => return Err(CHECKS_USAGE.into()),
+        }
+    }
+    let kinds = |c: &zombo_core::check::Check| c.accepts.iter().map(|k| kind_name(*k)).collect::<Vec<_>>();
+    if json {
+        let rows: Vec<_> = zombo_core::check::ALL
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id,
+                    "label": c.label,
+                    "accepts": kinds(c),
+                    "automatic": !c.is_on_demand(),
+                    "flags": flags_of(c),
+                    "query_secs": c.honours.contains(&RunFlag::Timeout).then_some(c.budget.1.as_secs_f64()),
+                    "whole_secs": c.budget.0.as_secs_f64(),
+                })
+            })
+            .collect();
+        return print_json(&serde_json::Value::Array(rows));
+    }
+    for c in zombo_core::check::ALL {
+        let when = if c.is_on_demand() { "on demand" } else { "automatic" };
+        let flags: Vec<_> = flags_of(c).iter().map(|f| format!("--{f}")).collect();
+        let query = if c.honours.contains(&RunFlag::Timeout) {
+            format!("{}s per query", c.budget.1.as_secs_f64())
+        } else {
+            "-".into()
+        };
+        println!(
+            "{:<13} {:<20} {:<28} {:<10} {:<34} {query}, {}s whole",
+            c.id,
+            c.label,
+            kinds(c).join(","),
+            when,
+            flags.join(" "),
+            c.budget.0.as_secs_f64()
+        );
+    }
+    Ok(())
+}
+
+const RUN_USAGE: &str = "usage: zombo run <id> <target> [--timeout-ms N] [--resolver ip[:port]]... [--port N] [--selector NAME]... [--json]\nA flag the check does not use is refused; zombo checks shows which each check takes.";
+
+async fn run_check(mut it: std::vec::IntoIter<String>) -> Result<(), String> {
+    let (mut positional, mut json, mut timeout, mut resolvers, mut port) = (vec![], false, None, vec![], None);
+    let mut selectors = vec![];
+    while let Some(a) = it.next() {
+        let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value"));
+        match a.as_str() {
+            "--json" => json = true,
+            "--timeout-ms" => {
+                let ms = value("--timeout-ms")?.parse().map_err(|_| "--timeout-ms needs a number")?;
+                timeout = Some(Duration::from_millis(ms));
+            }
+            "--resolver" => resolvers.push(addr(&value("--resolver")?)?),
+            "--port" => {
+                port = Some(value("--port")?.parse::<u16>().map_err(|_| "--port needs a number from 1 to 65535")?);
+            }
+            "--selector" => selectors.push(value("--selector")?),
+            f if f.starts_with("--") => return Err(format!("unknown option {f}\n{RUN_USAGE}")),
+            _ => positional.push(a),
+        }
+    }
+    let [id, target] = &positional[..] else { return Err(RUN_USAGE.into()) };
+    let args = zombo_core::check::RunArgs {
+        timeout,
+        resolvers: &resolvers,
+        port,
+        selectors: &selectors,
+        ..zombo_core::check::RunArgs::new(target)
+    };
+    let report = zombo_core::check::run_by_id(id, &args).await.map_err(|e| e.to_string())?;
+    if json {
+        let mut v = serde_json::to_value(&report.outcome).map_err(|e| e.to_string())?;
+        if let Some(o) = v.as_object_mut() {
+            o.insert("check".into(), report.id.into());
+            o.insert("target".into(), report.subject.clone().into());
+        }
+        return print_json(&v);
+    }
+    println!("{}", report.to_text());
     Ok(())
 }

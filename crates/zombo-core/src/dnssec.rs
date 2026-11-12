@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256, Sha384};
 use tokio::task::JoinSet;
 
 use crate::{
-    check::{Check, Fact, Outcome},
+    check::{Check, Fact, Outcome, RunFlag},
     dns::{QueryFlags, exchange_with},
     finding::{Finding, Severity},
     propagation::{DiscoverError, Vantage, ipv6_available},
@@ -893,6 +893,8 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
 /// The DNSSEC Check as the UI runs it. With `Request::system` that is the real validating resolvers, port 53 and the clock now.
 pub static CHECK: Check = Check {
     label: "DNSSEC",
+    id: "dnssec",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Email],
     budget: (Duration::from_secs(20), Duration::from_secs(4)),
     owns: &["dnssec_"],
@@ -901,13 +903,19 @@ pub static CHECK: Check = Check {
         "The DS record upload at the registrar: only what the parent zone serves now is read.",
         "Resolvers beyond the four asked: a resolver with an old trust anchor can disagree.",
     ],
+    honours: &[RunFlag::Timeout, RunFlag::Resolver],
     ..Check::base(|request| {
         Box::pin(async move {
             let own;
             let validating = match request.seams.validating {
                 Some(v) => v,
                 None => {
-                    own = validating_resolvers();
+                    own = if request.resolvers.is_empty() {
+                        validating_resolvers()
+                    } else {
+                        let named = |a: &SocketAddr| Vantage::resolver(&a.to_string(), "custom", *a);
+                        request.resolvers.iter().map(named).collect()
+                    };
                     &own
                 }
             };

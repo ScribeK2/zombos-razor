@@ -68,6 +68,8 @@ impl Default for Endpoints {
 /// lookup, however many servers it asks.
 pub static CHECK: Check = Check {
     label: "Registration",
+    id: "registration",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Hostname, Kind::Email],
     budget: (Duration::from_secs(15), Duration::from_secs(12)),
     owns: &["registration_"],

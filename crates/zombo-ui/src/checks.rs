@@ -45,11 +45,10 @@ pub fn check_name(target: &Target) -> Option<String> {
     }
 }
 
-/// The name an on-demand Check connects to or asks about. An IP address is a valid subject
-/// here, unlike for the automatic Checks.
+/// The name a section's Check runs on: the Check's own rule, so that an IP address is a subject
+/// only for a Check that accepts one. A section with no Check (DNS) asks about the name behind the target.
 pub fn name_for(section: Section, target: &Target) -> Option<String> {
-    let takes_ip = section.is_on_demand() || section.check().is_some_and(|c| c.automatic_for.contains(&Kind::Ip));
-    if takes_ip && target.kind == Kind::Ip { Some(target.value.clone()) } else { check_name(target) }
+    section.check().map_or_else(|| check_name(target), |check| check.subject(target))
 }
 
 /// The ten public resolvers, then the rep's own that are not already among them.
@@ -237,8 +236,10 @@ mod tests {
         let mut checks: Vec<&Check> = Section::ALL.iter().filter_map(|s| s.check()).collect();
         checks.push(&tls::ON_PORT);
         for check in checks {
-            let s =
-                request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings).seams;
+            let s = request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings);
+            let resolvers = s.resolvers;
+            let s = s.seams;
+            assert!(resolvers.is_empty(), "{}", check.label);
             let age = std::time::SystemTime::now().duration_since(s.now).unwrap_or_default();
             assert!(age < Duration::from_secs(5), "{}: {age:?}", check.label);
             assert_eq!(s.ns_port, 53, "{}", check.label);
@@ -286,6 +287,13 @@ mod tests {
         let ip = t("192.0.2.1", Kind::Ip);
         assert_eq!(name_for(Section::Rdns, &ip).as_deref(), Some("192.0.2.1"));
         assert_eq!(name_for(Section::Dns, &ip), None, "the DNS Check still needs a name");
+    }
+
+    /// The picker's first chip and the Check's default port are one fact kept twice.
+    #[test]
+    fn the_first_port_of_a_picker_is_the_default_port_of_its_check() {
+        assert_eq!(crate::tls_port::PRESETS[0], tls::ON_PORT.default_port);
+        assert_eq!(zombo_core::smtp::PORTS[0], smtp::CHECK.default_port);
     }
 
     #[test]

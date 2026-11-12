@@ -14,7 +14,7 @@ use hickory_proto::{
 use serde::Serialize;
 
 use crate::{
-    check::{Check, Fact, Outcome},
+    check::{Check, Fact, Outcome, RunFlag},
     dns::exchange,
     finding::{Finding, Severity},
     propagation::{DiscoverError, Soa, ask_any, find_apex, ipv6_available},
@@ -431,6 +431,8 @@ pub fn delegation_findings(r: &DelegationResult) -> Vec<Finding> {
 /// nameservers.
 pub static CHECK: Check = Check {
     label: "Delegation",
+    id: "delegation",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email],
     automatic_for: &[Kind::Domain, Kind::Email],
     owns: &["dns_delegation_", "dns_glue_", "dns_ns_"],
     blind_spots: &[
@@ -438,6 +440,7 @@ pub static CHECK: Check = Check {
         "Nameservers that answer only some networks: a server that is silent here may answer elsewhere.",
         "Why a nameserver is lame: its configuration and logs are on its own host.",
     ],
+    honours: &[RunFlag::Timeout, RunFlag::Resolver],
     ..Check::base(|request| {
         Box::pin(async move {
             let ports = Ports { parent: request.seams.ns_port, nameserver: request.seams.ns_port };

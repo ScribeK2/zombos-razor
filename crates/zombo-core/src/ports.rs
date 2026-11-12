@@ -17,6 +17,7 @@ use tokio::{io::AsyncReadExt, net::TcpStream, sync::Semaphore, task::JoinSet};
 use crate::{
     check::{Check, Fact, OnDemand, Outcome},
     finding::{Finding, Severity},
+    target::Kind,
     text::strip,
 };
 
@@ -402,6 +403,8 @@ pub fn ports_findings(target: &str, r: &PortsResult) -> Vec<Finding> {
 /// resolver for 4 seconds, and probes with the module's own timing, not the request's query timeout.
 pub static CHECK: Check = Check {
     label: "Port scan",
+    id: "ports",
+    accepts: &[Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip],
     on_demand: Some(OnDemand {
         run_label: "Run port scan",
         what: "Tries to open a connection to the common service ports and reports which ones answer.",
@@ -418,6 +421,7 @@ pub static CHECK: Check = Check {
         "Whether a firewall that allows only some source addresses is hiding a service from this machine.",
         "Whether this network or the target blocks a port that gives no answer.",
     ],
+    honours: &[],
     ..Check::base(|request| {
         Box::pin(async move {
             let addresses = resolve_target(request.name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;

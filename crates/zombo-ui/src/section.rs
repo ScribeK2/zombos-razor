@@ -165,4 +165,34 @@ mod tests {
         let on: Vec<_> = Section::ALL.iter().filter(|s| s.is_on_demand()).map(|s| s.index()).collect();
         assert_eq!(on, [9, 10, 11, 12]);
     }
+
+    /// The one guard that the UI and the core registry cannot drift: the UI runs a section on a
+    /// kind exactly when its descriptor accepts the kind, and every descriptor is in `ALL`.
+    #[test]
+    fn the_registry_matches_what_the_rail_runs() {
+        use zombo_core::{
+            check::ALL,
+            target::{Kind, parse_target},
+        };
+
+        let targets: Vec<_> = ["example.com", "www.example.com", "bob@example.com", "192.0.2.1"]
+            .iter()
+            .map(|raw| parse_target(raw).unwrap())
+            .collect();
+        let kinds: Vec<Kind> = targets.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, [Kind::Domain, Kind::Hostname, Kind::Email, Kind::Ip]);
+        for section in Section::ALL {
+            let Some(check) = section.check() else { continue };
+            assert!(ALL.iter().any(|c| std::ptr::eq(*c, check)), "{section:?} is missing from ALL");
+            for target in &targets {
+                assert_eq!(
+                    crate::checks::name_for(section, target).is_some(),
+                    check.accepts.contains(&target.kind),
+                    "{section:?} on {:?}",
+                    target.kind
+                );
+            }
+        }
+        assert_eq!(ALL.len(), Section::ALL.iter().filter(|s| s.check().is_some()).count());
+    }
 }
