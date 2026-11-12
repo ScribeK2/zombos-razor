@@ -85,3 +85,12 @@ async fn a_name_nobody_can_resolve_is_the_checks_own_error_text() {
     let request = Request::system("example.com", T, &[]);
     assert_eq!(CHECK.run(&request).await.unwrap_err(), "no resolver could be asked for the nameservers of example.com");
 }
+
+#[test]
+fn the_system_request_is_port_53_the_clock_now_and_the_checks_own_resolvers() {
+    let r = Request::system("example.com", T, &[]);
+    assert_eq!(r.ns_port, 53);
+    assert!(r.validating.is_none());
+    let age = std::time::SystemTime::now().duration_since(r.now).unwrap_or_default();
+    assert!(age < Duration::from_secs(5), "{age:?}");
+}

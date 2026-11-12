@@ -889,7 +889,7 @@ async fn nameserver_vantages(bootstrap: &[SocketAddr], names: &[Name], port: u16
     out
 }
 
-/// The DNSSEC Check as the UI runs it. With [`Request::system`] that is the real validating resolvers, port 53 and the clock now.
+/// The DNSSEC Check as the UI runs it. With `Request::system` that is the real validating resolvers, port 53 and the clock now.
 pub static CHECK: Check = Check::new(
     (Duration::from_secs(20), Duration::from_secs(4)),
     &["dnssec_"],
