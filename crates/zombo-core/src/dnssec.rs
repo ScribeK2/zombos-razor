@@ -909,7 +909,12 @@ pub static CHECK: Check = Check {
             let validating = match request.seams.validating {
                 Some(v) => v,
                 None => {
-                    own = validating_resolvers();
+                    own = if request.resolvers.is_empty() {
+                        validating_resolvers()
+                    } else {
+                        let named = |a: &SocketAddr| Vantage::resolver(&a.to_string(), "custom", *a);
+                        request.resolvers.iter().map(named).collect()
+                    };
                     &own
                 }
             };

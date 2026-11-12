@@ -237,8 +237,10 @@ mod tests {
         let mut checks: Vec<&Check> = Section::ALL.iter().filter_map(|s| s.check()).collect();
         checks.push(&tls::ON_PORT);
         for check in checks {
-            let s =
-                request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings).seams;
+            let s = request_for(check, "example.com", Kind::Email, Duration::from_secs(1), &[], Some(25), &settings);
+            let resolvers = s.resolvers;
+            let s = s.seams;
+            assert!(resolvers.is_empty(), "{}", check.label);
             let age = std::time::SystemTime::now().duration_since(s.now).unwrap_or_default();
             assert!(age < Duration::from_secs(5), "{}: {age:?}", check.label);
             assert_eq!(s.ns_port, 53, "{}", check.label);

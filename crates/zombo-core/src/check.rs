@@ -2,17 +2,20 @@
 
 use std::{
     borrow::Cow,
+    fmt,
     future::Future,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     time::{Duration, SystemTime},
 };
 
+use serde::Serialize;
+
 use crate::{
     blacklist, delegation, dnssec, email_auth,
-    finding::Finding,
+    finding::{Finding, Severity},
     ports,
-    propagation::Vantage,
+    propagation::{Vantage, default_resolvers},
     rdns,
     registration::{self, Endpoints},
     resolver::system_resolvers,
@@ -23,7 +26,7 @@ use crate::{
 };
 
 /// One line of a Check's data: a label and a value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Fact {
     pub key: String,
     pub value: String,
@@ -41,7 +44,7 @@ impl Fact {
 
 /// What one finished Check hands the UI: findings, a short key-value table that
 /// stays open, and long data that starts collapsed.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Outcome {
     pub findings: Vec<Finding>,
     pub facts: Vec<Fact>,
@@ -54,10 +57,41 @@ impl Outcome {
     pub fn records(&self) -> Vec<String> {
         self.facts.iter().chain(&self.details).map(Fact::record).collect()
     }
+
+    /// The outcome as plain text: the facts, then the details under their title, then the findings
+    /// worst-first as the Check ordered them. The groups are separated by one blank line.
+    pub fn to_text(&self) -> String {
+        self.text_blocks().join("\n\n")
+    }
+
+    fn text_blocks(&self) -> Vec<String> {
+        let facts = self.facts.iter().map(Fact::record).collect::<Vec<_>>().join("\n");
+        let details = if self.details.is_empty() {
+            String::new()
+        } else {
+            let rows = self.details.iter().map(|d| format!("  {}", d.record()));
+            std::iter::once(self.details_title.to_string()).chain(rows).collect::<Vec<_>>().join("\n")
+        };
+        let findings = self.findings.iter().map(finding_text).collect::<Vec<_>>().join("\n");
+        [facts, details, findings].into_iter().filter(|b| !b.is_empty()).collect()
+    }
 }
 
-/// What a Check is asked. The first seven fields are the inputs the UI sets for a run (the CLI
-/// sets the same ones); [`Seams`] is where a Check goes, and only tests set it.
+fn finding_text(f: &Finding) -> String {
+    let tag = match f.severity {
+        Severity::Ok => "ok",
+        Severity::Info => "info",
+        Severity::Warning => "WARNING",
+        Severity::Critical => "CRITICAL",
+    };
+    let line = format!("[{tag}] {}: {}", f.title, f.message);
+    match &f.recommendation {
+        Some(r) => format!("{line}\n        {r}"),
+        None => line,
+    }
+}
+
+/// What a Check is asked. The first eight fields are the inputs a run is given (the UI sets all but `resolvers`); [`Seams`] is where a Check goes, and only tests set it.
 ///
 /// Write a literal as `Request { field: x, ..Request::system(..) }`, so that a new field only
 /// touches `system` and breaks no caller.
@@ -71,7 +105,7 @@ pub struct Request<'a> {
     pub kind: Kind,
     /// How long one query may take. Every Check reads it.
     pub query: Duration,
-    /// The resolvers that find the zone of `name`.
+    /// The resolvers that find the zone of `name`. Delegation, Email and DNSSEC read it.
     pub bootstrap: &'a [SocketAddr],
     /// The port the Check dials. A Check whose descriptor has `takes_chosen_port` gets the rep's pick;
     /// TLS and SMTP read it.
@@ -82,6 +116,12 @@ pub struct Request<'a> {
     /// The rep's own DKIM selectors, tried beside the common ones. Empty means only the common ones.
     /// Email reads it.
     pub selectors: &'a [String],
+    /// The resolvers to ask instead of the defaults. Empty means the defaults. A seam still wins over
+    /// it. Reverse DNS, Blacklist, SMTP and Web ask them in place of this machine's resolvers, and
+    /// DNSSEC asks them in place of its validating list. Delegation, Email and DNSSEC find the zone
+    /// through `bootstrap`, which the runner sets to these. Registration, Ports and TLS do not read it.
+    /// The UI leaves it empty.
+    pub resolvers: &'a [SocketAddr],
     /// Where a Check goes. Production leaves this at its default; only tests set it.
     pub seams: Seams<'a>,
 }
@@ -140,6 +180,7 @@ impl<'a> Request<'a> {
             port: 443,
             proxy: None,
             selectors: &[],
+            resolvers: &[],
             seams: Seams::default(),
         }
     }
@@ -150,6 +191,7 @@ impl Request<'_> {
     pub(crate) fn machine_or_none(&self) -> Cow<'_, [SocketAddr]> {
         match self.seams.machine_resolvers {
             Some(r) => Cow::Borrowed(r),
+            None if !self.resolvers.is_empty() => Cow::Borrowed(self.resolvers),
             None => Cow::Owned(system_resolvers()),
         }
     }
@@ -243,4 +285,144 @@ pub static ALL: &[&Check] = &[
 
 pub fn find(id: &str) -> Option<&'static Check> {
     ALL.iter().copied().find(|c| c.id == id)
+}
+
+/// What a caller says about one run. Write it as `RunArgs { port: Some(25), ..RunArgs::new(text) }`, so
+/// that a new field breaks no caller. Only tests set `seams`.
+#[derive(Debug, Clone, Copy)]
+pub struct RunArgs<'a> {
+    /// What the rep typed: a domain, host name, IP address or email address.
+    pub target: &'a str,
+    /// The limit of one query. `None` means the Check's own.
+    pub timeout: Option<Duration>,
+    /// The resolvers to ask instead of the defaults. See [`Request::resolvers`].
+    pub resolvers: &'a [SocketAddr],
+    /// The port to dial. Only a Check with `takes_chosen_port` accepts one.
+    pub port: Option<u16>,
+    pub selectors: &'a [String],
+    pub seams: Seams<'a>,
+}
+
+impl<'a> RunArgs<'a> {
+    pub fn new(target: &'a str) -> RunArgs<'a> {
+        RunArgs { target, timeout: None, resolvers: &[], port: None, selectors: &[], seams: Seams::default() }
+    }
+}
+
+/// Why a run did not give an outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunError {
+    UnknownId(String),
+    /// The text of the target that did not parse.
+    BadTarget(String),
+    NotAccepted {
+        check: &'static str,
+        kind: Kind,
+    },
+    /// An option this Check does not take.
+    BadOption(String),
+    TimedOut,
+    /// The Check's own error text.
+    Failed(String),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RunError::UnknownId(id) => {
+                let ids: Vec<_> = ALL.iter().map(|c| c.id).collect();
+                write!(f, "unknown check \"{id}\"; the checks are {}", ids.join(", "))
+            }
+            RunError::BadTarget(text) | RunError::BadOption(text) | RunError::Failed(text) => f.write_str(text),
+            RunError::NotAccepted { check, kind } => {
+                let kind = match kind {
+                    Kind::Domain => "a domain",
+                    Kind::Hostname => "a host name",
+                    Kind::Ip => "an IP address",
+                    Kind::Email => "an email address",
+                };
+                write!(f, "{check} does not run on {kind}")
+            }
+            RunError::TimedOut => f.write_str("the check ran out of time"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+/// A finished run: which Check, on what, and what it found.
+#[derive(Debug, Clone)]
+pub struct Report {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// The name the Check ran on: the domain part of an email address, else the target as parsed.
+    pub subject: String,
+    pub outcome: Outcome,
+}
+
+impl Report {
+    /// A heading line, then [`Outcome::to_text`].
+    pub fn to_text(&self) -> String {
+        let heading = format!("{} for {}", self.label, self.subject);
+        std::iter::once(heading).chain(self.outcome.text_blocks()).collect::<Vec<_>>().join("\n\n")
+    }
+}
+
+/// The whole limit of a run: the Check's own, or five queries' worth of an explicit timeout when that
+/// is more.
+// ponytail: five is a guess. A Check that asks more than five queries in a row still ends at this limit and
+// reports `TimedOut`; give the descriptor a query count if one does.
+fn whole_limit(budget_whole: Duration, timeout: Option<Duration>) -> Duration {
+    timeout.map_or(budget_whole, |t| budget_whole.max(t.saturating_mul(5)))
+}
+
+/// Run the Check with this id as the UI does: parse the target, derive its subject, and give the
+/// Check its limits.
+pub async fn run_by_id(id: &str, args: &RunArgs<'_>) -> Result<Report, RunError> {
+    let check = find(id).ok_or_else(|| RunError::UnknownId(id.to_string()))?;
+    let target = parse_target(args.target).map_err(RunError::BadTarget)?;
+    if !check.accepts.contains(&target.kind) {
+        return Err(RunError::NotAccepted { check: check.id, kind: target.kind });
+    }
+    let subject = match target.kind {
+        Kind::Email => target.value.split_once('@').map_or(target.value.clone(), |(_, domain)| domain.to_string()),
+        _ => target.value,
+    };
+    if args.port.is_some() && !check.takes_chosen_port {
+        return Err(RunError::BadOption(format!("{} does not take a port", check.id)));
+    }
+    let defaults: Vec<SocketAddr>;
+    let bootstrap = if args.resolvers.is_empty() {
+        defaults = default_resolvers().iter().map(|r| r.address).collect();
+        &defaults[..]
+    } else {
+        args.resolvers
+    };
+    let query = args.timeout.unwrap_or(check.budget.1);
+    let request = Request {
+        kind: target.kind,
+        selectors: args.selectors,
+        resolvers: args.resolvers,
+        port: args.port.unwrap_or(443),
+        seams: args.seams,
+        ..Request::system(&subject, query, bootstrap)
+    };
+    let outcome = tokio::time::timeout(whole_limit(check.budget.0, args.timeout), check.run(&request))
+        .await
+        .map_err(|_| RunError::TimedOut)?
+        .map_err(RunError::Failed)?;
+    Ok(Report { id: check.id, label: check.label, subject, outcome })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_explicit_timeout_stretches_the_whole_limit_to_five_queries_and_never_shrinks_it() {
+        let whole = Duration::from_secs(20);
+        assert_eq!(whole_limit(whole, None), whole);
+        assert_eq!(whole_limit(whole, Some(Duration::from_secs(1))), whole);
+        assert_eq!(whole_limit(whole, Some(Duration::from_secs(10))), Duration::from_secs(50));
+    }
 }
