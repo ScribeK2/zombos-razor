@@ -16,7 +16,6 @@ const OWNERS: &[(&str, Option<Section>)] = &[
     ("email_", Some(Section::Email)),
     ("website_", Some(Section::Web)),
     ("web_", Some(Section::Web)),
-    ("hosting_reachability_", Some(Section::Ports)),
     ("smtp_", Some(Section::Smtp)),
 ];
 

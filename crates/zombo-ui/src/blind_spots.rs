@@ -31,12 +31,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
         Section::Tls => zombo_core::tls::CHECK.blind_spots,
         Section::Registration => zombo_core::registration::CHECK.blind_spots,
         Section::Rdns => zombo_core::rdns::CHECK.blind_spots,
-        Section::Ports => &[
-            "UDP services: only TCP ports are tried.",
-            "Ports outside the quick list.",
-            "Whether a firewall that allows only some source addresses is hiding a service from this machine.",
-            "Whether this network or the target blocks a port that gives no answer.",
-        ],
+        Section::Ports => zombo_core::ports::CHECK.blind_spots,
         Section::Smtp => &[
             "Whether the server accepts mail from you: no mail is sent.",
             "Recipient-side filtering of mail it does accept.",

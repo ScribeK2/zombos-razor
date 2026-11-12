@@ -4,7 +4,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use zombo_core::{
     check::{Check, Request},
     email_auth::{EmailAuthResult, email_auth, email_findings},
-    ports::{PortState, PortsResult, QUICK, Timing as PortTiming, ports_findings, probe, resolve_target},
     propagation::{Scope, ask_vantage, default_resolvers, discover_nameservers, propagation_with},
     rdns::{RdnsResult, check_rdns},
     resolver::{Resolver, system_resolvers},
@@ -178,10 +177,6 @@ async fn produce(section: Section, name: &str, settings: &Settings, options: Opt
             let opts = WebOptions { timeout: query, ..WebOptions::default() };
             Ok(web_outcome(&host, &check_web(&host, &path, &opts).await))
         }
-        Section::Ports => {
-            let addresses = resolve_target(name, Duration::from_secs(4)).await.map_err(|e| e.to_string())?;
-            Ok(ports_outcome(name, &probe(&addresses, QUICK, PortTiming::default()).await))
-        }
         Section::Smtp => {
             let resolvers = system_resolvers();
             let asked = if resolvers.is_empty() { &bootstrap } else { &resolvers };
@@ -259,22 +254,6 @@ pub fn web_outcome(host: &str, r: &WebResult) -> Outcome {
         })
         .collect();
     Outcome { findings: web_findings(host, r), facts, details_title: "Redirect chain", details }
-}
-
-pub fn ports_outcome(target: &str, r: &PortsResult) -> Outcome {
-    let addresses = r.addresses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-    let mut facts = vec![Fact::new("Addresses probed", if addresses.is_empty() { "none" } else { &addresses })];
-    for p in &r.ports {
-        let state = match p.state {
-            PortState::Open => "open",
-            PortState::Closed => "closed (refused)",
-            PortState::Filtered => "no answer",
-            PortState::NoRoute => "no route from this network",
-        };
-        let banner = p.banner.as_deref().map(|b| format!(", banner: {b}")).unwrap_or_default();
-        facts.push(Fact::new(format!("Port {} {}", p.port, p.service), format!("{state} on {}{banner}", p.address)));
-    }
-    Outcome { findings: ports_findings(target, r), facts, ..Outcome::default() }
 }
 
 fn extensions_text(e: &Extensions) -> String {
@@ -447,45 +426,6 @@ mod tests {
                 assert!(!automatic(kind).contains(s), "{s:?} would start by itself for {kind:?}");
             }
         }
-    }
-
-    #[test]
-    fn a_silent_mail_port_reads_as_no_answer_and_not_as_down() {
-        use zombo_core::ports::PortProbe;
-        let r = PortsResult {
-            addresses: vec!["192.0.2.1".parse().unwrap()],
-            ports: vec![PortProbe {
-                address: "192.0.2.1".parse().unwrap(),
-                port: 25,
-                service: "SMTP",
-                state: PortState::Filtered,
-                banner: None,
-            }],
-        };
-        let o = ports_outcome("mail.example.com", &r);
-        assert!(o.records().contains(&"Port 25 SMTP: no answer on 192.0.2.1".to_string()));
-        assert_eq!(o.findings.len(), 1);
-        assert_eq!(o.findings[0].code, "hosting_reachability_mail_filtered");
-        assert_eq!(o.findings[0].severity, zombo_core::Severity::Info);
-    }
-
-    #[test]
-    fn a_banner_and_an_open_port_show_together() {
-        use zombo_core::ports::PortProbe;
-        let ip: std::net::IpAddr = "192.0.2.1".parse().unwrap();
-        let r = PortsResult {
-            addresses: vec![ip],
-            ports: vec![PortProbe {
-                address: ip,
-                port: 22,
-                service: "SSH",
-                state: PortState::Open,
-                banner: Some("SSH-2.0-x".into()),
-            }],
-        };
-        assert!(
-            ports_outcome("h", &r).records().contains(&"Port 22 SSH: open on 192.0.2.1, banner: SSH-2.0-x".to_string())
-        );
     }
 
     #[test]

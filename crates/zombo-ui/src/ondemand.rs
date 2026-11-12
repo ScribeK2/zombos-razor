@@ -1,4 +1,4 @@
-use zombo_core::{ports::QUICK, target::Kind};
+use zombo_core::target::Kind;
 
 use crate::{section::Section, status::CheckState};
 
@@ -33,7 +33,6 @@ pub fn run_label(section: Section) -> Option<&'static str> {
         return check.on_demand.map(|d| d.run_label);
     }
     match section {
-        Section::Ports => Some("Run port scan"),
         Section::Smtp => Some("Run SMTP banner check"),
         _ => None,
     }
@@ -49,14 +48,6 @@ pub fn brief(section: Section) -> Option<Brief> {
         note: Some(note).filter(|n| !n.is_empty()),
     };
     match section {
-        Section::Ports => {
-            let ports = QUICK.iter().map(|p| p.port.to_string()).collect::<Vec<_>>().join(", ");
-            Some(brief(
-                "Tries to open a connection to the common service ports and reports which ones answer.",
-                format!("The target's own servers, on TCP ports {ports}: its first IPv4 address, and its first IPv6 address if this machine has IPv6. This machine's resolver looks up the name first."),
-                "A port that gives no answer is reported as no answer, not as down: many networks block outbound mail ports.",
-            ))
-        }
         Section::Smtp => Some(brief(
             "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
             "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
