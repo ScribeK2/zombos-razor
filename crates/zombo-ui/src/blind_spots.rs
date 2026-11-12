@@ -52,12 +52,7 @@ pub fn lines(section: Section) -> &'static [&'static str] {
             "Whether this network blocks the port, when there is no answer.",
         ],
         Section::TlsPort => zombo_core::tls::ON_PORT.blind_spots,
-        Section::Blacklist => &[
-            "Lists that are not in the table this Check asks.",
-            "Private block lists inside the receiving company.",
-            "Whether a listing changes delivery: the receiving server decides.",
-            "The sending reputation of the domain's mail history.",
-        ],
+        Section::Blacklist => zombo_core::blacklist::CHECK.blind_spots,
     }
 }
 

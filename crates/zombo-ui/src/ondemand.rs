@@ -1,4 +1,4 @@
-use zombo_core::{blacklist::DNSBLS, ports::QUICK, target::Kind};
+use zombo_core::{ports::QUICK, target::Kind};
 
 use crate::{section::Section, status::CheckState};
 
@@ -35,7 +35,6 @@ pub fn run_label(section: Section) -> Option<&'static str> {
     match section {
         Section::Ports => Some("Run port scan"),
         Section::Smtp => Some("Run SMTP banner check"),
-        Section::Blacklist => Some("Run blacklist check"),
         _ => None,
     }
 }
@@ -62,14 +61,6 @@ pub fn brief(section: Section) -> Option<Brief> {
             "Connects to the target's mail port, reads the greeting, lists what the server offers and tries STARTTLS. It sends no mail.",
             "For a domain, its MX hosts, most preferred first (up to 3 are tried), on the port you pick below. For a host name or an IP address, that name or address on the port. This machine's resolver looks up the MX records, the name and the reverse name of the address.".into(),
             "Port 25 is often blocked outbound on home and cloud networks. A host that gives no answer is reported as no answer, not as down. Ports 587 and 465 are the submission ports.",
-        )),
-        Section::Blacklist => Some(brief(
-            "Asks public blocklists whether the target's address, or a domain and its mail hosts, are listed for spam.",
-            format!(
-                "This machine's resolver, which sends {} questions per address to the blocklist operators' DNS servers (Spamhaus, SpamCop, Barracuda and others). They see the address or domain asked about. Nothing connects to the target.",
-                DNSBLS.len()
-            ),
-            "",
         )),
         _ => None,
     }
