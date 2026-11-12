@@ -152,7 +152,7 @@ End state: `Section` stays a small enum used as an index. A new Check adds one v
 - [x] Registration: `Request::proxy` is the rep's proxy, copied for every Check; `Request::endpoints` is where Registration asks, for a test to point at fakes
 - [x] Ports: no new `Request` field; the scan tests dial `127.0.0.1`. A test pins that the dial limit is the module's own, not the request's query; the 4 s resolve limit has no local test, since only a stalled lookup shows it
 - [x] Email: `Request::selectors` is the rep's DKIM selectors, copied for every Check; the first bootstrap resolver is asked, and its two error texts are pinned
-- [ ] Web
+- [x] Web: `Request::dial` is the address the Web Check connects to instead of resolving its name, with the plain-HTTP port; the HTTPS port is `tls_port` and the hosting questions go to the first of `machine_resolvers`. A test pins that the request's proxy is not used
 - [ ] Smtp, last and alone
 - [ ] Remove the leftover `Section` tables (`label`, `is_on_demand`, the `automatic` lists, the `ondemand` match arms, `blind_spots` and `default_budget` matches)
 

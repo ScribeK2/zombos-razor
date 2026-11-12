@@ -258,8 +258,8 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `ssl_inspection_untrusted` | critical | critical | same | same | same | `zombo-core/tests/tls.rs::a_complete_chain_under_an_unknown_root_is_untrusted`, `zombo-core/tests/tls.rs::a_chain_that_fails_verification_otherwise_is_invalid` |
 | `ssl_inspection_valid` | ok | ok | same | DIFF | same | `zombo-core/tests/smtp.rs::the_whole_dialogue_is_read_and_never_sends_mail`, `zombo-core/tests/smtp.rs::implicit_tls_reads_the_greeting_inside_the_tunnel` (+2) |
 | `website_inspection_client_error` | warning | warning | same | same | same | `zombo-core/tests/web.rs::server_and_client_errors` |
-| `website_inspection_healthy` | ok | ok | same | same | same | `zombo-core/tests/web.rs::healthy_site_with_every_header`, `zombo-core/tests/web.rs::records_the_redirect_chain_with_relative_locations` (+5) |
-| `website_inspection_https_failed` | warning | warning | same | same | same | `zombo-core/tests/web.rs::healthy_site_with_every_header`, `zombo-core/tests/web.rs::falls_back_to_http_when_https_fails` |
+| `website_inspection_healthy` | ok | ok | same | same | same | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/check_web.rs::a_redirect_chain_is_one_detail_row_per_hop` (+7) |
+| `website_inspection_https_failed` | warning | warning | same | same | same | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::healthy_site_with_every_header` (+1) |
 | `website_inspection_https_not_enforced` | warning | warning | same | same | same | `zombo-core/tests/web.rs::plain_http_that_never_reaches_https_is_flagged` |
 | `website_inspection_missing_headers` | info | info | DIFF | same | same | `zombo-core/tests/web.rs::stops_after_ten_redirects`, `zombo-core/tests/web.rs::missing_headers_with_frame_ancestors_standing_in_for_x_frame_options` |
 | `website_inspection_missing_hsts` | warning | warning | same | same | same | `zombo-core/tests/web.rs::falls_back_to_http_when_https_fails`, `zombo-core/tests/web.rs::https_site_without_hsts_is_warned_and_one_with_every_header_is_only_healthy` |
@@ -267,7 +267,7 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `website_inspection_server_error` | critical | critical | same | same | same | `zombo-core/tests/web.rs::server_and_client_errors`, `zombo-core/tests/web.rs::detects_wordpress_and_its_failure_pages` |
 | `website_inspection_slow` | info | info | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/web.rs::slow_response_is_flagged` |
 | `website_inspection_too_many_redirects` | warning | warning | same | same | same | `zombo-core/tests/web.rs::stops_after_ten_redirects` |
-| `website_inspection_unreachable` | critical | critical | same | same | same | `zombo-core/tests/web.rs::scheme_relative_location_keeps_the_scheme`, `zombo-core/tests/web.rs::never_follows_a_redirect_to_another_scheme` (+3) |
+| `website_inspection_unreachable` | critical | critical | same | same | same | `zombo-core/tests/check_web.rs::the_requests_query_bounds_the_whole_check`, `zombo-core/tests/web.rs::scheme_relative_location_keeps_the_scheme` (+4) |
 | `website_inspection_wp_critical_error` | critical | critical | same | same | same | `zombo-core/tests/web.rs::detects_wordpress_and_its_failure_pages` |
 | `website_inspection_wp_maintenance` | warning | warning | same | same | same | `zombo-core/tests/web.rs::detects_wordpress_and_its_failure_pages` |
 
@@ -359,18 +359,18 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `ssl_inspection_weak_signature` | crates/zombo-core/src/tls.rs:642 | warning | `zombo-core/tests/tls.rs::a_weak_key_and_a_sha1_signature_each_get_a_finding` |
 | `tls_no_ocsp_staple` | crates/zombo-core/src/tls_extras.rs:272 | info | `zombo-ui/src/finding_owner.rs::the_tls_prefixes_belong_to_the_automatic_section_not_the_on_demand_one`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` (+3) |
 | `tls_ocsp_stapled` | crates/zombo-core/src/tls_extras.rs:262 | ok | `zombo-core/tests/tls_extras.rs::a_server_that_staples_is_detected` |
-| `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:60 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
-| `web_redirect_downgrade` | crates/zombo-core/src/web/findings.rs:34 | warning | `zombo-core/src/web/mod.rs::the_downgrade_finding_names_both_urls`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` |
-| `website_asn` | crates/zombo-core/src/web/findings.rs:251 | info | `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
-| `website_cdn_detected` | crates/zombo-core/src/web/findings.rs:224 | info | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
-| `website_host_detected` | crates/zombo-core/src/web/findings.rs:225 | info | `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
+| `web_origin_cert_not_verified` | crates/zombo-core/src/web/findings.rs:97 | info | `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
+| `web_redirect_downgrade` | crates/zombo-core/src/web/findings.rs:71 | warning | `zombo-core/src/web/mod.rs::the_downgrade_finding_names_both_urls`, `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section` |
+| `website_asn` | crates/zombo-core/src/web/findings.rs:288 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
+| `website_cdn_detected` | crates/zombo-core/src/web/findings.rs:261 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn` (+1) |
+| `website_host_detected` | crates/zombo-core/src/web/findings.rs:262 | info | `zombo-core/tests/check_web.rs::a_healthy_site_gives_url_status_server_and_hop_rows_and_the_findings`, `zombo-core/tests/web.rs::provider_findings_name_each_provider_and_the_asn` |
 | `website_origin_cert_rejected` | crates/zombo-core/src/web/origin.rs:96 | warning | `zombo-core/tests/web_tls.rs::a_rejected_origin_certificate_is_not_reported_as_silence`, `zombo-core/tests/web_tls.rs::insecure_origin_compares_anyway_and_says_what_it_skipped` |
 | `website_origin_headers_differ` | crates/zombo-core/src/web/origin.rs:178 | info | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::an_origin_that_answers_alike_is_ok_and_header_changes_are_info` |
 | `website_origin_matches` | crates/zombo-core/src/web/origin.rs:169 | ok | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::an_origin_that_answers_alike_is_ok_and_header_changes_are_info` |
 | `website_origin_redirect_differs` | crates/zombo-core/src/web/origin.rs:153 | warning | `zombo-core/tests/web.rs::redirects_that_differ_are_reported` |
 | `website_origin_status_differs` | crates/zombo-core/src/web/origin.rs:143 | warning | `zombo-core/tests/web.rs::a_healthy_origin_behind_a_failing_cdn_blames_the_cdn`, `zombo-core/tests/web.rs::a_cdn_masking_a_broken_origin_is_called_out` (+1) |
 | `website_origin_unreachable` | crates/zombo-core/src/web/origin.rs:109 | warning | `zombo-core/tests/web.rs::an_origin_that_does_not_answer_is_reported_without_blaming`, `zombo-core/tests/web_tls.rs::a_rejected_origin_certificate_is_not_reported_as_silence` |
-| `website_provider_dns_failed` | crates/zombo-core/src/web/findings.rs:260 | info | NONE |
+| `website_provider_dns_failed` | crates/zombo-core/src/web/findings.rs:297 | info | NONE |
 
 #### Rust codes that no test body names (6)
 
