@@ -217,12 +217,12 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `email_headers_no_auth_results` | info | info | same | same | same | `zombo-core/tests/evidence_headers.rs::minimal_headers_have_no_authentication_verdict` |
 | `email_headers_spam` | warning | warning | same | same | same | `zombo-core/tests/evidence_headers.rs::relaxed_alignment_and_a_spam_score` |
 | `email_headers_spf_fail` | critical | critical/warning | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/evidence_headers.rs::spoofed_headers_are_called_out` (+1) |
-| `hosting_reachability_database_exposed` | warning | warning | same | same | same | `zombo-core/tests/ports.rs::the_full_table_has_the_hosting_ports`, `zombo-core/tests/ports.rs::web_mail_and_database_findings` |
+| `hosting_reachability_database_exposed` | warning | warning | same | same | same | `zombo-core/tests/check_ports.rs::an_open_port_is_a_row_and_a_database_port_is_called_out`, `zombo-core/tests/ports.rs::the_full_table_has_the_hosting_ports` (+1) |
 | `hosting_reachability_no_address` | critical | critical | same | same | same | `zombo-core/tests/ports.rs::no_address_is_critical` |
 | `hosting_reachability_no_https` | warning | warning | same | same | same | `zombo-core/tests/ports.rs::web_mail_and_database_findings` |
-| `hosting_reachability_reachable` | ok | ok | same | same | same | `zombo-core/tests/ports.rs::the_quick_sweep_classifies_each_port`, `zombo-core/tests/ports.rs::web_mail_and_database_findings` (+1) |
+| `hosting_reachability_reachable` | ok | ok | same | same | same | `zombo-core/tests/check_ports.rs::every_quick_port_of_the_loopback_gets_a_row_with_the_state_the_machine_gives_it`, `zombo-core/tests/check_ports.rs::an_open_port_is_a_row_and_a_database_port_is_called_out` (+3) |
 | `hosting_reachability_smtp_closed` | info | info | same | same | same | `zombo-core/tests/ports.rs::web_mail_and_database_findings` |
-| `hosting_reachability_unreachable` | critical | critical | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/ports.rs::an_unroutable_address_is_no_route_not_filtered` (+3) |
+| `hosting_reachability_unreachable` | critical | critical | same | same | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/check_ports.rs::every_quick_port_of_the_loopback_gets_a_row_with_the_state_the_machine_gives_it` (+5) |
 | `hosting_reachability_web_closed` | warning | warning | same | same | same | `zombo-core/tests/ports.rs::web_mail_and_database_findings`, `zombo-core/tests/ports.rs::each_address_is_judged_on_its_own` |
 | `mail_log_bounced` | dynamic | dynamic | same | DIFF | same | `zombo-ui/src/finding_owner.rs::each_family_goes_to_its_section`, `zombo-core/tests/evidence_maillog.rs::findings_for_every_kind_of_outcome` (+1) |
 | `mail_log_deferred` | info | info | same | DIFF | same | `zombo-core/tests/evidence_maillog.rs::findings_for_every_kind_of_outcome` |
@@ -330,7 +330,7 @@ Sev is the severity word at the Go site and at the Rust site. The three wording 
 | `email_tlsrpt_missing` | crates/zombo-core/src/email_auth/findings.rs:392 | info | `zombo-core/tests/email_records.rs::absent_records_are_info_not_a_problem`, `zombo-core/tests/email_records.rs::a_record_with_another_version_or_a_stray_txt_is_not_one_of_them` |
 | `email_tlsrpt_multiple` | crates/zombo-core/src/email_auth/findings.rs:417 | warning | `zombo-core/tests/email_records.rs::two_records_are_a_warning_for_each_kind` |
 | `email_tlsrpt_ok` | crates/zombo-core/src/email_auth/findings.rs:410 | ok | `zombo-core/tests/email_records.rs::published_records_are_ok_and_say_where_reports_go`, `zombo-core/tests/email_records.rs::a_tls_rpt_record_must_have_a_mailto_or_https_address` |
-| `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:307 | info | `zombo-ui/src/checks.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
+| `hosting_reachability_mail_filtered` | crates/zombo-core/src/ports.rs:308 | info | `zombo-core/src/ports.rs::a_silent_mail_port_reads_as_no_answer_and_not_as_down`, `zombo-core/tests/ports.rs::only_mail_ports_with_no_answer_blames_the_probing_network_not_the_server` |
 | `mail_log_truncated` | crates/zombo-core/src/evidence/maillog.rs:709 | info | `zombo-core/tests/evidence_maillog.rs::a_megabyte_single_line_is_bounded` |
 | `rdns_addresses` | crates/zombo-core/src/rdns.rs:213 | info | `zombo-core/tests/check_rdns.rs::a_host_name_target_lists_its_addresses`, `zombo-core/tests/rdns.rs::a_host_reports_each_address` |
 | `rdns_confirmed` | crates/zombo-core/src/rdns.rs:298 | ok | `zombo-core/tests/check_rdns.rs::an_address_with_a_confirmed_ptr_gives_the_address_ptr_and_forward_rows`, `zombo-core/tests/rdns.rs::a_ptr_that_resolves_back_is_confirmed` (+4) |
