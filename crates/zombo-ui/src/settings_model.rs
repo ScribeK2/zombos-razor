@@ -27,6 +27,8 @@ pub struct Settings {
     pub notifications: bool,
     /// Ask GitHub once a day for a newer AppImage. Used only when running as an AppImage.
     pub check_updates: bool,
+    /// Put the app icon and a launcher entry in the user's data directory. AppImage only.
+    pub launcher_entry: bool,
 }
 
 impl Default for Settings {
@@ -38,6 +40,7 @@ impl Default for Settings {
             proxy: None,
             notifications: true,
             check_updates: true,
+            launcher_entry: true,
         }
     }
 }
@@ -99,6 +102,7 @@ pub struct Draft {
     pub proxy: String,
     pub notifications: bool,
     pub check_updates: bool,
+    pub launcher_entry: bool,
 }
 
 /// Split a typed list on commas, semicolons and whitespace.
@@ -122,6 +126,7 @@ impl From<&Settings> for Draft {
             proxy: s.proxy.clone().unwrap_or_default(),
             notifications: s.notifications,
             check_updates: s.check_updates,
+            launcher_entry: s.launcher_entry,
         }
     }
 }
@@ -143,6 +148,7 @@ impl Draft {
                 proxy,
                 notifications: self.notifications,
                 check_updates: self.check_updates,
+                launcher_entry: self.launcher_entry,
             })
         } else {
             Err(errors)
@@ -229,6 +235,7 @@ struct FileForm {
     proxy: Option<String>,
     notifications: Option<bool>,
     check_updates: Option<bool>,
+    launcher_entry: Option<bool>,
 }
 
 /// Parse a config file. Missing keys take their defaults; everything present is validated.
@@ -244,6 +251,7 @@ pub fn parse(text: &str) -> Result<Settings, LoadError> {
         proxy: f.proxy.unwrap_or_default(),
         notifications: f.notifications.unwrap_or(Settings::default().notifications),
         check_updates: f.check_updates.unwrap_or(Settings::default().check_updates),
+        launcher_entry: f.launcher_entry.unwrap_or(Settings::default().launcher_entry),
     };
     draft.validate().map_err(LoadError::Invalid)
 }
@@ -257,6 +265,7 @@ pub fn to_toml(s: &Settings) -> String {
         proxy: s.proxy.clone(),
         notifications: Some(s.notifications),
         check_updates: Some(s.check_updates),
+        launcher_entry: Some(s.launcher_entry),
     };
     toml::to_string(&f).unwrap_or_default()
 }
@@ -300,7 +309,7 @@ mod tests {
     use super::*;
 
     fn draft() -> Draft {
-        Draft { notifications: true, check_updates: true, ..Draft::default() }
+        Draft { notifications: true, check_updates: true, launcher_entry: true, ..Draft::default() }
     }
     fn only(d: Draft) -> (Field, String) {
         let mut e = d.validate().unwrap_err();
@@ -328,9 +337,17 @@ mod tests {
             proxy: Some("http://proxy.example:3128".into()),
             notifications: false,
             check_updates: false,
+            launcher_entry: false,
         };
         assert_eq!(parse(&to_toml(&s)).unwrap(), s);
         assert_eq!(parse(&to_toml(&Settings::default())).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn the_launcher_entry_is_on_by_default_and_can_be_switched_off_in_the_file() {
+        assert!(Settings::default().launcher_entry);
+        assert!(parse("").unwrap().launcher_entry);
+        assert!(!parse("launcher_entry = false\n").unwrap().launcher_entry);
     }
 
     #[test]
@@ -440,6 +457,7 @@ mod tests {
             proxy: "x".into(),
             notifications: true,
             check_updates: true,
+            launcher_entry: true,
         };
         let fields: Vec<Field> = d.validate().unwrap_err().iter().map(|e| e.field).collect();
         assert_eq!(fields, [Field::Resolvers, Field::Selectors, Field::Timeout, Field::Proxy]);
