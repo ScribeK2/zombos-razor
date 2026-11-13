@@ -46,7 +46,7 @@ It prints the time to first render. That time stops at the first render call, no
 2. `.github/workflows/release.yml` builds, checks the 40 MB size budget, runs the smoke test on Ubuntu 24.04 and 26.04, signs `SHA256SUMS`, and creates a draft GitHub release.
 3. Open the draft, read the notes, and publish it.
 
-The signing step is a placeholder. It fails the job when the `MINISIGN_SECRET_KEY` secret is missing, so an unsigned release is never drafted. The minisign worker replaces the `TODO` in that step.
+The signing step is real. It fails the job when a signing secret is missing, so an unsigned release is never drafted. It then verifies the signature against `crates/zombo-core/update_key.pub`. See "The signing key" below.
 
 ## Compatibility
 
