@@ -33,7 +33,16 @@ pub fn ensure(appimage: &Path, appdir: &Path, data_home: &Path) -> Result<bool, 
     let icon = fs::read(&icon).map_err(|e| format!("cannot read {}: {e}", icon.display()))?;
     let a = put(&data_home.join(format!("applications/{ID}.desktop")), entry.as_bytes())?;
     let b = put(&data_home.join(format!("icons/hicolor/256x256/apps/{ID}.png")), &icon)?;
+    if b {
+        touch_theme(&data_home.join("icons/hicolor"));
+    }
     Ok(a || b)
+}
+
+/// GTK and GNOME decide whether to reload an icon theme from the modification time of its directory.
+/// Bumping it makes a running session notice the new icon. A failure only means a log-out is needed.
+fn touch_theme(dir: &Path) {
+    let _ = fs::File::open(dir).and_then(|d| d.set_modified(std::time::SystemTime::now()));
 }
 
 /// A quoted `Exec=` line. A path with a character that needs a second layer of escaping is refused.
@@ -100,6 +109,25 @@ mod tests {
         assert!(ensure(Path::new("/home/me/My Apps/Z.AppImage"), &appdir, &data).unwrap());
         assert_eq!(desktop(&data), "[Desktop Entry]\nName=Z\nExec=\"/home/me/My Apps/Z.AppImage\"\nIcon=x\n");
         assert_eq!(fs::read(data.join(format!("icons/hicolor/256x256/apps/{ID}.png"))).unwrap(), b"png-bytes");
+    }
+
+    #[test]
+    fn a_new_icon_bumps_the_theme_directory_time_and_an_unchanged_one_does_not() {
+        let t = Tmp::new("touch");
+        let appdir = image(&t.0.join("mnt"));
+        let data = t.0.join("data");
+        let theme = data.join("icons/hicolor");
+        fs::create_dir_all(theme.join("256x256/apps")).unwrap();
+        let mtime = || fs::metadata(&theme).unwrap().modified().unwrap();
+        let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let reset = || fs::File::open(&theme).unwrap().set_modified(old).unwrap();
+        let app = Path::new("/opt/Z.AppImage");
+        reset();
+        ensure(app, &appdir, &data).unwrap();
+        assert!(mtime() > old, "a new icon bumps the time");
+        reset();
+        ensure(app, &appdir, &data).unwrap();
+        assert_eq!(mtime(), old, "an unchanged icon leaves it alone");
     }
 
     #[test]
