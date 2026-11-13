@@ -71,6 +71,19 @@ pub struct Shell {
     rendered: bool,
 }
 
+/// Under an AppImage, put its launcher entry and icon in the user's data directory. Other runs do nothing.
+fn install_launcher_entry() {
+    let var = |k| std::env::var_os(k).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    let (Some(appimage), Some(appdir)) = (var("APPIMAGE"), var("APPDIR")) else { return };
+    let text = |k| std::env::var(k).ok();
+    let Some(data) = zombo_ui::launcher::data_home(text("XDG_DATA_HOME").as_deref(), text("HOME").as_deref()) else {
+        return;
+    };
+    if let Err(e) = zombo_ui::launcher::ensure(&appimage, &appdir, &data) {
+        eprintln!("zombo-razor: the launcher entry was not installed: {e}");
+    }
+}
+
 fn color(c: u32) -> Rgba {
     rgb(c)
 }
@@ -168,6 +181,9 @@ impl Shell {
         .detach();
         let config = Config::load(Dirs::from_env());
         let dirs = Dirs::from_env();
+        if config.settings.launcher_entry {
+            install_launcher_entry();
+        }
         let update = cx.new(|cx| UpdateCard::new(config.settings.check_updates, dirs.as_ref(), cx));
         let ws = Workspace {
             recent: config::to_recent(&config.recent, config::unix_now(), Instant::now()),

@@ -20,6 +20,7 @@ pub struct SettingsPane {
     inputs: [(Field, Entity<InputState>); 4],
     notifications: bool,
     check_updates: bool,
+    launcher_entry: bool,
     /// Only an AppImage with a real signing key can update itself.
     updates: Availability,
     errors: Vec<FieldError>,
@@ -34,6 +35,7 @@ impl EventEmitter<PaneEvent> for SettingsPane {}
 
 const PROXY_RULE: &str = "Used for the registration lookup over RDAP (HTTPS) only. The WHOIS fallback connects directly on port 43, and the Web Check ignores every proxy on purpose: it must show what the site does from this machine, not what a proxy relays. Empty means use HTTP_PROXY and HTTPS_PROXY from the environment. The daily update check always uses those environment variables.";
 const RESOLVER_RULE: &str = "Added to the ten public resolvers (Google, Cloudflare, Quad9, OpenDNS, Level3, DNS.SB, AdGuard, Yandex, 114DNS, CleanBrowsing) in the DNS propagation Check. The queries hold the target's name and nothing else. Separate with commas or spaces; a port is optional (192.0.2.53:5353).";
+const LAUNCHER_RULE: &str = "Copies a launcher entry and the icon into your data directory (~/.local/share) each time the app starts, so the desktop can show the icon. Turning this off stops the copying and leaves the files in place.";
 const UPDATE_RULE: &str = "Asks GitHub once a day whether a newer version exists. Nothing about you or your lookups is sent. A newer version is downloaded only after you click Update, and its signature is checked first.";
 const APPLY_RULE: &str =
     "Changes apply to the next run of a Check. A Check that is running keeps the settings it started with.";
@@ -66,6 +68,7 @@ impl SettingsPane {
             inputs,
             notifications: current.notifications,
             check_updates: current.check_updates,
+            launcher_entry: current.launcher_entry,
             updates,
             errors: vec![],
             save_error: None,
@@ -93,6 +96,7 @@ impl SettingsPane {
             proxy: self.text(Field::Proxy, cx),
             notifications: self.notifications,
             check_updates: self.check_updates,
+            launcher_entry: self.launcher_entry,
         };
         match draft.validate() {
             Ok(settings) => {
@@ -230,6 +234,7 @@ impl Render for SettingsPane {
             .unwrap_or_else(|| "No home directory: settings cannot be saved".into());
         let notifications = self.notifications;
         let check_updates = self.check_updates;
+        let launcher_entry = self.launcher_entry;
         div()
             .absolute()
             .size_full()
@@ -283,6 +288,19 @@ impl Render for SettingsPane {
                                 cx.notify();
                             })),
                     )
+                    .when(self.updates != Availability::NotAnAppImage, |s| {
+                        s.child(
+                            Checkbox::new("launcher-entry")
+                                .checked(launcher_entry)
+                                .label("Show the app icon in the taskbar")
+                                .accessibility_label("Show the app icon in the taskbar")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.launcher_entry = *checked;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(div().text_size(px(t::TEXT_CAPTION)).line_height(px(16.)).text_color(color(t::GRAY_900)).child(LAUNCHER_RULE))
+                    })
                     .when(self.updates == Availability::NoSigningKey, |s| {
                         s.child(div().id("updates-off").text_size(px(t::TEXT_LABEL)).text_color(color(t::GRAY_900)).child("Updates are not available in this build"))
                     })

@@ -48,6 +48,10 @@ It prints the time to first render. That time stops at the first render call, no
 
 The signing step is real. It fails the job when a signing secret is missing, so an unsigned release is never drafted. It then verifies the signature against `crates/zombo-core/update_key.pub`. See "The signing key" below.
 
+## The taskbar icon
+
+An AppImage installs no `.desktop` file, so GNOME and KDE cannot match its window to its icon. At each start inside an AppImage (`APPIMAGE` and `APPDIR` set), the app copies the launcher entry and the 256 px icon from the mounted image to `$XDG_DATA_HOME` (default `~/.local/share`): `applications/io.github.scribek2.zombos-razor.desktop` and `icons/hicolor/256x256/apps/`. It sets `Exec=` to the AppImage path, rewrites the files only when they differ, and skips a path that cannot be quoted. The settings key `launcher_entry = false` stops this. Files already written stay in place.
+
 ## Compatibility
 
 The AppImage targets Ubuntu 24.04 and newer. Arch needs `fuse3` for the mount, or the extract-and-run flag. The host supplies Vulkan and Mesa on every distribution.

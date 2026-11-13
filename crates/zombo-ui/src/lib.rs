@@ -10,6 +10,7 @@ pub mod evidence_model;
 pub mod finding_owner;
 pub mod focus_nav;
 pub mod keys;
+pub mod launcher;
 pub mod layout;
 pub mod motion;
 pub mod notice;
