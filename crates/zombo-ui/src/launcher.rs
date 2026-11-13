@@ -39,7 +39,7 @@ pub fn ensure(appimage: &Path, appdir: &Path, data_home: &Path) -> Result<bool, 
 /// A quoted `Exec=` line. A path with a character that needs a second layer of escaping is refused.
 fn exec_line(appimage: &Path) -> Result<String, String> {
     let p = appimage.to_str().ok_or("the AppImage path is not valid UTF-8")?;
-    if p.chars().any(|c| c.is_control() || matches!(c, '"' | '`' | '$' | '\\' | '%')) {
+    if p.chars().any(|c| zombo_core::text::is_unsafe_char(c) || matches!(c, '"' | '`' | '$' | '\\' | '%')) {
         return Err(format!("the AppImage path {p:?} has a character a desktop entry cannot quote"));
     }
     Ok(format!("Exec=\"{p}\""))
